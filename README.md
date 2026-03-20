@@ -124,8 +124,8 @@ Edit `config.yaml` to match your setup:
 players:
   - username: your_chess_com_username
     display_name: Player 1
-    age: 9
-    rating: 1000
+    age: null
+    rating: null
   - username: another_username
     display_name: Player 2
     age: null
