@@ -1,0 +1,33 @@
+# ArrakisEngine Configuration
+
+players:
+  - username: evanleongxinyu
+    display_name: Evan
+    age: 9
+    rating: 1050
+  - username: estellaleong
+    display_name: Estella
+    age: null
+    rating: null
+
+stockfish:
+  path: /usr/local/bin/stockfish
+  depth: 22
+  threads: 6
+  hash_mb: 512
+
+analysis:
+  months_lookback: 6
+  time_classes:
+    - rapid
+    - blitz
+    - bullet
+    - daily
+
+coaching:
+  default_provider: claude
+  anthropic_model: claude-sonnet-4-6
+  openai_model: gpt-4o
+
+database:
+  path: data/chess_coach.db
