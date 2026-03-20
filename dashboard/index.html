@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ArrakisEngine — Chess Coach Dashboard</title>
+<link rel="stylesheet" href="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css">
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #1a1a2e;
+    --surface: #16213e;
+    --surface2: #0f3460;
+    --accent: #e94560;
+    --text: #eee;
+    --text-dim: #999;
+    --green: #4ade80;
+    --red: #f87171;
+    --yellow: #fbbf24;
+    --blue: #60a5fa;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); }
+
+  .header { background: var(--surface); padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid var(--accent); }
+  .header h1 { font-size: 20px; }
+  .header h1 span { color: var(--accent); }
+
+  .player-tabs { display: flex; gap: 8px; }
+  .player-tab { padding: 8px 16px; border: 1px solid var(--surface2); border-radius: 6px; cursor: pointer; background: transparent; color: var(--text); font-size: 14px; }
+  .player-tab.active { background: var(--accent); border-color: var(--accent); }
+
+  .nav { background: var(--surface); padding: 8px 24px; display: flex; gap: 4px; border-bottom: 1px solid var(--surface2); }
+  .nav-btn { padding: 8px 16px; border: none; background: transparent; color: var(--text-dim); cursor: pointer; border-radius: 6px; font-size: 14px; }
+  .nav-btn.active { background: var(--surface2); color: var(--text); }
+
+  .container { max-width: 1400px; margin: 0 auto; padding: 24px; }
+  .view { display: none; }
+  .view.active { display: block; }
+
+  /* Game list */
+  .filters { display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+  .filters select, .filters input { padding: 8px 12px; border: 1px solid var(--surface2); border-radius: 6px; background: var(--surface); color: var(--text); font-size: 13px; }
+  .game-table { width: 100%; border-collapse: collapse; }
+  .game-table th, .game-table td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--surface2); font-size: 13px; }
+  .game-table th { color: var(--text-dim); font-weight: 600; }
+  .game-table tr:hover { background: var(--surface); cursor: pointer; }
+  .result-win { color: var(--green); font-weight: 700; }
+  .result-loss { color: var(--red); font-weight: 700; }
+  .result-draw { color: var(--yellow); font-weight: 700; }
+
+  /* Game detail */
+  .game-detail { display: grid; grid-template-columns: 400px 1fr; gap: 24px; }
+  .board-container { position: sticky; top: 24px; }
+  .move-controls { display: flex; gap: 8px; margin-top: 12px; justify-content: center; }
+  .move-controls button { padding: 8px 16px; border: 1px solid var(--surface2); border-radius: 6px; background: var(--surface); color: var(--text); cursor: pointer; font-size: 16px; }
+  .move-controls button:hover { background: var(--surface2); }
+
+  .detail-panels { display: flex; flex-direction: column; gap: 16px; }
+  .panel { background: var(--surface); border-radius: 8px; padding: 16px; }
+  .panel h3 { font-size: 14px; color: var(--accent); margin-bottom: 12px; text-transform: uppercase; letter-spacing: 1px; }
+  .panel p, .panel li { font-size: 14px; line-height: 1.6; }
+
+  .eval-chart-container { height: 200px; }
+
+  .move-list { display: flex; flex-wrap: wrap; gap: 2px; max-height: 200px; overflow-y: auto; padding: 4px; }
+  .move-item { padding: 4px 8px; border-radius: 4px; font-size: 12px; font-family: monospace; cursor: pointer; }
+  .move-item:hover { background: var(--surface2); }
+  .move-item.active { background: var(--accent); }
+  .move-item.excellent { border-left: 3px solid var(--green); }
+  .move-item.good { border-left: 3px solid var(--blue); }
+  .move-item.inaccuracy { border-left: 3px solid var(--yellow); }
+  .move-item.mistake { border-left: 3px solid #f97316; }
+  .move-item.blunder { border-left: 3px solid var(--red); }
+
+  /* Patterns */
+  .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+  .stat-card { background: var(--surface); border-radius: 8px; padding: 20px; }
+  .stat-card h3 { font-size: 13px; color: var(--text-dim); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 1px; }
+  .stat-card .big-number { font-size: 36px; font-weight: 700; }
+  .stat-card .sub { font-size: 13px; color: var(--text-dim); margin-top: 4px; }
+
+  .chart-container { height: 300px; margin-top: 16px; }
+  .opening-table { width: 100%; margin-top: 12px; }
+  .opening-table th, .opening-table td { padding: 8px; text-align: left; border-bottom: 1px solid var(--surface2); font-size: 13px; }
+
+  .back-btn { padding: 8px 16px; border: 1px solid var(--surface2); border-radius: 6px; background: var(--surface); color: var(--text); cursor: pointer; margin-bottom: 16px; }
+
+  .loading { text-align: center; padding: 60px; color: var(--text-dim); }
+
+  @media (max-width: 900px) {
+    .game-detail { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1><span>Arrakis</span>Engine</h1>
+  <div class="player-tabs" id="playerTabs"></div>
+</div>
+
+<div class="nav">
+  <button class="nav-btn active" data-view="games">Games</button>
+  <button class="nav-btn" data-view="patterns">Patterns</button>
+</div>
+
+<div class="container">
+  <!-- Games List -->
+  <div class="view active" id="view-games">
+    <div class="filters">
+      <select id="filterResult"><option value="">All Results</option><option value="win">Wins</option><option value="loss">Losses</option><option value="draw">Draws</option></select>
+      <select id="filterTimeClass"><option value="">All Time Controls</option></select>
+      <input type="date" id="filterDateFrom" placeholder="From">
+      <input type="date" id="filterDateTo" placeholder="To">
+    </div>
+    <table class="game-table">
+      <thead><tr><th>Date</th><th>Color</th><th>Rating</th><th>Opp</th><th>Result</th><th>Time</th><th>Status</th></tr></thead>
+      <tbody id="gameList"></tbody>
+    </table>
+  </div>
+
+  <!-- Game Detail -->
+  <div class="view" id="view-detail">
+    <button class="back-btn" onclick="showView('games')">&larr; Back to Games</button>
+    <div class="game-detail">
+      <div class="board-container">
+        <div id="board" style="width: 400px;"></div>
+        <div class="move-controls">
+          <button onclick="goToStart()">&#9198;</button>
+          <button onclick="goBack()">&larr;</button>
+          <button onclick="goForward()">&rarr;</button>
+          <button onclick="goToEnd()">&#9197;</button>
+        </div>
+        <div class="panel" style="margin-top: 12px;">
+          <h3>Moves</h3>
+          <div class="move-list" id="moveList"></div>
+        </div>
+      </div>
+      <div class="detail-panels">
+        <div class="panel">
+          <h3>Evaluation</h3>
+          <div class="eval-chart-container"><canvas id="evalChart"></canvas></div>
+        </div>
+        <div class="panel" id="coachingNarrative">
+          <h3>Game Story</h3>
+          <p id="narrativeText"></p>
+        </div>
+        <div class="panel">
+          <h3>Key Lesson</h3>
+          <p id="lessonText"></p>
+        </div>
+        <div class="panel">
+          <h3>Practice Focus</h3>
+          <p id="focusText"></p>
+        </div>
+        <div class="panel" id="criticalMomentsPanel">
+          <h3>Critical Moments</h3>
+          <div id="criticalMoments"></div>
+        </div>
+        <div class="panel">
+          <h3>Coach Notes</h3>
+          <p id="coachNotes" style="font-size: 13px; color: var(--text-dim);"></p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Patterns -->
+  <div class="view" id="view-patterns">
+    <div class="stats-grid" id="statsGrid"></div>
+    <div class="panel" style="margin-top: 16px;">
+      <h3>ACPL Trend</h3>
+      <div class="chart-container"><canvas id="acplChart"></canvas></div>
+    </div>
+    <div class="panel" style="margin-top: 16px;">
+      <h3>Opening Performance</h3>
+      <table class="opening-table">
+        <thead><tr><th>Opening</th><th>Games</th><th>Wins</th><th>Losses</th><th>Win%</th></tr></thead>
+        <tbody id="openingTable"></tbody>
+      </table>
+    </div>
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px;">
+      <div class="panel">
+        <h3>Move Quality</h3>
+        <div class="chart-container"><canvas id="qualityChart"></canvas></div>
+      </div>
+      <div class="panel">
+        <h3>Performance by Phase</h3>
+        <div class="chart-container"><canvas id="phaseChart"></canvas></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// State
+let allGames = [];
+let allPlayers = [];
+let allPatterns = [];
+let currentPlayer = null;
+let currentGame = null;
+let board = null;
+let chess = null;
+let gameMoves = [];
+let moveIndex = -1;
+let evalChart = null;
+let acplChart = null;
+let qualityChart = null;
+let phaseChart = null;
+
+const DATA_BASE = 'data/';
+
+// Init
+async function init() {
+  try {
+    const [players, games, patterns] = await Promise.all([
+      fetch(DATA_BASE + 'players.json').then(r => r.json()),
+      fetch(DATA_BASE + 'games.json').then(r => r.json()),
+      fetch(DATA_BASE + 'patterns.json').then(r => r.json()),
+    ]);
+    allPlayers = players;
+    allGames = games;
+    allPatterns = patterns;
+
+    renderPlayerTabs();
+    if (players.length > 0) selectPlayer(players[0].username);
+  } catch (e) {
+    document.querySelector('.container').innerHTML =
+      '<div class="loading">Could not load data. Run <code>python main.py export-json</code> first.</div>';
+  }
+}
+
+function renderPlayerTabs() {
+  const tabs = document.getElementById('playerTabs');
+  tabs.innerHTML = allPlayers.map(p =>
+    `<button class="player-tab" data-username="${p.username}">${p.display_name || p.username}</button>`
+  ).join('');
+  tabs.querySelectorAll('.player-tab').forEach(btn => {
+    btn.onclick = () => selectPlayer(btn.dataset.username);
+  });
+}
+
+function selectPlayer(username) {
+  currentPlayer = username;
+  document.querySelectorAll('.player-tab').forEach(t => t.classList.toggle('active', t.dataset.username === username));
+  renderGameList();
+  renderPatterns();
+}
+
+// Navigation
+document.querySelectorAll('.nav-btn').forEach(btn => {
+  btn.onclick = () => showView(btn.dataset.view);
+});
+
+function showView(name) {
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.view === name));
+  document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === 'view-' + name));
+  if (name === 'patterns') renderPatterns();
+}
+
+// Game List
+function renderGameList() {
+  const games = getFilteredGames();
+  const tbody = document.getElementById('gameList');
+
+  // Populate time class filter
+  const tcs = [...new Set(allGames.filter(g => g.username === currentPlayer).map(g => g.time_class).filter(Boolean))];
+  const tcSelect = document.getElementById('filterTimeClass');
+  tcSelect.innerHTML = '<option value="">All Time Controls</option>' + tcs.map(tc => `<option value="${tc}">${tc}</option>`).join('');
+
+  tbody.innerHTML = games.map(g => {
+    const resultClass = 'result-' + g.result;
+    return `<tr onclick="loadGame(${g.id})">
+      <td>${g.date_played || '—'}</td>
+      <td>${g.player_color}</td>
+      <td>${g.player_rating || '?'}</td>
+      <td>${g.opponent_rating || '?'}</td>
+      <td class="${resultClass}">${g.result.toUpperCase()}</td>
+      <td>${g.time_class || '?'}</td>
+      <td>${g.analysis_status}</td>
+    </tr>`;
+  }).join('');
+}
+
+function getFilteredGames() {
+  let games = allGames.filter(g => g.username === currentPlayer);
+  const result = document.getElementById('filterResult').value;
+  const tc = document.getElementById('filterTimeClass').value;
+  const from = document.getElementById('filterDateFrom').value;
+  const to = document.getElementById('filterDateTo').value;
+  if (result) games = games.filter(g => g.result === result);
+  if (tc) games = games.filter(g => g.time_class === tc);
+  if (from) games = games.filter(g => g.date_played >= from);
+  if (to) games = games.filter(g => g.date_played <= to);
+  return games;
+}
+
+document.querySelectorAll('.filters select, .filters input').forEach(el => {
+  el.onchange = renderGameList;
+});
+
+// Game Detail
+async function loadGame(gameId) {
+  try {
+    const detail = await fetch(DATA_BASE + 'games/' + gameId + '.json').then(r => r.json());
+    currentGame = detail;
+    renderGameDetail(detail);
+    showView('detail');
+  } catch (e) {
+    alert('Could not load game detail. Has this game been analyzed?');
+  }
+}
+
+function renderGameDetail(detail) {
+  const { game, moves, coaching } = detail;
+
+  // Setup chess.js and board
+  chess = new Chess();
+  chess.load_pgn(game.pgn || '');
+  const history = chess.history();
+  chess.reset();
+
+  // Parse PGN to get FEN at each position
+  gameMoves = [];
+  const tempChess = new Chess();
+  gameMoves.push({ fen: tempChess.fen(), move: null, index: -1 });
+  history.forEach((move, i) => {
+    tempChess.move(move);
+    gameMoves.push({ fen: tempChess.fen(), move: move, index: i });
+  });
+
+  moveIndex = 0;
+
+  // Init board
+  if (board) board.destroy();
+  const orientation = game.player_color === 'black' ? 'black' : 'white';
+  board = Chessboard('board', {
+    position: 'start',
+    pieceTheme: 'https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/img/chesspieces/wikipedia/{piece}.png',
+    orientation: orientation,
+  });
+
+  // Move list
+  const moveListEl = document.getElementById('moveList');
+  let html = '';
+  for (let i = 0; i < moves.length; i++) {
+    const m = moves[i];
+    const cls = m.classification || '';
+    const moveIdx = (m.move_number - 1) * 2 + (m.side === 'black' ? 1 : 0);
+    const prefix = m.side === 'white' ? m.move_number + '. ' : '';
+    html += `<span class="move-item ${cls}" data-idx="${moveIdx + 1}" onclick="goToMove(${moveIdx + 1})">${prefix}${m.move_played}</span>`;
+  }
+  moveListEl.innerHTML = html;
+
+  // Eval chart
+  renderEvalChart(moves, game.player_color);
+
+  // Coaching
+  if (coaching) {
+    document.getElementById('narrativeText').textContent = coaching.narrative || 'Not available';
+    document.getElementById('lessonText').textContent = coaching.key_lesson || 'Not available';
+    document.getElementById('focusText').textContent = coaching.practical_focus || 'Not available';
+    document.getElementById('coachNotes').textContent = coaching.coach_notes || 'Not available';
+
+    const cmDiv = document.getElementById('criticalMoments');
+    if (coaching.critical_moments_json) {
+      try {
+        const moments = JSON.parse(coaching.critical_moments_json);
+        cmDiv.innerHTML = moments.map(m =>
+          `<div style="margin-bottom:12px;padding:8px;background:var(--surface2);border-radius:6px;">
+            <strong>Move ${m.move_number} (${m.side}):</strong> ${m.move_played || ''}<br>
+            <span style="color:var(--yellow);">${m.what_happened || ''}</span><br>
+            <span style="color:var(--green);">Better: ${m.what_was_better || ''}</span>
+          </div>`
+        ).join('');
+      } catch { cmDiv.innerHTML = '<p>Not available</p>'; }
+    } else {
+      cmDiv.innerHTML = '<p>Not available</p>';
+    }
+  } else {
+    document.getElementById('narrativeText').textContent = 'Run coaching analysis first.';
+    document.getElementById('lessonText').textContent = '—';
+    document.getElementById('focusText').textContent = '—';
+    document.getElementById('coachNotes').textContent = '—';
+    document.getElementById('criticalMoments').innerHTML = '<p>Not available</p>';
+  }
+}
+
+function renderEvalChart(moves, playerColor) {
+  const ctx = document.getElementById('evalChart').getContext('2d');
+  if (evalChart) evalChart.destroy();
+
+  const labels = moves.map(m => m.side === 'white' ? m.move_number + '.' : m.move_number + '...');
+  const data = moves.map(m => {
+    const cp = m.eval_after_cp || 0;
+    return Math.max(-500, Math.min(500, cp)) / 100;
+  });
+
+  const colors = moves.map(m => {
+    switch (m.classification) {
+      case 'blunder': return '#f87171';
+      case 'mistake': return '#f97316';
+      case 'inaccuracy': return '#fbbf24';
+      default: return '#60a5fa';
+    }
+  });
+
+  evalChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        data,
+        backgroundColor: colors,
+        borderWidth: 0,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        y: { min: -5, max: 5, ticks: { color: '#999' }, grid: { color: '#333' } },
+        x: { ticks: { color: '#999', maxRotation: 0, autoSkip: true, maxTicksLimit: 20 }, grid: { display: false } },
+      },
+    },
+  });
+}
+
+// Board navigation
+function goToMove(idx) {
+  if (idx < 0 || idx >= gameMoves.length) return;
+  moveIndex = idx;
+  board.position(gameMoves[idx].fen);
+  document.querySelectorAll('.move-item').forEach(el => {
+    el.classList.toggle('active', parseInt(el.dataset.idx) === idx);
+  });
+}
+function goForward() { goToMove(moveIndex + 1); }
+function goBack() { goToMove(moveIndex - 1); }
+function goToStart() { goToMove(0); }
+function goToEnd() { goToMove(gameMoves.length - 1); }
+
+// Keyboard navigation
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowRight') goForward();
+  else if (e.key === 'ArrowLeft') goBack();
+  else if (e.key === 'Home') goToStart();
+  else if (e.key === 'End') goToEnd();
+});
+
+// Patterns
+function renderPatterns() {
+  const pattern = allPatterns.find(p => p.username === currentPlayer);
+  if (!pattern || !pattern.stats) {
+    document.getElementById('statsGrid').innerHTML = '<div class="loading">No pattern data. Run analysis and then <code>python main.py patterns</code>.</div>';
+    return;
+  }
+  const s = pattern.stats;
+
+  // Stats grid
+  document.getElementById('statsGrid').innerHTML = `
+    <div class="stat-card">
+      <h3>Games Analyzed</h3>
+      <div class="big-number">${s.total_games}</div>
+    </div>
+    <div class="stat-card">
+      <h3>Win Rate</h3>
+      <div class="big-number" style="color:var(--green)">${s.results.win_rate}%</div>
+      <div class="sub">${s.results.wins}W / ${s.results.losses}L / ${s.results.draws}D</div>
+    </div>
+    <div class="stat-card">
+      <h3>Move Quality</h3>
+      <div class="big-number">${s.move_quality?.total_moves || 0}</div>
+      <div class="sub">moves analyzed</div>
+    </div>
+    <div class="stat-card">
+      <h3>vs Higher Rated</h3>
+      <div class="big-number">${s.rating_performance?.vs_higher?.win_rate || 0}%</div>
+      <div class="sub">${s.rating_performance?.vs_higher?.games || 0} games</div>
+    </div>
+  `;
+
+  // ACPL trend
+  if (s.acpl_trend && s.acpl_trend.length > 0) {
+    const ctx = document.getElementById('acplChart').getContext('2d');
+    if (acplChart) acplChart.destroy();
+    acplChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: s.acpl_trend.map(t => t.week),
+        datasets: [{
+          label: 'ACPL',
+          data: s.acpl_trend.map(t => t.acpl),
+          borderColor: '#e94560',
+          backgroundColor: 'rgba(233,69,96,0.1)',
+          fill: true,
+          tension: 0.3,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          y: { title: { display: true, text: 'Avg CP Loss', color: '#999' }, ticks: { color: '#999' }, grid: { color: '#333' } },
+          x: { ticks: { color: '#999', maxRotation: 45 }, grid: { display: false } },
+        },
+      },
+    });
+  }
+
+  // Opening table
+  const tbody = document.getElementById('openingTable');
+  if (s.openings) {
+    tbody.innerHTML = s.openings.map(o =>
+      `<tr><td>${o.name}</td><td>${o.games}</td><td>${o.wins}</td><td>${o.losses}</td><td>${o.win_rate}%</td></tr>`
+    ).join('');
+  }
+
+  // Move quality donut
+  if (s.move_quality) {
+    const ctx = document.getElementById('qualityChart').getContext('2d');
+    if (qualityChart) qualityChart.destroy();
+    const mq = s.move_quality;
+    qualityChart = new Chart(ctx, {
+      type: 'doughnut',
+      data: {
+        labels: ['Excellent', 'Good', 'Inaccuracy', 'Mistake', 'Blunder'],
+        datasets: [{
+          data: [mq.excellent?.count||0, mq.good?.count||0, mq.inaccuracy?.count||0, mq.mistake?.count||0, mq.blunder?.count||0],
+          backgroundColor: ['#4ade80', '#60a5fa', '#fbbf24', '#f97316', '#f87171'],
+        }],
+      },
+      options: { responsive: true, maintainAspectRatio: false },
+    });
+  }
+
+  // Phase chart
+  if (s.phase_analysis) {
+    const ctx = document.getElementById('phaseChart').getContext('2d');
+    if (phaseChart) phaseChart.destroy();
+    const pa = s.phase_analysis;
+    phaseChart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: ['Opening', 'Middlegame', 'Endgame'],
+        datasets: [
+          { label: 'ACPL', data: [pa.opening?.acpl||0, pa.middlegame?.acpl||0, pa.endgame?.acpl||0], backgroundColor: '#e94560' },
+          { label: 'Blunders', data: [pa.opening?.blunders||0, pa.middlegame?.blunders||0, pa.endgame?.blunders||0], backgroundColor: '#f87171' },
+          { label: 'Mistakes', data: [pa.opening?.mistakes||0, pa.middlegame?.mistakes||0, pa.endgame?.mistakes||0], backgroundColor: '#f97316' },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          y: { ticks: { color: '#999' }, grid: { color: '#333' } },
+          x: { ticks: { color: '#999' }, grid: { display: false } },
+        },
+      },
+    });
+  }
+}
+
+init();
+</script>
+</body>
+</html>
