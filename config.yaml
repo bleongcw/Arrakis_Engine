@@ -11,7 +11,7 @@ players:
     rating: null
 
 stockfish:
-  path: /usr/local/bin/stockfish
+  path: /opt/homebrew/bin/stockfish
   depth: 22
   threads: 6
   hash_mb: 512

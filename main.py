@@ -10,10 +10,15 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+import http.server
+import functools
+
 from src.harvester import harvest_player
 from src.analyzer import analyze_pending
 from src.coach import coach_pending
 from src.patterns import update_patterns
+from src.export import export_json
+from src.report import generate_report
 from src.models import init_db
 
 
@@ -91,6 +96,69 @@ def cmd_patterns(args, config):
     print(f"Updated patterns for {count} players.")
 
 
+def cmd_export_json(args, config):
+    """Export data to JSON for the dashboard."""
+    db_path = config["database"]["path"]
+    counts = export_json(output_dir="dashboard/data", db_path=db_path)
+    print(f"Exported: {counts['players']} players, {counts['games']} games, "
+          f"{counts['patterns']} pattern records.")
+
+
+def cmd_report(args, config):
+    """Generate coaching reports."""
+    db_path = config["database"]["path"]
+    players = config["players"]
+    if args.player:
+        players = [p for p in players if p["username"] in args.player]
+
+    period = "monthly" if args.monthly else "weekly"
+    output_dir = args.output or "reports"
+
+    for player in players:
+        path = generate_report(
+            player["username"], period=period,
+            output_dir=output_dir, db_path=db_path,
+        )
+        print(f"  {player['username']}: {path}")
+
+
+def cmd_dashboard(args, config):
+    """Launch a local HTTP server for the dashboard."""
+    db_path = config["database"]["path"]
+    # Auto-export JSON before launching
+    export_json(output_dir="dashboard/data", db_path=db_path)
+
+    port = args.port or 8000
+    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory="dashboard")
+    with http.server.HTTPServer(("", port), handler) as httpd:
+        print(f"Dashboard running at http://localhost:{port}")
+        print("Press Ctrl+C to stop.")
+        try:
+            httpd.serve_forever()
+        except KeyboardInterrupt:
+            print("\nStopped.")
+
+
+def cmd_run_all(args, config):
+    """Run the full pipeline: harvest → analyze → coach → patterns → export."""
+    print("=== Step 1/5: Harvesting games ===")
+    cmd_harvest(args, config)
+
+    print("\n=== Step 2/5: Analyzing games ===")
+    cmd_analyze(args, config)
+
+    print("\n=== Step 3/5: Coaching games ===")
+    cmd_coach(args, config)
+
+    print("\n=== Step 4/5: Updating patterns ===")
+    cmd_patterns(args, config)
+
+    print("\n=== Step 5/5: Exporting JSON ===")
+    cmd_export_json(args, config)
+
+    print("\nPipeline complete! Run 'python main.py dashboard' to view results.")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="ArrakisEngine — Chess Coach AI"
@@ -128,6 +196,25 @@ def main():
     # patterns
     patterns_parser = subparsers.add_parser("patterns", help="Update pattern tracking")
 
+    # export-json
+    export_parser = subparsers.add_parser("export-json", help="Export data to JSON for dashboard")
+
+    # report
+    report_parser = subparsers.add_parser("report", help="Generate coaching reports")
+    report_parser.add_argument("--player", action="append", help="Username(s) to report on")
+    report_parser.add_argument("--weekly", action="store_true", default=True, help="Weekly report (default)")
+    report_parser.add_argument("--monthly", action="store_true", help="Monthly report")
+    report_parser.add_argument("--output", help="Output directory (default: reports/)")
+
+    # dashboard
+    dashboard_parser = subparsers.add_parser("dashboard", help="Launch local dashboard server")
+    dashboard_parser.add_argument("--port", type=int, default=8000, help="Port (default: 8000)")
+
+    # run-all
+    run_all_parser = subparsers.add_parser("run-all", help="Run full pipeline")
+    run_all_parser.add_argument("--player", action="append", help="Username(s)")
+    run_all_parser.add_argument("--provider", choices=["claude", "openai"], help="LLM provider")
+
     args = parser.parse_args()
 
     log_level = logging.DEBUG if args.verbose else logging.INFO
@@ -150,6 +237,14 @@ def main():
         cmd_coach(args, config)
     elif args.command == "patterns":
         cmd_patterns(args, config)
+    elif args.command == "export-json":
+        cmd_export_json(args, config)
+    elif args.command == "report":
+        cmd_report(args, config)
+    elif args.command == "dashboard":
+        cmd_dashboard(args, config)
+    elif args.command == "run-all":
+        cmd_run_all(args, config)
 
 
 if __name__ == "__main__":
