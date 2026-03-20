@@ -1,6 +1,8 @@
-# ArrakisEngine
+# Arrakis Engine
 
 A local Python application that pulls chess.com games, runs deep Stockfish analysis on every move, and uses LLMs (Claude Opus 4.6 / ChatGPT 5.4 Pro) to generate age-appropriate coaching insights. Built for tracking improvement over time with pattern detection, an interactive web dashboard, and exportable coach-ready reports.
+
+Inspired by my three children — Eleanor, Evan, and Estella — and their journey learning chess.
 
 ## Architecture
 
@@ -120,12 +122,12 @@ Edit `config.yaml` to match your setup:
 
 ```yaml
 players:
-  - username: evanleongxinyu    # chess.com username
-    display_name: Evan
+  - username: your_chess_com_username
+    display_name: Player 1
     age: 9
-    rating: 1050
-  - username: estellaleong
-    display_name: Estella
+    rating: 1000
+  - username: another_username
+    display_name: Player 2
     age: null
     rating: null
 
@@ -173,7 +175,7 @@ database:
 python main.py harvest
 
 # Specific player only
-python main.py harvest --player evanleongxinyu
+python main.py harvest --player your_chess_com_username
 ```
 
 **Analyze with Stockfish:**
@@ -199,7 +201,7 @@ python main.py coach --provider openai
 
 ```bash
 # Weekly report for a specific player
-python main.py report --player evanleongxinyu --weekly
+python main.py report --player your_chess_com_username --weekly
 
 # Monthly report for all players, custom output directory
 python main.py report --monthly --output reports/march
@@ -260,8 +262,7 @@ python main.py dashboard
 python main.py run-all
 
 # Generate weekly reports for coaches
-python main.py report --player evanleongxinyu --weekly
-python main.py report --player estellaleong --weekly
+python main.py report --player your_chess_com_username --weekly
 
 # Review in dashboard
 python main.py dashboard

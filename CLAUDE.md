@@ -1,9 +1,9 @@
-# ArrakisEngine — Chess Coach AI for Evan & Estella
+# Arrakis Engine — Chess Coach AI
 
 ## Project Overview
 Local Python app that pulls chess.com games, runs Stockfish analysis,
 and uses LLMs to generate age-appropriate coaching insights with
-pattern tracking over time.
+pattern tracking over time. Inspired by Eleanor, Evan, and Estella.
 
 ## Architecture
 - Python 3.11+, SQLite, local Stockfish on Apple Silicon
@@ -11,13 +11,12 @@ pattern tracking over time.
 - Third layer: cross-game pattern aggregation over time
 
 ## Players
-- Evan (evanleongxinyu) — age 9, rated 1000-1100
-- Estella (estellaleong)
+- Configured in config.yaml (chess.com usernames, display names, ages, ratings)
 
 ## Key Configuration
-- Stockfish: depth 22, 6 threads, 512MB hash, binary at /usr/local/bin/stockfish
-- LLM: abstracted provider supporting both Anthropic (claude-sonnet-4-6) and OpenAI
-- Config via config.yaml, secrets via environment variables (ANTHROPIC_API_KEY, OPENAI_API_KEY)
+- Stockfish: depth 22, 6 threads, 512MB hash, path configured in config.yaml
+- LLM: abstracted provider supporting both Anthropic (Claude Opus 4.6) and OpenAI (ChatGPT 5.4 Pro)
+- Config via config.yaml, secrets via .env (ARRAKIS_ANTHROPIC_API_KEY, ARRAKIS_OPENAI_API_KEY)
 - Initial scope: last 6 months of games
 
 ## Analysis Standards
