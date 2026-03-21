@@ -162,7 +162,7 @@
           <div class="eval-chart-container"><canvas id="evalChart"></canvas></div>
         </div>
         <div class="panel" id="coachingNarrative">
-          <h3>Game Story</h3>
+          <h3>Game Story <span id="coachingModelBadge" style="font-size: 11px; padding: 2px 8px; border-radius: 4px; background: var(--accent); color: #fff; margin-left: 8px; font-weight: normal;"></span></h3>
           <p id="narrativeText"></p>
         </div>
         <div class="panel">
@@ -419,7 +419,20 @@ function renderGameDetail(detail) {
   renderEvalChart(moves, game.player_color);
 
   // Coaching
+  const badge = document.getElementById('coachingModelBadge');
   if (coaching) {
+    // Show model badge (provider field is "provider:model")
+    const providerStr = coaching.provider || '';
+    if (providerStr.includes(':')) {
+      const [prov, mod] = providerStr.split(':', 2);
+      badge.textContent = `${prov === 'claude' ? '🟣' : '🟢'} ${mod}`;
+      badge.style.background = prov === 'claude' ? '#7c3aed' : '#059669';
+    } else {
+      badge.textContent = providerStr;
+      badge.style.background = 'var(--accent)';
+    }
+    badge.style.display = 'inline';
+
     document.getElementById('narrativeText').textContent = coaching.narrative || 'Not available';
     document.getElementById('lessonText').textContent = coaching.key_lesson || 'Not available';
     document.getElementById('focusText').textContent = coaching.practical_focus || 'Not available';
@@ -440,6 +453,9 @@ function renderGameDetail(detail) {
       cmDiv.innerHTML = '<p>Not available</p>';
     }
   } else {
+    badge.textContent = 'No coaching';
+    badge.style.background = '#666';
+    badge.style.display = 'inline';
     document.getElementById('narrativeText').textContent = 'Run coaching analysis first.';
     document.getElementById('lessonText').textContent = '\u2014';
     document.getElementById('focusText').textContent = '\u2014';

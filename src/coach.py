@@ -216,10 +216,12 @@ def coach_game(game_id: int, provider: str = "claude",
         default_model = "claude-opus-4-6"
         raw = _call_claude(prompt, model or default_model)
     elif provider == "openai":
-        default_model = "chatgpt-5.4-pro"
+        default_model = "gpt-5.4"
         raw = _call_openai(prompt, model or default_model)
     else:
         raise ValueError(f"Unknown provider: {provider}")
+
+    used_model = model or default_model
 
     # Parse response
     try:
@@ -238,12 +240,13 @@ def coach_game(game_id: int, provider: str = "claude",
     # Store in database
     critical_json = json.dumps(coaching.get("critical_moments", []))
 
+    provider_model = f"{provider}:{used_model}"
     conn.execute(
         """INSERT OR REPLACE INTO game_coaching
         (game_id, provider, narrative, key_lesson, practical_focus,
          critical_moments_json, coach_notes)
         VALUES (?, ?, ?, ?, ?, ?, ?)""",
-        (game_id, provider, coaching.get("narrative"),
+        (game_id, provider_model, coaching.get("narrative"),
          coaching.get("key_lesson"), coaching.get("practical_focus"),
          critical_json, coaching.get("coach_notes")),
     )
@@ -278,6 +281,18 @@ def coach_pending(provider: str = "claude", model: str | None = None,
     total_pending = len(pending)
     logger.info("Found %d games to coach%s", total_pending,
                 f" (limited to {limit})" if limit > 0 else "")
+
+    # Rate limit advisory
+    if provider == "openai":
+        logger.warning(
+            "⚠️  OpenAI rate limits: gpt-5.4 has 10k TPM limit (~1 game/min). "
+            "Recommended: --limit 5 per batch with 10s delay between calls. "
+            "For higher throughput, use --provider claude or upgrade your OpenAI plan."
+        )
+    elif provider == "claude":
+        logger.info(
+            "Using Claude API. Recommended: --limit 10-20 per batch."
+        )
 
     coached = 0
     for i, row in enumerate(pending):
