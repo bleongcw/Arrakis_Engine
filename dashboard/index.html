@@ -214,35 +214,8 @@
 
 <script>
 // ── Chess Piece Theme ────────────────────────────────────────────
-// Inline SVG pieces using encodeURIComponent (avoids btoa encoding issues)
-function makePieceSvg(unicode, isWhite) {
-  const fill = isWhite ? '#fff' : '#000';
-  const stroke = isWhite ? '#000' : '#000';
-  return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50">'
-    + '<text x="25" y="39" font-size="38" text-anchor="middle" fill="' + fill + '" stroke="' + stroke + '" stroke-width="0.8">'
-    + unicode + '</text></svg>';
-}
-
-const PIECE_MAP = {
-  wK: makePieceSvg('\u2654', true),
-  wQ: makePieceSvg('\u2655', true),
-  wR: makePieceSvg('\u2656', true),
-  wB: makePieceSvg('\u2657', true),
-  wN: makePieceSvg('\u2658', true),
-  wP: makePieceSvg('\u2659', true),
-  bK: makePieceSvg('\u265A', false),
-  bQ: makePieceSvg('\u265B', false),
-  bR: makePieceSvg('\u265C', false),
-  bB: makePieceSvg('\u265D', false),
-  bN: makePieceSvg('\u265E', false),
-  bP: makePieceSvg('\u265F', false),
-};
-
-function pieceTheme(piece) {
-  const svg = PIECE_MAP[piece];
-  if (!svg) return '';
-  return 'data:image/svg+xml,' + encodeURIComponent(svg);
-}
+// Local SVG pieces (lichess cburnett set, MIT license)
+const PIECE_THEME = 'img/pieces/{piece}.svg';
 
 // ── State ────────────────────────────────────────────────────────
 const API = '/api';
@@ -426,7 +399,7 @@ function renderGameDetail(detail) {
   const orientation = game.player_color === 'black' ? 'black' : 'white';
   board = Chessboard('board', {
     position: 'start',
-    pieceTheme: pieceTheme,
+    pieceTheme: PIECE_THEME,
     orientation: orientation,
   });
 
