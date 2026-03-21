@@ -60,6 +60,7 @@ def score_to_cp(score: chess.engine.PovScore, side: chess.Color) -> int | None:
 def analyze_game(game_id: int, pgn_text: str, player_color: str,
                  stockfish_path: str, depth: int = 22,
                  threads: int = 6, hash_mb: int = 512,
+                 move_time_limit: float = 10.0,
                  db_path: str | None = None) -> dict:
     """Analyze a single game move-by-move with Stockfish.
 
@@ -94,8 +95,12 @@ def analyze_game(game_id: int, pgn_text: str, player_color: str,
 
     logger.info("Analyzing game %d: %d moves at depth %d", game_id, total_moves, depth)
 
+    # Use both depth and time limit — whichever is reached first.
+    # This prevents hangs on complex endgame positions.
+    limit = chess.engine.Limit(depth=depth, time=move_time_limit)
+
     # Get initial position eval
-    info = engine.analyse(board, chess.engine.Limit(depth=depth))
+    info = engine.analyse(board, limit)
     prev_cp = score_to_cp(info["score"], board.turn)
 
     stats = {"moves": 0, "blunders": 0, "mistakes": 0, "inaccuracies": 0}
@@ -132,7 +137,7 @@ def analyze_game(game_id: int, pgn_text: str, player_color: str,
         board.push(move)
 
         # Analyze the new position
-        info = engine.analyse(board, chess.engine.Limit(depth=depth))
+        info = engine.analyse(board, limit)
         current_cp = score_to_cp(info["score"], board.turn)
 
         eval_after_cp = current_cp
@@ -211,12 +216,22 @@ def analyze_game(game_id: int, pgn_text: str, player_color: str,
 
 def analyze_pending(stockfish_path: str, depth: int = 22,
                     threads: int = 6, hash_mb: int = 512,
+                    move_time_limit: float = 10.0,
                     db_path: str | None = None) -> int:
     """Analyze all games with pending analysis status.
 
     Returns the number of games analyzed.
     """
     conn = init_db(db_path)
+
+    # Reset any games stuck in 'analyzing' from interrupted runs
+    stuck = conn.execute(
+        "UPDATE games SET analysis_status = 'pending' WHERE analysis_status = 'analyzing'"
+    ).rowcount
+    if stuck:
+        conn.commit()
+        logger.info("Reset %d interrupted games back to pending", stuck)
+
     pending = conn.execute(
         "SELECT id, pgn, player_color FROM games WHERE analysis_status = 'pending'"
     ).fetchall()
@@ -235,6 +250,7 @@ def analyze_pending(stockfish_path: str, depth: int = 22,
                 depth=depth,
                 threads=threads,
                 hash_mb=hash_mb,
+                move_time_limit=move_time_limit,
                 db_path=db_path,
             )
         except Exception as e:

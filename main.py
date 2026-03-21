@@ -69,6 +69,7 @@ def cmd_analyze(args, config):
         depth=sf_config["depth"],
         threads=sf_config["threads"],
         hash_mb=sf_config["hash_mb"],
+        move_time_limit=sf_config.get("move_time_limit", 10.0),
         db_path=db_path,
     )
     print(f"Analyzed {count} games.")
