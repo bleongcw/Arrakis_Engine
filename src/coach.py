@@ -7,6 +7,7 @@ using either Claude Opus 4.6 or ChatGPT 5.4 Pro (swappable).
 import json
 import logging
 import os
+import time
 
 from dotenv import load_dotenv
 
@@ -284,8 +285,22 @@ def coach_pending(provider: str = "claude", model: str | None = None,
         try:
             coach_game(row["id"], provider=provider, model=model, db_path=db_path)
             coached += 1
+            # Rate limit: wait 10s between API calls to avoid 429s
+            if i < len(pending) - 1:
+                logger.info("Waiting 10s for rate limit cooldown...")
+                time.sleep(10)
         except Exception as e:
             logger.error("Failed to coach game %d: %s", row["id"], e)
+            if "429" in str(e) or "rate_limit" in str(e).lower():
+                logger.info("Rate limited — waiting 60s before retry...")
+                time.sleep(60)
+                # Retry once after cooldown
+                try:
+                    coach_game(row["id"], provider=provider, model=model, db_path=db_path)
+                    coached += 1
+                    continue
+                except Exception as retry_e:
+                    logger.error("Retry failed for game %d: %s", row["id"], retry_e)
             err_conn = init_db(db_path)
             err_conn.execute(
                 "UPDATE games SET coaching_status = 'error' WHERE id = ?",
