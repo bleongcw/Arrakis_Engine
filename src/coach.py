@@ -114,7 +114,6 @@ def _call_claude(prompt: str, model: str) -> str:
         max_tokens=16000,
         thinking={
             "type": "adaptive",
-            "budget_tokens": 10000,
         },
         messages=[{"role": "user", "content": prompt}],
     )
