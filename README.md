@@ -149,7 +149,7 @@ database:
   path: data/chess_coach.db
 ```
 
-**Stockfish path:** Use `/opt/homebrew/bin/stockfish` if installed via Homebrew, or `/usr/local/bin/stockfish` if compiled from source.
+**Stockfish path:** Defaults to `/opt/homebrew/bin/stockfish` (Homebrew). Use `/usr/local/bin/stockfish` if compiled from source. Run `which stockfish` to verify.
 
 **Threads:** Set to your CPU core count minus 2 (e.g., 6 for an 8-core M-series chip) to leave headroom for other processes.
 
@@ -185,7 +185,7 @@ python main.py harvest --player your_chess_com_username
 python main.py analyze
 ```
 
-> Analysis takes ~25–30 min per game with Homebrew Stockfish (~4.4M nodes/sec) or ~10–15 min per game with a source-compiled binary (~9–14M nodes/sec). For large backlogs, run overnight.
+> Each move has a 10-second time limit to prevent hanging on complex positions. Analysis takes ~5–10 min per game with Homebrew Stockfish or ~3–5 min per game with a source-compiled binary. For large backlogs (400+ games), run overnight.
 
 **Generate coaching insights:**
 
@@ -277,6 +277,7 @@ python main.py dashboard
 | Depth | 22 | Catches all tactical errors at the 1000–1100 level |
 | Threads | 6 | Leaves 2 cores free on M-series chips |
 | Hash | 512 MB | Sufficient for single-game analysis |
+| Time limit | 10s/move | Prevents hanging on complex endgame positions |
 | MultiPV | 1 | Best move only (keeps analysis focused) |
 
 ### Move Classification
@@ -404,7 +405,7 @@ Update the `stockfish.path` in `config.yaml` to match your installation. Use `wh
 Create a `.env` file in the project root with your API keys (see [Configure API keys](#4-configure-api-keys)).
 
 **Analysis is very slow**
-Homebrew Stockfish runs at ~4.4M nodes/sec vs ~9–14M nodes/sec for a source-compiled binary. Consider compiling from source (see [Install Stockfish](#2-install-stockfish)). You can also reduce depth in `config.yaml` — depth 18 is ~3x faster with minimal loss in accuracy at the 1000–1100 rating level.
+Homebrew Stockfish runs at ~4.4M nodes/sec vs ~9–14M nodes/sec for a source-compiled binary. Consider compiling from source (see [Install Stockfish](#2-install-stockfish)). Each move has a 10-second time limit to prevent hanging. You can also reduce depth in `config.yaml` — depth 18 is ~3x faster with minimal loss in accuracy at the 1000–1100 rating level.
 
 **Games show "error" analysis status**
 Reset errored games and re-run:
