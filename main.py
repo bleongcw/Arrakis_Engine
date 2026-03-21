@@ -86,7 +86,8 @@ def cmd_coach(args, config):
     elif provider == "openai":
         model = config["coaching"]["openai_model"]
 
-    count = coach_pending(provider=provider, model=model, db_path=db_path)
+    limit = getattr(args, 'limit', 0) or 0
+    count = coach_pending(provider=provider, model=model, db_path=db_path, limit=limit)
     print(f"Coached {count} games with {provider} ({model}).")
 
 
@@ -184,6 +185,10 @@ def main():
     coach_parser.add_argument(
         "--provider", choices=["claude", "openai"],
         help="LLM provider (default: from config)",
+    )
+    coach_parser.add_argument(
+        "--limit", type=int, default=0,
+        help="Max games to coach (default: all pending)",
     )
 
     # patterns

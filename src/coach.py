@@ -113,7 +113,7 @@ def _call_claude(prompt: str, model: str) -> str:
         model=model,
         max_tokens=16000,
         thinking={
-            "type": "enabled",
+            "type": "adaptive",
             "budget_tokens": 10000,
         },
         messages=[{"role": "user", "content": prompt}],
@@ -263,19 +263,25 @@ def coach_game(game_id: int, provider: str = "claude",
 
 
 def coach_pending(provider: str = "claude", model: str | None = None,
-                  db_path: str | None = None) -> int:
-    """Generate coaching for all analyzed but uncoached games.
+                  db_path: str | None = None, limit: int = 0) -> int:
+    """Generate coaching for analyzed but uncoached games.
+
+    Args:
+        limit: Max games to coach (0 = all pending).
 
     Returns the number of games coached.
     """
     conn = init_db(db_path)
-    pending = conn.execute(
-        """SELECT id FROM games
+    sql = """SELECT id FROM games
         WHERE analysis_status = 'complete' AND coaching_status = 'pending'"""
-    ).fetchall()
+    if limit > 0:
+        sql += f" LIMIT {limit}"
+    pending = conn.execute(sql).fetchall()
     conn.close()
 
-    logger.info("Found %d games pending coaching", len(pending))
+    total_pending = len(pending)
+    logger.info("Found %d games to coach%s", total_pending,
+                f" (limited to {limit})" if limit > 0 else "")
 
     coached = 0
     for i, row in enumerate(pending):
