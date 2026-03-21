@@ -127,7 +127,7 @@ def _call_claude(prompt: str, model: str) -> str:
 
 
 def _call_openai(prompt: str, model: str) -> str:
-    """Call OpenAI API."""
+    """Call OpenAI Responses API."""
     from openai import OpenAI
 
     api_key = os.getenv("ARRAKIS_OPENAI_API_KEY")
@@ -136,17 +136,13 @@ def _call_openai(prompt: str, model: str) -> str:
 
     client = OpenAI(api_key=api_key)
 
-    response = client.chat.completions.create(
+    response = client.responses.create(
         model=model,
-        messages=[
-            {"role": "system", "content": "You are an expert chess coach. Respond only with valid JSON."},
-            {"role": "user", "content": prompt},
-        ],
-        temperature=0.7,
-        max_tokens=4096,
+        instructions="You are an expert chess coach. Respond only with valid JSON.",
+        input=prompt,
     )
 
-    return response.choices[0].message.content
+    return response.output_text
 
 
 def _parse_llm_response(text: str) -> dict:
