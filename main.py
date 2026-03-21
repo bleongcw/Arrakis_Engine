@@ -124,20 +124,12 @@ def cmd_report(args, config):
 
 
 def cmd_dashboard(args, config):
-    """Launch a local HTTP server for the dashboard."""
+    """Launch the live dashboard server with API endpoints."""
     db_path = config["database"]["path"]
-    # Auto-export JSON before launching
-    export_json(output_dir="dashboard/data", db_path=db_path)
-
     port = args.port or 8000
-    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory="dashboard")
-    with http.server.HTTPServer(("", port), handler) as httpd:
-        print(f"Dashboard running at http://localhost:{port}")
-        print("Press Ctrl+C to stop.")
-        try:
-            httpd.serve_forever()
-        except KeyboardInterrupt:
-            print("\nStopped.")
+
+    from src.dashboard_server import run_dashboard
+    run_dashboard(db_path=db_path, port=port, static_dir="dashboard")
 
 
 def cmd_run_all(args, config):
