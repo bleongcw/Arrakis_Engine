@@ -129,6 +129,11 @@
   .claude-btn { background: #7c3aed; }
   .openai-btn { background: #059669; }
 
+  /* Tooltip */
+  .tooltip-icon { position: relative; cursor: help; font-size: 14px; color: var(--text-dim); margin-left: 6px; font-weight: normal; text-transform: none; letter-spacing: 0; }
+  .tooltip-icon .tooltip-content { display: none; position: absolute; left: 50%; transform: translateX(-50%); top: 24px; width: 340px; padding: 14px 16px; background: var(--surface); border: 1px solid var(--surface2); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.3); font-size: 13px; font-weight: 400; line-height: 1.6; color: var(--text); z-index: 100; text-transform: none; letter-spacing: 0; }
+  .tooltip-icon:hover .tooltip-content { display: block; }
+
   .theme-toggle { padding: 6px 12px; border: 1px solid var(--surface2); border-radius: 6px; background: var(--surface); color: var(--text); cursor: pointer; font-size: 16px; line-height: 1; transition: background 0.2s; }
   .theme-toggle:hover { background: var(--surface2); }
 
@@ -261,7 +266,26 @@
   <div class="view" id="view-patterns">
     <div class="stats-grid" id="statsGrid"></div>
     <div class="panel" style="margin-top: 16px;">
-      <h3>ACPL Trend</h3>
+      <h3>ACPL Trend
+        <span class="tooltip-icon" title="">ⓘ
+          <span class="tooltip-content">
+            <strong>Average Centipawn Loss (ACPL)</strong><br><br>
+            ACPL measures how much your moves deviate from the engine's best move, averaged across all moves in a game. One centipawn = 1/100th of a pawn.<br><br>
+            <strong>How it's calculated:</strong><br>
+            For each move: loss = |best move eval − your move eval|<br>
+            ACPL = sum of all losses ÷ number of moves<br><br>
+            <strong>What the numbers mean:</strong><br>
+            • 10–20: Super Grandmaster level<br>
+            • 20–30: Master (2200+)<br>
+            • 30–50: Expert (1800–2200)<br>
+            • 50–100: Intermediate (1200–1800)<br>
+            • 100–200: Beginner/Elementary<br>
+            • 200+: Just starting out<br><br>
+            <strong>Lower is better.</strong> The trend shows your weekly average — a downward slope means you're improving!<br><br>
+            <em>Note: ACPL varies by time control (blitz games tend to have higher ACPL) and engine depth. Compare like with like.</em>
+          </span>
+        </span>
+      </h3>
       <div class="chart-container"><canvas id="acplChart"></canvas></div>
     </div>
     <div class="panel" style="margin-top: 16px;">
