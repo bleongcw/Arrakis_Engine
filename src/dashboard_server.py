@@ -224,7 +224,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             ).fetchall()
 
             coaching = conn.execute(
-                "SELECT * FROM game_coaching WHERE game_id = ?",
+                "SELECT * FROM game_coaching WHERE game_id = ? ORDER BY id DESC LIMIT 1",
                 (game_id,),
             ).fetchone()
 

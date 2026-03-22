@@ -468,6 +468,9 @@ async function runCoaching(provider) {
   const buttons = document.querySelectorAll('.coach-btn');
   const providerName = provider === 'claude' ? 'Claude Opus 4.6' : 'GPT-5.4';
 
+  // Remember old coaching provider to detect when new coaching arrives
+  const oldProvider = currentGame?.coaching?.provider || '';
+
   // Disable buttons
   buttons.forEach(b => b.disabled = true);
   statusEl.textContent = `⏳ Coaching with ${providerName}...`;
@@ -488,15 +491,19 @@ async function runCoaching(provider) {
       return;
     }
 
-    statusEl.textContent = `⏳ ${providerName} is thinking... (auto-refreshes in 30s)`;
+    statusEl.textContent = `⏳ ${providerName} is thinking...`;
 
-    // Poll for completion every 10s, up to 2 minutes
+    // Poll for completion every 10s, up to 3 minutes
     let attempts = 0;
     const poll = setInterval(async () => {
       attempts++;
       try {
         const detail = await fetch(API + '/games/' + currentGameId).then(r => r.json());
-        if (detail.coaching && detail.coaching.narrative) {
+        const newProvider = detail.coaching?.provider || '';
+        const isNew = newProvider.startsWith(provider) && newProvider !== oldProvider;
+        const isFirstCoaching = !oldProvider && detail.coaching?.narrative;
+
+        if (isNew || isFirstCoaching) {
           clearInterval(poll);
           currentGame = detail;
           renderGameDetail(detail);
@@ -506,10 +513,12 @@ async function runCoaching(provider) {
           // Also refresh game list
           await fetchGames();
           renderGameList();
-        } else if (attempts >= 12) {
+        } else if (attempts >= 18) {
           clearInterval(poll);
-          statusEl.textContent = `⚠️ Taking longer than expected. Refresh manually.`;
+          statusEl.textContent = `⚠️ Taking longer than expected. Click to refresh.`;
           statusEl.style.color = 'var(--yellow)';
+          statusEl.style.cursor = 'pointer';
+          statusEl.onclick = () => { loadGame(currentGameId); statusEl.textContent = ''; statusEl.onclick = null; };
           buttons.forEach(b => b.disabled = false);
         } else {
           statusEl.textContent = `⏳ ${providerName} is thinking... (${attempts * 10}s)`;
