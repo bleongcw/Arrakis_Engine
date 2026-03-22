@@ -178,6 +178,8 @@ python main.py harvest
 python main.py harvest --player your_chess_com_username
 ```
 
+> **Incremental by design:** The harvester deduplicates by `game_url` — it only fetches new games since your last harvest. Safe to run repeatedly without duplicating data.
+
 **Analyze with Stockfish:**
 
 ```bash
@@ -204,6 +206,8 @@ python main.py coach --provider openai --limit 5
 ```
 
 > **Rate limits:** OpenAI's `gpt-5.4` has a 10,000 TPM limit (~1 game/min on free/low tiers). Use `--limit 5` per batch to avoid 429 errors. Claude typically has higher throughput — `--limit 10-20` is safe. The dashboard shows which model was used for each game's coaching (purple badge = Claude, green badge = OpenAI).
+
+> **Dashboard coaching:** You can also coach individual games directly from the dashboard — click the 🟣 **Coach with Claude** or 🟢 **Coach with ChatGPT** button on any game's detail page. Results auto-refresh when complete.
 
 **Generate reports:**
 
@@ -319,6 +323,7 @@ For each analyzed game, the LLM produces:
 | **Game narrative** | Child | 2–3 paragraph story of what happened, encouraging tone |
 | **Key lesson** | Child | Single most important takeaway |
 | **Practical focus** | Child | One specific thing to practice |
+| **Opening analysis** | Both | Opening name, quality rating, counter-move assessment, and tip |
 | **Critical moments** | Both | 3–5 positions with what happened vs. what was better |
 | **Coach notes** | Coach | Technical summary for lesson planning |
 
@@ -341,9 +346,14 @@ The dashboard is a live web app served by a built-in Python HTTP server. It quer
 - **Player selector** — toggle between configured players
 - **Games list** — filterable by result, time control, coaching status (✅ Coached / ⏳ Pending / ❌ Error), and date range
 - **Status columns** — separate Analysis and Coaching status icons per game for at-a-glance pipeline progress
-- **Game analysis** — interactive chessboard with proper piece SVGs (lichess cburnett set), move-by-move eval chart, color-coded move list, full coaching narrative
+- **Month/year filter** — filter games by month (e.g. "Mar 2026") alongside result, time control, and coaching status
+- **Game analysis** — interactive chessboard with proper piece SVGs (lichess cburnett set), move-by-move eval chart, color-coded move list (green/blue/yellow/orange/red by classification)
+- **Move quality summary** — per-game table showing counts of excellent, good, inaccuracy, mistake, and blunder moves for player vs opponent with proportional bars
+- **Opening analysis** — LLM-generated assessment of the opening choice, quality rating, counter-move correctness, and tips
+- **On-demand coaching** — 🟣 Coach with Claude / 🟢 Coach with ChatGPT buttons on each game, with auto-refresh on completion
 - **Coaching model badge** — shows which LLM model generated the coaching (🟣 Claude / 🟢 OpenAI)
-- **Patterns dashboard** — stat cards, ACPL trend line chart, opening performance table, move quality donut chart, phase analysis bar chart
+- **Patterns dashboard** — stat cards, ACPL trend line chart, opening performance split by color (All / ♔ White / ♚ Black), move quality donut chart, phase analysis bar chart
+- **Light/dark mode** — toggle with 🌙/☀️ button, persists across sessions
 - **Live data** — dashboard reads from the database directly, so you can view results while analysis or coaching is still running
 
 **Libraries used (all loaded from CDN):**
