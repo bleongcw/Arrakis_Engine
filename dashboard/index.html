@@ -130,11 +130,12 @@
     <div class="filters">
       <select id="filterResult"><option value="">All Results</option><option value="win">Wins</option><option value="loss">Losses</option><option value="draw">Draws</option></select>
       <select id="filterTimeClass"><option value="">All Time Controls</option></select>
+      <select id="filterCoaching"><option value="">All Coaching Status</option><option value="complete">✅ Coached</option><option value="pending">⏳ Pending</option><option value="error">❌ Error</option></select>
       <input type="date" id="filterDateFrom" placeholder="From">
       <input type="date" id="filterDateTo" placeholder="To">
     </div>
     <table class="game-table">
-      <thead><tr><th>Date</th><th>Color</th><th>Rating</th><th>Opp</th><th>Result</th><th>Time</th><th>Status</th></tr></thead>
+      <thead><tr><th>Date</th><th>Color</th><th>Rating</th><th>Opp</th><th>Result</th><th>Time</th><th>Analysis</th><th>Coaching</th></tr></thead>
       <tbody id="gameList"></tbody>
     </table>
   </div>
@@ -328,7 +329,8 @@ function renderGameList() {
 
   tbody.innerHTML = games.map(g => {
     const resultClass = 'result-' + g.result;
-    const statusClass = 'status-' + g.analysis_status;
+    const analysisIcon = g.analysis_status === 'complete' ? '✅' : g.analysis_status === 'analyzing' ? '🔄' : g.analysis_status === 'error' ? '❌' : '⏳';
+    const coachIcon = g.coaching_status === 'complete' ? '✅' : g.coaching_status === 'error' ? '❌' : '⏳';
     return `<tr onclick="loadGame(${g.id})">
       <td>${g.date_played || '\u2014'}</td>
       <td>${g.player_color}</td>
@@ -336,7 +338,8 @@ function renderGameList() {
       <td>${g.opponent_rating || '?'}</td>
       <td class="${resultClass}">${g.result.toUpperCase()}</td>
       <td>${g.time_class || '?'}</td>
-      <td class="${statusClass}">${g.analysis_status}</td>
+      <td style="text-align:center" title="${g.analysis_status}">${analysisIcon}</td>
+      <td style="text-align:center" title="${g.coaching_status}">${coachIcon}</td>
     </tr>`;
   }).join('');
 }
@@ -345,10 +348,12 @@ function getFilteredGames() {
   let games = [...allGames];
   const result = document.getElementById('filterResult').value;
   const tc = document.getElementById('filterTimeClass').value;
+  const coaching = document.getElementById('filterCoaching').value;
   const from = document.getElementById('filterDateFrom').value;
   const to = document.getElementById('filterDateTo').value;
   if (result) games = games.filter(g => g.result === result);
   if (tc) games = games.filter(g => g.time_class === tc);
+  if (coaching) games = games.filter(g => g.coaching_status === coaching);
   if (from) games = games.filter(g => g.date_played >= from);
   if (to) games = games.filter(g => g.date_played <= to);
   return games;
