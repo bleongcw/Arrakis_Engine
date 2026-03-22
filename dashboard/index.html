@@ -77,14 +77,20 @@
   .eval-chart-container { height: 200px; }
 
   .move-list { display: flex; flex-wrap: wrap; gap: 2px; max-height: 200px; overflow-y: auto; padding: 4px; }
-  .move-item { padding: 4px 8px; border-radius: 4px; font-size: 12px; font-family: monospace; cursor: pointer; }
-  .move-item:hover { background: var(--surface2); }
-  .move-item.active { background: var(--accent); }
-  .move-item.excellent { border-left: 3px solid var(--green); }
-  .move-item.good { border-left: 3px solid var(--blue); }
-  .move-item.inaccuracy { border-left: 3px solid var(--yellow); }
-  .move-item.mistake { border-left: 3px solid #f97316; }
-  .move-item.blunder { border-left: 3px solid var(--red); }
+  .move-item { padding: 4px 8px; border-radius: 4px; font-size: 12px; font-family: monospace; cursor: pointer; transition: opacity 0.15s; }
+  .move-item:hover { opacity: 0.8; filter: brightness(1.2); }
+  .move-item.active { outline: 2px solid #fff; outline-offset: -1px; }
+  .move-item.excellent { background: rgba(34,197,94,0.25); color: #22c55e; border-left: 3px solid #22c55e; }
+  .move-item.good { background: rgba(59,130,246,0.2); color: #93c5fd; border-left: 3px solid #3b82f6; }
+  .move-item.inaccuracy { background: rgba(234,179,8,0.2); color: #eab308; border-left: 3px solid #eab308; }
+  .move-item.mistake { background: rgba(249,115,22,0.25); color: #fb923c; border-left: 3px solid #f97316; }
+  .move-item.blunder { background: rgba(239,68,68,0.3); color: #f87171; border-left: 3px solid #ef4444; }
+
+  .quality-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .quality-table th, .quality-table td { padding: 6px 10px; text-align: center; }
+  .quality-table th { color: var(--text-dim); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .quality-table td { font-weight: 600; font-size: 16px; }
+  .quality-table .bar { height: 6px; border-radius: 3px; margin-top: 4px; }
 
   /* Patterns */
   .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
@@ -162,6 +168,17 @@
         <div class="panel">
           <h3>Evaluation</h3>
           <div class="eval-chart-container"><canvas id="evalChart"></canvas></div>
+        </div>
+        <div class="panel">
+          <h3>Move Quality Summary</h3>
+          <div id="moveQualitySummary"></div>
+          <div id="moveQualityLegend" style="margin-top: 12px; display: flex; flex-wrap: wrap; gap: 10px; font-size: 12px;">
+            <span style="display:inline-flex;align-items:center;gap:4px;"><span style="width:14px;height:14px;border-radius:3px;background:#22c55e;display:inline-block;"></span> Excellent (&lt;30cp)</span>
+            <span style="display:inline-flex;align-items:center;gap:4px;"><span style="width:14px;height:14px;border-radius:3px;background:#3b82f6;display:inline-block;"></span> Good (&lt;50cp)</span>
+            <span style="display:inline-flex;align-items:center;gap:4px;"><span style="width:14px;height:14px;border-radius:3px;background:#eab308;display:inline-block;"></span> Inaccuracy (&lt;100cp)</span>
+            <span style="display:inline-flex;align-items:center;gap:4px;"><span style="width:14px;height:14px;border-radius:3px;background:#f97316;display:inline-block;"></span> Mistake (&lt;300cp)</span>
+            <span style="display:inline-flex;align-items:center;gap:4px;"><span style="width:14px;height:14px;border-radius:3px;background:#ef4444;display:inline-block;"></span> Blunder (300+cp)</span>
+          </div>
         </div>
         <div class="panel" id="coachingNarrative">
           <h3>Game Story <span id="coachingModelBadge" style="font-size: 11px; padding: 2px 8px; border-radius: 4px; background: var(--accent); color: #fff; margin-left: 8px; font-weight: normal;"></span></h3>
@@ -438,6 +455,9 @@ function renderGameDetail(detail) {
   }
   moveListEl.innerHTML = html;
 
+  // Move quality summary table
+  renderMoveQualitySummary(moves, game.player_color);
+
   // Eval chart
   renderEvalChart(moves, game.player_color);
 
@@ -485,6 +505,58 @@ function renderGameDetail(detail) {
     document.getElementById('coachNotes').textContent = '\u2014';
     document.getElementById('criticalMoments').innerHTML = '<p>Not available</p>';
   }
+}
+
+function renderMoveQualitySummary(moves, playerColor) {
+  const container = document.getElementById('moveQualitySummary');
+  const playerSide = playerColor === 'white' ? 'white' : 'black';
+
+  // Count classifications for the player's moves only
+  const counts = { excellent: 0, good: 0, inaccuracy: 0, mistake: 0, blunder: 0 };
+  const oppCounts = { excellent: 0, good: 0, inaccuracy: 0, mistake: 0, blunder: 0 };
+
+  moves.forEach(m => {
+    const cls = m.classification || '';
+    if (cls in counts) {
+      if (m.side === playerSide) counts[cls]++;
+      else oppCounts[cls]++;
+    }
+  });
+
+  const playerMoves = moves.filter(m => m.side === playerSide).length;
+  const oppMoves = moves.filter(m => m.side !== playerSide).length;
+
+  const colors = {
+    excellent: '#22c55e', good: '#3b82f6', inaccuracy: '#eab308',
+    mistake: '#f97316', blunder: '#ef4444'
+  };
+  const labels = {
+    excellent: '✨ Excellent', good: '👍 Good', inaccuracy: '⚠️ Inaccuracy',
+    mistake: '❌ Mistake', blunder: '💥 Blunder'
+  };
+
+  function barWidth(count, total) {
+    return total > 0 ? Math.max(2, (count / total) * 100) : 0;
+  }
+
+  container.innerHTML = `
+    <table class="quality-table">
+      <tr>
+        <th></th>
+        ${Object.keys(labels).map(k => `<th style="color:${colors[k]}">${labels[k]}</th>`).join('')}
+        <th>Total</th>
+      </tr>
+      <tr>
+        <td style="text-align:left;font-size:12px;color:var(--text-dim);">You (${playerSide})</td>
+        ${Object.keys(counts).map(k => `<td style="color:${colors[k]}">${counts[k]}<div class="bar" style="background:${colors[k]};width:${barWidth(counts[k], playerMoves)}%"></div></td>`).join('')}
+        <td style="color:var(--text-dim)">${playerMoves}</td>
+      </tr>
+      <tr>
+        <td style="text-align:left;font-size:12px;color:var(--text-dim);">Opponent</td>
+        ${Object.keys(oppCounts).map(k => `<td style="color:${colors[k]}">${oppCounts[k]}<div class="bar" style="background:${colors[k]};width:${barWidth(oppCounts[k], oppMoves)}%"></div></td>`).join('')}
+        <td style="color:var(--text-dim)">${oppMoves}</td>
+      </tr>
+    </table>`;
 }
 
 function renderEvalChart(moves, playerColor) {
