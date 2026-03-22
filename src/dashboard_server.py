@@ -178,6 +178,13 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                     )
                 except (json.JSONDecodeError, TypeError):
                     coaching_data["critical_moments"] = []
+            if coaching_data and coaching_data.get("opening_analysis_json"):
+                try:
+                    coaching_data["opening_analysis"] = json.loads(
+                        coaching_data["opening_analysis_json"]
+                    )
+                except (json.JSONDecodeError, TypeError):
+                    coaching_data["opening_analysis"] = {}
 
             return {
                 "game": dict_from_row(game),

@@ -58,7 +58,15 @@ Produce a JSON response with these exact keys:
    - "move_played": the move in notation
    - "best_move": the engine's recommended move
 
-5. "coach_notes" — Technical summary for the chess coach. Use precise chess terminology.
+5. "opening_analysis" — A JSON object analyzing the opening choice:
+   - "opening_name": the name of the opening played (e.g. "Italian Game", "Sicilian Defense")
+   - "player_role": "white" if the player chose the opening, or "black" if responding to it
+   - "opening_quality": "good", "acceptable", or "poor" — was this a sound opening choice for their level?
+   - "correct_counter_moves": true or false — if playing black, did the player respond with correct/principled counter-moves? If playing white, did they follow the main line or deviate poorly?
+   - "opening_summary": 2-3 sentences explaining the opening choice. For white: was the system appropriate? Did they develop pieces logically? For black: did they play the correct response to white's opening? Where did they first deviate from good play?
+   - "opening_tip": One specific, actionable tip about this opening for a {age}-year-old.
+
+6. "coach_notes" — Technical summary for the chess coach. Use precise chess terminology.
    Include: opening assessment, critical tactical moments, endgame technique (if applicable),
    specific weaknesses to address in lessons, and recommended training exercises.
    2-3 paragraphs, professional tone.
@@ -239,16 +247,17 @@ def coach_game(game_id: int, provider: str = "claude",
 
     # Store in database
     critical_json = json.dumps(coaching.get("critical_moments", []))
+    opening_json = json.dumps(coaching.get("opening_analysis", {}))
 
     provider_model = f"{provider}:{used_model}"
     conn.execute(
         """INSERT OR REPLACE INTO game_coaching
         (game_id, provider, narrative, key_lesson, practical_focus,
-         critical_moments_json, coach_notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?)""",
+         critical_moments_json, opening_analysis_json, coach_notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
         (game_id, provider_model, coaching.get("narrative"),
          coaching.get("key_lesson"), coaching.get("practical_focus"),
-         critical_json, coaching.get("coach_notes")),
+         critical_json, opening_json, coaching.get("coach_notes")),
     )
     conn.execute(
         "UPDATE games SET coaching_status = 'complete' WHERE id = ?",

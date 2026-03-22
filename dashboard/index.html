@@ -180,6 +180,10 @@
             <span style="display:inline-flex;align-items:center;gap:4px;"><span style="width:14px;height:14px;border-radius:3px;background:#ef4444;display:inline-block;"></span> Blunder (300+cp)</span>
           </div>
         </div>
+        <div class="panel" id="openingAnalysisPanel">
+          <h3>📖 Opening Analysis</h3>
+          <div id="openingAnalysis"></div>
+        </div>
         <div class="panel" id="coachingNarrative">
           <h3>Game Story <span id="coachingModelBadge" style="font-size: 11px; padding: 2px 8px; border-radius: 4px; background: var(--accent); color: #fff; margin-left: 8px; font-weight: normal;"></span></h3>
           <p id="narrativeText"></p>
@@ -481,6 +485,38 @@ function renderGameDetail(detail) {
     document.getElementById('focusText').textContent = coaching.practical_focus || 'Not available';
     document.getElementById('coachNotes').textContent = coaching.coach_notes || 'Not available';
 
+    // Opening analysis
+    const openDiv = document.getElementById('openingAnalysis');
+    const oa = coaching.opening_analysis;
+    if (oa && typeof oa === 'object') {
+      const qualityColors = { good: '#22c55e', acceptable: '#eab308', poor: '#ef4444' };
+      const qualityColor = qualityColors[oa.opening_quality] || 'var(--text)';
+      const counterIcon = oa.correct_counter_moves ? '✅' : '❌';
+      openDiv.innerHTML = `
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">
+          <div style="background:var(--surface2);padding:10px;border-radius:6px;">
+            <div style="font-size:11px;color:var(--text-dim);text-transform:uppercase;">Opening</div>
+            <div style="font-size:16px;font-weight:600;margin-top:2px;">${oa.opening_name || 'Unknown'}</div>
+          </div>
+          <div style="background:var(--surface2);padding:10px;border-radius:6px;">
+            <div style="font-size:11px;color:var(--text-dim);text-transform:uppercase;">Quality</div>
+            <div style="font-size:16px;font-weight:600;margin-top:2px;color:${qualityColor};">${(oa.opening_quality || '?').toUpperCase()}</div>
+          </div>
+          <div style="background:var(--surface2);padding:10px;border-radius:6px;">
+            <div style="font-size:11px;color:var(--text-dim);text-transform:uppercase;">Role</div>
+            <div style="font-size:14px;margin-top:2px;">${oa.player_role === 'white' ? '♔ Chose opening' : '♚ Responding'}</div>
+          </div>
+          <div style="background:var(--surface2);padding:10px;border-radius:6px;">
+            <div style="font-size:11px;color:var(--text-dim);text-transform:uppercase;">Counter-moves</div>
+            <div style="font-size:14px;margin-top:2px;">${counterIcon} ${oa.correct_counter_moves ? 'Correct' : 'Needs work'}</div>
+          </div>
+        </div>
+        <p style="font-size:13px;line-height:1.6;margin-bottom:8px;">${oa.opening_summary || ''}</p>
+        <p style="font-size:13px;color:var(--green);"><strong>💡 Tip:</strong> ${oa.opening_tip || ''}</p>`;
+    } else {
+      openDiv.innerHTML = '<p style="color:var(--text-dim);">Not available (re-run coaching to generate)</p>';
+    }
+
     const cmDiv = document.getElementById('criticalMoments');
     // Use pre-parsed critical_moments from API, or parse from JSON string
     const moments = coaching.critical_moments || (coaching.critical_moments_json ? JSON.parse(coaching.critical_moments_json) : null);
@@ -499,6 +535,7 @@ function renderGameDetail(detail) {
     badge.textContent = 'No coaching';
     badge.style.background = '#666';
     badge.style.display = 'inline';
+    document.getElementById('openingAnalysis').innerHTML = '<p style="color:var(--text-dim);">Run coaching analysis first.</p>';
     document.getElementById('narrativeText').textContent = 'Run coaching analysis first.';
     document.getElementById('lessonText').textContent = '\u2014';
     document.getElementById('focusText').textContent = '\u2014';

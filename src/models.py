@@ -30,7 +30,17 @@ def init_db(db_path: str | None = None) -> sqlite3.Connection:
     """Initialize the database schema. Returns the connection."""
     conn = get_connection(db_path)
     conn.executescript(SCHEMA)
+    # Migrations for existing databases
+    _migrate(conn)
     return conn
+
+
+def _migrate(conn: sqlite3.Connection):
+    """Add columns that may not exist in older databases."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(game_coaching)").fetchall()}
+    if "opening_analysis_json" not in cols:
+        conn.execute("ALTER TABLE game_coaching ADD COLUMN opening_analysis_json TEXT")
+        conn.commit()
 
 
 SCHEMA = """
@@ -92,6 +102,7 @@ CREATE TABLE IF NOT EXISTS game_coaching (
     key_lesson              TEXT,
     practical_focus         TEXT,
     critical_moments_json   TEXT,
+    opening_analysis_json   TEXT,
     coach_notes             TEXT,
     UNIQUE(game_id, provider)
 );
