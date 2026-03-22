@@ -131,11 +131,12 @@
       <select id="filterResult"><option value="">All Results</option><option value="win">Wins</option><option value="loss">Losses</option><option value="draw">Draws</option></select>
       <select id="filterTimeClass"><option value="">All Time Controls</option></select>
       <select id="filterCoaching"><option value="">All Coaching Status</option><option value="complete">✅ Coached</option><option value="pending">⏳ Pending</option><option value="error">❌ Error</option></select>
+      <select id="filterMonth"><option value="">All Months</option></select>
       <input type="date" id="filterDateFrom" placeholder="From">
       <input type="date" id="filterDateTo" placeholder="To">
     </div>
     <table class="game-table">
-      <thead><tr><th>Date</th><th>Color</th><th>Rating</th><th>Opp</th><th>Result</th><th>Time</th><th>Analysis</th><th>Coaching</th></tr></thead>
+      <thead><tr><th>#</th><th>Date</th><th>Color</th><th>Rating</th><th>Opp</th><th>Result</th><th>Time</th><th>Analysis</th><th>Coaching</th></tr></thead>
       <tbody id="gameList"></tbody>
     </table>
   </div>
@@ -327,11 +328,26 @@ function renderGameList() {
   const currentTc = tcSelect.value;
   tcSelect.innerHTML = '<option value="">All Time Controls</option>' + tcs.map(tc => `<option value="${tc}"${tc === currentTc ? ' selected' : ''}>${tc}</option>`).join('');
 
-  tbody.innerHTML = games.map(g => {
+  // Populate month/year filter
+  const months = [...new Set(allGames.map(g => g.date_played ? g.date_played.substring(0, 7) : null).filter(Boolean))].sort().reverse();
+  const monthSelect = document.getElementById('filterMonth');
+  const currentMonth = monthSelect.value;
+  const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  monthSelect.innerHTML = '<option value="">All Months</option>' + months.map(m => {
+    const [y, mo] = m.split('-');
+    const label = `${monthNames[parseInt(mo)-1]} ${y}`;
+    return `<option value="${m}"${m === currentMonth ? ' selected' : ''}>${label}</option>`;
+  }).join('');
+
+  // Sort by latest date first
+  games.sort((a, b) => (b.date_played || '').localeCompare(a.date_played || ''));
+
+  tbody.innerHTML = games.map((g, idx) => {
     const resultClass = 'result-' + g.result;
     const analysisIcon = g.analysis_status === 'complete' ? '✅' : g.analysis_status === 'analyzing' ? '🔄' : g.analysis_status === 'error' ? '❌' : '⏳';
     const coachIcon = g.coaching_status === 'complete' ? '✅' : g.coaching_status === 'error' ? '❌' : '⏳';
     return `<tr onclick="loadGame(${g.id})">
+      <td style="color:var(--text-dim);font-size:12px;">${idx + 1}</td>
       <td>${g.date_played || '\u2014'}</td>
       <td>${g.player_color}</td>
       <td>${g.player_rating || '?'}</td>
@@ -349,11 +365,13 @@ function getFilteredGames() {
   const result = document.getElementById('filterResult').value;
   const tc = document.getElementById('filterTimeClass').value;
   const coaching = document.getElementById('filterCoaching').value;
+  const month = document.getElementById('filterMonth').value;
   const from = document.getElementById('filterDateFrom').value;
   const to = document.getElementById('filterDateTo').value;
   if (result) games = games.filter(g => g.result === result);
   if (tc) games = games.filter(g => g.time_class === tc);
   if (coaching) games = games.filter(g => g.coaching_status === coaching);
+  if (month) games = games.filter(g => g.date_played && g.date_played.startsWith(month));
   if (from) games = games.filter(g => g.date_played >= from);
   if (to) games = games.filter(g => g.date_played <= to);
   return games;
