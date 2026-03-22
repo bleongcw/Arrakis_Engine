@@ -1,6 +1,6 @@
 # Arrakis Engine
 
-A local Python application that pulls chess.com games, runs deep Stockfish analysis on every move, and uses LLMs (Claude Opus 4.6 / ChatGPT 5.4 Pro) to generate age-appropriate coaching insights. Built for tracking improvement over time with pattern detection, an interactive web dashboard, and exportable coach-ready reports.
+A local Python application that pulls chess.com games, runs deep Stockfish analysis on every move, and uses LLMs (Claude Opus 4.6 / GPT-5.4) to generate age-appropriate coaching insights. Built for tracking improvement over time with pattern detection, a live web dashboard, and exportable coach-ready reports.
 
 Inspired by my three children — Eleanor, Evan, and Estella — and their journey learning chess.
 
@@ -143,7 +143,7 @@ analysis:
 coaching:
   default_provider: claude            # or "openai"
   anthropic_model: claude-opus-4-6
-  openai_model: chatgpt-5.4-pro
+  openai_model: gpt-5.4               # or gpt-5.4-pro (requires Responses API)
 
 database:
   path: data/chess_coach.db
@@ -159,7 +159,7 @@ database:
 |---|---|
 | `python main.py harvest` | Fetch games from chess.com for all configured players |
 | `python main.py analyze` | Run Stockfish analysis on all pending games |
-| `python main.py coach` | Generate LLM coaching insights for analyzed games |
+| `python main.py coach` | Generate LLM coaching insights (supports `--limit` and `--provider`) |
 | `python main.py patterns` | Compute cross-game pattern statistics |
 | `python main.py export-json` | Export database to JSON for the web dashboard |
 | `python main.py report` | Generate Markdown coaching reports |
@@ -195,7 +195,15 @@ python main.py coach
 
 # Use a specific provider
 python main.py coach --provider openai
+
+# Limit batch size (recommended for rate limits)
+python main.py coach --limit 5
+
+# Combine provider and limit
+python main.py coach --provider openai --limit 5
 ```
+
+> **Rate limits:** OpenAI's `gpt-5.4` has a 10,000 TPM limit (~1 game/min on free/low tiers). Use `--limit 5` per batch to avoid 429 errors. Claude typically has higher throughput — `--limit 10-20` is safe. The dashboard shows which model was used for each game's coaching (purple badge = Claude, green badge = OpenAI).
 
 **Generate reports:**
 
@@ -327,13 +335,15 @@ Patterns are aggregated across all games per player:
 
 ## Web Dashboard
 
-The dashboard is a single HTML file (`dashboard/index.html`) that loads data from exported JSON. No build step required.
+The dashboard is a live web app served by a built-in Python HTTP server. It queries SQLite directly — no JSON export needed, and data updates in real-time as analysis and coaching complete.
 
 **Features:**
 - **Player selector** — toggle between configured players
 - **Games list** — filterable by result, time control, and date range
-- **Game analysis** — interactive board (keyboard arrow keys to navigate), move-by-move eval chart, color-coded move list, full coaching narrative
+- **Game analysis** — interactive chessboard with proper piece SVGs (lichess cburnett set), move-by-move eval chart, color-coded move list, full coaching narrative
+- **Coaching model badge** — shows which LLM model generated the coaching (🟣 Claude / 🟢 OpenAI)
 - **Patterns dashboard** — stat cards, ACPL trend line chart, opening performance table, move quality donut chart, phase analysis bar chart
+- **Live data** — dashboard reads from the database directly, so you can view results while analysis or coaching is still running
 
 **Libraries used (all loaded from CDN):**
 - [chessboard.js](https://chessboardjs.com/) — board rendering
@@ -355,12 +365,14 @@ ArrakisEngine/
 │   ├── models.py          # SQLite schema (5 tables) and data helpers
 │   ├── harvester.py       # Chess.com API game fetcher
 │   ├── analyzer.py        # Stockfish move-by-move analysis engine
-│   ├── coach.py           # LLM coaching layer (Claude / OpenAI)
+│   ├── coach.py           # LLM coaching layer (Claude / OpenAI via Responses API)
 │   ├── patterns.py        # Cross-game pattern detection
 │   ├── export.py          # JSON export for dashboard
+│   ├── dashboard_server.py # Live dashboard HTTP server with SQLite API
 │   └── report.py          # Markdown report generator
 ├── dashboard/
-│   ├── index.html         # Single-file web dashboard
+│   ├── index.html         # Web dashboard (served by dashboard_server.py)
+│   ├── img/pieces/        # Lichess cburnett SVG chess pieces
 │   └── data/              # Exported JSON (auto-generated, gitignored)
 ├── tests/                 # Test suite (56 tests)
 │   ├── test_models.py
@@ -407,9 +419,13 @@ Create a `.env` file in the project root with your API keys (see [Configure API 
 **Analysis is very slow**
 Homebrew Stockfish runs at ~4.4M nodes/sec vs ~9–14M nodes/sec for a source-compiled binary. Consider compiling from source (see [Install Stockfish](#2-install-stockfish)). Each move has a 10-second time limit to prevent hanging. You can also reduce depth in `config.yaml` — depth 18 is ~3x faster with minimal loss in accuracy at the 1000–1100 rating level.
 
-**Games show "error" analysis status**
+**OpenAI 429 rate limit errors**
+Your API tier has a tokens-per-minute cap (e.g. 10,000 TPM on free tier). Use `--limit 5` to batch and allow the 10-second delay between calls. Upgrading your OpenAI plan raises the limit. Alternatively, use `--provider claude`.
+
+**Games show "error" analysis or coaching status**
 Reset errored games and re-run:
 ```bash
+# Reset analysis errors
 python3 -c "
 from src.models import init_db
 conn = init_db('data/chess_coach.db')
@@ -419,7 +435,21 @@ print('Reset', conn.total_changes, 'games')
 conn.close()
 "
 python main.py analyze
+
+# Reset coaching errors
+python3 -c "
+from src.models import init_db
+conn = init_db('data/chess_coach.db')
+conn.execute(\"UPDATE games SET coaching_status = 'pending' WHERE coaching_status = 'error'\")
+conn.commit()
+print('Reset', conn.total_changes, 'games')
+conn.close()
+"
+python main.py coach --limit 5
 ```
+
+**"database is locked"**
+SQLite only allows one writer at a time. Stop the analyzer before running harvest or coach in another terminal. The dashboard (read-only) can run concurrently without issues.
 
 ## License
 
