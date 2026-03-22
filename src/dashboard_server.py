@@ -80,11 +80,12 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         finally:
             conn.close()
 
-        # Mark as 'coaching' so the dashboard poll can detect the transition
+        # Mark as 'pending' so the dashboard poll can detect the transition
+        # back to 'complete' when coaching finishes
         conn2 = self._get_conn()
         try:
             conn2.execute(
-                "UPDATE games SET coaching_status = 'coaching' WHERE id = ?",
+                "UPDATE games SET coaching_status = 'pending' WHERE id = ?",
                 (game_id,),
             )
             conn2.commit()
