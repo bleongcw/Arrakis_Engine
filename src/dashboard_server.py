@@ -80,6 +80,17 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         finally:
             conn.close()
 
+        # Mark as 'coaching' so the dashboard poll can detect the transition
+        conn2 = self._get_conn()
+        try:
+            conn2.execute(
+                "UPDATE games SET coaching_status = 'coaching' WHERE id = ?",
+                (game_id,),
+            )
+            conn2.commit()
+        finally:
+            conn2.close()
+
         # Run coaching in a background thread so the request doesn't block
         def run_coach():
             try:

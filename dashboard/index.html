@@ -482,9 +482,6 @@ async function runCoaching(provider) {
   const buttons = document.querySelectorAll('.coach-btn');
   const providerName = provider === 'claude' ? 'Claude Opus 4.6' : 'GPT-5.4';
 
-  // Remember old coaching provider to detect when new coaching arrives
-  const oldProvider = currentGame?.coaching?.provider || '';
-
   // Disable buttons
   buttons.forEach(b => b.disabled = true);
   statusEl.textContent = `⏳ Coaching with ${providerName}...`;
@@ -507,17 +504,19 @@ async function runCoaching(provider) {
 
     statusEl.textContent = `⏳ ${providerName} is thinking...`;
 
-    // Poll for completion every 10s, up to 3 minutes
+    // Poll for completion every 5s, up to 5 minutes
+    // Detection: the server sets coaching_status='coaching' when it starts,
+    // and coach_game sets it back to 'complete' when done.
     let attempts = 0;
     const poll = setInterval(async () => {
       attempts++;
       try {
         const detail = await fetch(API + '/games/' + currentGameId).then(r => r.json());
+        const status = detail.game?.coaching_status;
         const newProvider = detail.coaching?.provider || '';
-        const isNew = newProvider.startsWith(provider) && newProvider !== oldProvider;
-        const isFirstCoaching = !oldProvider && detail.coaching?.narrative;
 
-        if (isNew || isFirstCoaching) {
+        // Coaching is done when status is 'complete' AND provider matches what we requested
+        if (status === 'complete' && newProvider.startsWith(provider)) {
           clearInterval(poll);
           currentGame = detail;
           renderGameDetail(detail);
@@ -527,7 +526,7 @@ async function runCoaching(provider) {
           // Also refresh game list
           await fetchGames();
           renderGameList();
-        } else if (attempts >= 18) {
+        } else if (attempts >= 60) {
           clearInterval(poll);
           statusEl.textContent = `⚠️ Taking longer than expected. Click to refresh.`;
           statusEl.style.color = 'var(--yellow)';
@@ -535,10 +534,10 @@ async function runCoaching(provider) {
           statusEl.onclick = () => { loadGame(currentGameId); statusEl.textContent = ''; statusEl.onclick = null; };
           buttons.forEach(b => b.disabled = false);
         } else {
-          statusEl.textContent = `⏳ ${providerName} is thinking... (${attempts * 10}s)`;
+          statusEl.textContent = `⏳ ${providerName} is thinking... (${attempts * 5}s)`;
         }
       } catch (e) { /* ignore polling errors */ }
-    }, 10000);
+    }, 5000);
 
   } catch (e) {
     statusEl.textContent = `❌ Failed: ${e.message}`;
