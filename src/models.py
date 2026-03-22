@@ -41,6 +41,9 @@ def _migrate(conn: sqlite3.Connection):
     if "opening_analysis_json" not in cols:
         conn.execute("ALTER TABLE game_coaching ADD COLUMN opening_analysis_json TEXT")
         conn.commit()
+    if "player_feedback" not in cols:
+        conn.execute("ALTER TABLE game_coaching ADD COLUMN player_feedback TEXT")
+        conn.commit()
 
 
 SCHEMA = """

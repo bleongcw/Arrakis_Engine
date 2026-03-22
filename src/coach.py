@@ -82,7 +82,25 @@ Produce a JSON response with these exact keys:
    - "opening_summary": 2-3 sentences explaining the opening choice. For white: was the system appropriate? Did they develop pieces logically? For black: did they play the correct response to white's opening? Where did they first deviate from good play?
    - "opening_tip": One specific, actionable tip about this opening for a {age}-year-old.
 
-6. "coach_notes" — Technical summary for the chess coach. Use precise chess terminology.
+6. "player_feedback" — A personal letter to the child (2-3 paragraphs) written directly to them.
+   This is the most important section — it should feel like a kind, encouraging coach talking
+   to a {age}-year-old {tier_label}-level player after their game.
+
+   REQUIREMENTS:
+   - Address {name} by name. Use "you" throughout.
+   - Start by celebrating what they did well — find at least 2 specific good decisions.
+   - Frame every mistake as a growth opportunity: "Next time you see X, try Y" not "You made a mistake."
+   - Include exactly 3 practical, actionable tips they can use in their very next game:
+     * Tip 1: Something they already did well — reinforce it ("Keep doing X, it's working!")
+     * Tip 2: One specific chess habit to build (appropriate for {tier_label} level)
+     * Tip 3: One pattern or idea to look for in future games
+   - End with a growth mindset message — emphasize that every game teaches something,
+     wins and losses both help them improve, and they're making real progress.
+   - Match language to a {age}-year-old at {tier_label} level: {language_level}
+   - Be warm but not patronizing. Respect their intelligence while keeping it accessible.
+   - Reference specific moves from THIS game to make it personal, not generic.
+
+7. "coach_notes" — Technical summary for the chess coach. Use precise chess terminology.
    Include: opening assessment, critical tactical moments, endgame technique (if applicable),
    specific weaknesses to address in lessons, and recommended training exercises.
    2-3 paragraphs, professional tone.
@@ -279,11 +297,12 @@ def coach_game(game_id: int, provider: str = "claude",
     conn.execute(
         """INSERT OR REPLACE INTO game_coaching
         (game_id, provider, narrative, key_lesson, practical_focus,
-         critical_moments_json, opening_analysis_json, coach_notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+         critical_moments_json, opening_analysis_json, player_feedback, coach_notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (game_id, provider_model, coaching.get("narrative"),
          coaching.get("key_lesson"), coaching.get("practical_focus"),
-         critical_json, opening_json, coaching.get("coach_notes")),
+         critical_json, opening_json,
+         coaching.get("player_feedback"), coaching.get("coach_notes")),
     )
     conn.execute(
         "UPDATE games SET coaching_status = 'complete' WHERE id = ?",

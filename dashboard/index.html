@@ -240,6 +240,10 @@
           <h3>Practice Focus</h3>
           <p id="focusText"></p>
         </div>
+        <div class="panel" id="playerFeedbackPanel" style="border-left: 3px solid var(--green);">
+          <h3 style="color:var(--green);">💬 Feedback to the Player</h3>
+          <div id="playerFeedback" style="line-height:1.8; white-space:pre-wrap;"></div>
+        </div>
         <div class="panel" id="criticalMomentsPanel">
           <h3>Critical Moments</h3>
           <div id="criticalMoments"></div>
@@ -622,6 +626,17 @@ function renderGameDetail(detail) {
     document.getElementById('narrativeText').innerHTML = narrative.split('\n\n').map(p => `<p style="margin-bottom:10px;">${p.replace(/\n/g, '<br>')}</p>`).join('');
     document.getElementById('lessonText').textContent = coaching.key_lesson || 'Not available';
     document.getElementById('focusText').textContent = coaching.practical_focus || 'Not available';
+
+    // Player Feedback
+    const feedbackEl = document.getElementById('playerFeedback');
+    const feedback = coaching.player_feedback || '';
+    if (feedback) {
+      feedbackEl.innerHTML = feedback.split('\n\n').map(p => `<p style="margin-bottom:12px;">${p.replace(/\n/g, '<br>')}</p>`).join('');
+      document.getElementById('playerFeedbackPanel').style.display = 'block';
+    } else {
+      feedbackEl.innerHTML = '<p style="color:var(--text-dim);">Run coaching to generate personalized feedback.</p>';
+    }
+
     const notesEl = document.getElementById('coachNotes');
     const notes = coaching.coach_notes || 'Not available';
     notesEl.innerHTML = notes.split('\n\n').map(p => `<p style="margin-bottom:12px;">${p.replace(/\n/g, '<br>')}</p>`).join('');
@@ -680,6 +695,7 @@ function renderGameDetail(detail) {
     document.getElementById('narrativeText').innerHTML = '<p style="color:var(--text-dim);">Run coaching analysis first.</p>';
     document.getElementById('lessonText').textContent = '\u2014';
     document.getElementById('focusText').textContent = '\u2014';
+    document.getElementById('playerFeedback').innerHTML = '<p style="color:var(--text-dim);">Run coaching to generate personalized feedback.</p>';
     document.getElementById('coachNotes').innerHTML = '<p style="color:var(--text-dim);">\u2014</p>';
     document.getElementById('criticalMoments').innerHTML = '<p>Not available</p>';
   }
