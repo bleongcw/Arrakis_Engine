@@ -10,7 +10,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
-  :root {
+  :root, [data-theme="dark"] {
     --bg: #1a1a2e;
     --surface: #16213e;
     --surface2: #0f3460;
@@ -21,6 +21,22 @@
     --red: #f87171;
     --yellow: #fbbf24;
     --blue: #60a5fa;
+    --board-light: #f0d9b5;
+    --board-dark: #b58863;
+  }
+  [data-theme="light"] {
+    --bg: #f5f5f5;
+    --surface: #ffffff;
+    --surface2: #e5e7eb;
+    --accent: #dc2626;
+    --text: #1f2937;
+    --text-dim: #6b7280;
+    --green: #16a34a;
+    --red: #dc2626;
+    --yellow: #ca8a04;
+    --blue: #2563eb;
+    --board-light: #eeeed2;
+    --board-dark: #769656;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); }
@@ -110,6 +126,17 @@
   .claude-btn { background: #7c3aed; }
   .openai-btn { background: #059669; }
 
+  .theme-toggle { padding: 6px 12px; border: 1px solid var(--surface2); border-radius: 6px; background: var(--surface); color: var(--text); cursor: pointer; font-size: 16px; line-height: 1; transition: background 0.2s; }
+  .theme-toggle:hover { background: var(--surface2); }
+
+  /* Light mode overrides for elements with hardcoded colors */
+  [data-theme="light"] .game-table tr:hover { background: #f0f0f0; }
+  [data-theme="light"] .move-item.excellent { background: rgba(22,163,74,0.15); color: #15803d; }
+  [data-theme="light"] .move-item.good { background: rgba(37,99,235,0.12); color: #1d4ed8; }
+  [data-theme="light"] .move-item.inaccuracy { background: rgba(202,138,4,0.15); color: #a16207; }
+  [data-theme="light"] .move-item.mistake { background: rgba(234,88,12,0.15); color: #c2410c; }
+  [data-theme="light"] .move-item.blunder { background: rgba(220,38,38,0.15); color: #b91c1c; }
+
   .loading { text-align: center; padding: 60px; color: var(--text-dim); }
 
   @media (max-width: 900px) {
@@ -127,6 +154,7 @@
       <span id="statusText"></span>
     </div>
     <div class="player-tabs" id="playerTabs"></div>
+    <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Toggle light/dark mode">🌙</button>
   </div>
 </div>
 
@@ -856,6 +884,24 @@ async function renderPatterns() {
     document.getElementById('statsGrid').innerHTML = '<div class="loading">Could not load pattern data.</div>';
   }
 }
+
+// ── Theme Toggle ─────────────────────────────────────────────────
+function toggleTheme() {
+  const html = document.documentElement;
+  const current = html.getAttribute('data-theme') || 'dark';
+  const next = current === 'dark' ? 'light' : 'dark';
+  html.setAttribute('data-theme', next);
+  document.getElementById('themeToggle').textContent = next === 'dark' ? '🌙' : '☀️';
+  localStorage.setItem('arrakis-theme', next);
+}
+
+// Load saved theme preference
+(function() {
+  const saved = localStorage.getItem('arrakis-theme') || 'dark';
+  document.documentElement.setAttribute('data-theme', saved);
+  const btn = document.getElementById('themeToggle');
+  if (btn) btn.textContent = saved === 'dark' ? '🌙' : '☀️';
+})();
 
 init();
 </script>
