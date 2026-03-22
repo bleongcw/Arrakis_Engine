@@ -286,7 +286,7 @@ python main.py dashboard
 
 | Setting | Value | Rationale |
 |---|---|---|
-| Depth | 22 | Catches all tactical errors at the 1000–1100 level |
+| Depth | 22 | Catches all tactical errors at beginner-to-intermediate levels |
 | Threads | 6 | Leaves 2 cores free on M-series chips |
 | Hash | 512 MB | Sufficient for single-game analysis |
 | Time limit | 10s/move | Prevents hanging on complex endgame positions |
@@ -428,7 +428,7 @@ Update the `stockfish.path` in `config.yaml` to match your installation. Use `wh
 Create a `.env` file in the project root with your API keys (see [Configure API keys](#4-configure-api-keys)).
 
 **Analysis is very slow**
-Homebrew Stockfish runs at ~4.4M nodes/sec vs ~9–14M nodes/sec for a source-compiled binary. Consider compiling from source (see [Install Stockfish](#2-install-stockfish)). Each move has a 10-second time limit to prevent hanging. You can also reduce depth in `config.yaml` — depth 18 is ~3x faster with minimal loss in accuracy at the 1000–1100 rating level.
+Homebrew Stockfish runs at ~4.4M nodes/sec vs ~9–14M nodes/sec for a source-compiled binary. Consider compiling from source (see [Install Stockfish](#2-install-stockfish)). Each move has a 10-second time limit to prevent hanging. You can also reduce depth in `config.yaml` — depth 18 is ~3x faster with minimal loss in accuracy for beginner-to-intermediate players.
 
 **OpenAI 429 rate limit errors**
 Your API tier has a tokens-per-minute cap (e.g. 10,000 TPM on free tier). Use `--limit 5` to batch and allow the 10-second delay between calls. Upgrading your OpenAI plan raises the limit. Alternatively, use `--provider claude`.

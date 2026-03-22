@@ -22,7 +22,8 @@ pattern tracking over time. Inspired by Eleanor, Evan, and Estella.
 ## Analysis Standards
 - Win probability: Lichess formula → win% = 50 + 50 × (2 / (1 + exp(-0.00368208 × cp)) - 1)
 - Move classifications: excellent (<30cp loss), good (<50), inaccuracy (<100), mistake (<300), blunder (300+)
-- Coaching output has two tones: child-facing (age 9, concrete, encouraging) and coach-facing (technical, actionable)
+- Coaching output has two tones: child-facing (age-appropriate, concrete, encouraging) and coach-facing (technical, actionable)
+- Player age and rating are read dynamically from the database — coaching tone adapts per player
 
 ## Project Structure
 ```
