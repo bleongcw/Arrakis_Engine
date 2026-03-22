@@ -339,7 +339,8 @@ The dashboard is a live web app served by a built-in Python HTTP server. It quer
 
 **Features:**
 - **Player selector** — toggle between configured players
-- **Games list** — filterable by result, time control, and date range
+- **Games list** — filterable by result, time control, coaching status (✅ Coached / ⏳ Pending / ❌ Error), and date range
+- **Status columns** — separate Analysis and Coaching status icons per game for at-a-glance pipeline progress
 - **Game analysis** — interactive chessboard with proper piece SVGs (lichess cburnett set), move-by-move eval chart, color-coded move list, full coaching narrative
 - **Coaching model badge** — shows which LLM model generated the coaching (🟣 Claude / 🟢 OpenAI)
 - **Patterns dashboard** — stat cards, ACPL trend line chart, opening performance table, move quality donut chart, phase analysis bar chart
