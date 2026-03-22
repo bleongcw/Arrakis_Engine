@@ -178,7 +178,7 @@
       <input type="date" id="filterDateTo" placeholder="To">
     </div>
     <table class="game-table">
-      <thead><tr><th>#</th><th>Date</th><th>Color</th><th>Rating</th><th>Opp</th><th>Result</th><th>Time</th><th>Analysis</th><th>Coaching</th></tr></thead>
+      <thead><tr><th>#</th><th>Date</th><th>Color</th><th>Player</th><th>Opponent</th><th>Result</th><th>Time</th><th>Analysis</th><th>Coaching</th></tr></thead>
       <tbody id="gameList"></tbody>
     </table>
   </div>
@@ -194,6 +194,7 @@
       </div>
       <span id="coachingStatus" style="font-size:13px;color:var(--text-dim);"></span>
     </div>
+    <div id="matchupBar" style="display:flex;align-items:center;justify-content:center;gap:16px;padding:12px 20px;margin-bottom:12px;background:var(--surface);border-radius:8px;border:1px solid var(--border);font-size:15px;"></div>
     <div class="game-detail">
       <div class="board-container">
         <div id="board" style="width: 400px;"></div>
@@ -421,12 +422,14 @@ function renderGameList() {
     const resultClass = 'result-' + g.result;
     const analysisIcon = g.analysis_status === 'complete' ? '✅' : g.analysis_status === 'analyzing' ? '🔄' : g.analysis_status === 'error' ? '❌' : '⏳';
     const coachIcon = g.coaching_status === 'complete' ? '✅' : g.coaching_status === 'error' ? '❌' : '⏳';
+    const colorIcon = g.player_color === 'white' ? '♔' : '♚';
+    const oppName = g.opponent_username || '?';
     return `<tr onclick="loadGame(${g.id})">
       <td style="color:var(--text-dim);font-size:12px;">${idx + 1}</td>
       <td>${g.date_played || '\u2014'}</td>
-      <td>${g.player_color}</td>
-      <td>${g.player_rating || '?'}</td>
-      <td>${g.opponent_rating || '?'}</td>
+      <td>${colorIcon}</td>
+      <td>${g.display_name || g.username} (${g.player_rating || '?'})</td>
+      <td>${oppName} (${g.opponent_rating || '?'})</td>
       <td class="${resultClass}">${g.result.toUpperCase()}</td>
       <td>${g.time_class || '?'}</td>
       <td style="text-align:center" title="${g.analysis_status}">${analysisIcon}</td>
@@ -561,6 +564,24 @@ function renderGameDetail(detail) {
     tierBadge.style.color = '#fff';
     tierBadge.title = game.tier_description || '';
   }
+
+  // Matchup bar
+  const matchup = document.getElementById('matchupBar');
+  const playerName = game.display_name || game.username || 'Player';
+  const oppName = game.opponent_username || '?';
+  const isWhite = game.player_color === 'white';
+  const whiteName = isWhite ? playerName : oppName;
+  const whiteRating = isWhite ? (game.player_rating || '?') : (game.opponent_rating || '?');
+  const blackName = isWhite ? oppName : playerName;
+  const blackRating = isWhite ? (game.opponent_rating || '?') : (game.player_rating || '?');
+  const resultText = game.result === 'win' ? (isWhite ? '1-0' : '0-1') : game.result === 'loss' ? (isWhite ? '0-1' : '1-0') : '½-½';
+  const resultColor = game.result === 'win' ? 'var(--green)' : game.result === 'loss' ? 'var(--red)' : 'var(--yellow)';
+  matchup.innerHTML = `
+    <span style="font-weight:600;">♔ ${whiteName} <span style="color:var(--text-dim);">(${whiteRating})</span></span>
+    <span style="font-size:18px;color:${resultColor};font-weight:700;">${resultText}</span>
+    <span style="font-weight:600;">♚ ${blackName} <span style="color:var(--text-dim);">(${blackRating})</span></span>
+    <span style="color:var(--text-dim);font-size:12px;margin-left:8px;">${game.time_class || ''} · ${game.date_played || ''}</span>
+  `;
 
   // Setup chess.js and board
   chess = new Chess();

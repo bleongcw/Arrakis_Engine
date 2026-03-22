@@ -1,6 +1,7 @@
 """SQLite schema and data models for ArrakisEngine."""
 
 import os
+import re
 import sqlite3
 from pathlib import Path
 
@@ -35,6 +36,36 @@ def init_db(db_path: str | None = None) -> sqlite3.Connection:
     return conn
 
 
+def extract_opponent_from_pgn(pgn: str, player_color: str) -> str | None:
+    """Extract opponent username from PGN headers.
+
+    If player is black, opponent is the [White] header, and vice versa.
+    """
+    if player_color == "black":
+        match = re.search(r'\[White\s+"([^"]+)"\]', pgn)
+    else:
+        match = re.search(r'\[Black\s+"([^"]+)"\]', pgn)
+    return match.group(1) if match else None
+
+
+def _backfill_opponent_usernames(conn: sqlite3.Connection):
+    """Backfill opponent_username from PGN headers for existing games."""
+    rows = conn.execute(
+        "SELECT id, pgn, player_color FROM games WHERE opponent_username IS NULL"
+    ).fetchall()
+    updated = 0
+    for row in rows:
+        opponent = extract_opponent_from_pgn(row["pgn"], row["player_color"])
+        if opponent:
+            conn.execute(
+                "UPDATE games SET opponent_username = ? WHERE id = ?",
+                (opponent, row["id"]),
+            )
+            updated += 1
+    if updated:
+        conn.commit()
+
+
 def _migrate(conn: sqlite3.Connection):
     """Add columns that may not exist in older databases."""
     cols = {r[1] for r in conn.execute("PRAGMA table_info(game_coaching)").fetchall()}
@@ -44,6 +75,13 @@ def _migrate(conn: sqlite3.Connection):
     if "player_feedback" not in cols:
         conn.execute("ALTER TABLE game_coaching ADD COLUMN player_feedback TEXT")
         conn.commit()
+
+    game_cols = {r[1] for r in conn.execute("PRAGMA table_info(games)").fetchall()}
+    if "opponent_username" not in game_cols:
+        conn.execute("ALTER TABLE games ADD COLUMN opponent_username TEXT")
+        conn.commit()
+        # Backfill from PGN headers
+        _backfill_opponent_usernames(conn)
 
 
 SCHEMA = """

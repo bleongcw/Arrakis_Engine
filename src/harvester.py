@@ -51,10 +51,10 @@ def fetch_games_from_archive(url: str) -> list[dict]:
     return resp.json().get("games", [])
 
 
-def determine_player_side(game: dict, username: str) -> tuple[str, int | None, int | None]:
+def determine_player_side(game: dict, username: str) -> tuple[str, int | None, int | None, str | None]:
     """Determine which color the player was and extract ratings.
 
-    Returns (color, player_rating, opponent_rating).
+    Returns (color, player_rating, opponent_rating, opponent_username).
     """
     white = game.get("white", {})
     black = game.get("black", {})
@@ -62,9 +62,9 @@ def determine_player_side(game: dict, username: str) -> tuple[str, int | None, i
     black_user = black.get("username", "").lower()
 
     if white_user == username.lower():
-        return "white", white.get("rating"), black.get("rating")
+        return "white", white.get("rating"), black.get("rating"), black.get("username")
     elif black_user == username.lower():
-        return "black", black.get("rating"), white.get("rating")
+        return "black", black.get("rating"), white.get("rating"), white.get("username")
     else:
         raise ValueError(f"Player {username} not found in game")
 
@@ -135,7 +135,7 @@ def harvest_player(username: str, db_path: str | None = None,
                 continue
 
             try:
-                color, player_rating, opponent_rating = determine_player_side(game, username)
+                color, player_rating, opponent_rating, opponent_username = determine_player_side(game, username)
                 result = determine_result(game, username)
 
                 # Extract date from game end_time or PGN
@@ -148,11 +148,13 @@ def harvest_player(username: str, db_path: str | None = None,
                 conn.execute(
                     """INSERT INTO games
                     (player_id, game_url, pgn, player_color, player_rating,
-                     opponent_rating, result, time_control, time_class, date_played)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                     opponent_rating, opponent_username, result, time_control,
+                     time_class, date_played)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (player_id, game_url, pgn_text, color, player_rating,
-                     opponent_rating, result, game.get("time_control"),
-                     game.get("time_class"), date_played),
+                     opponent_rating, opponent_username, result,
+                     game.get("time_control"), game.get("time_class"),
+                     date_played),
                 )
                 stats["new"] += 1
             except Exception as e:

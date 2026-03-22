@@ -56,19 +56,21 @@ class TestFilterRecentArchives:
 
 class TestDeterminePlayerSide:
     def test_white_player(self):
-        color, pr, opp = determine_player_side(SAMPLE_GAME, "evanleongxinyu")
+        color, pr, opp, opp_name = determine_player_side(SAMPLE_GAME, "evanleongxinyu")
         assert color == "white"
         assert pr == 1050
         assert opp == 980
+        assert opp_name == "opponent1"
 
     def test_black_player(self):
-        color, pr, opp = determine_player_side(SAMPLE_GAME, "opponent1")
+        color, pr, opp, opp_name = determine_player_side(SAMPLE_GAME, "opponent1")
         assert color == "black"
         assert pr == 980
         assert opp == 1050
+        assert opp_name == "evanleongxinyu"
 
     def test_case_insensitive(self):
-        color, _, _ = determine_player_side(SAMPLE_GAME, "EvanLeongXinYu")
+        color, _, _, _ = determine_player_side(SAMPLE_GAME, "EvanLeongXinYu")
         assert color == "white"
 
     def test_unknown_player_raises(self):
