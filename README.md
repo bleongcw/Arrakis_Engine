@@ -116,9 +116,15 @@ ARRAKIS_ANTHROPIC_API_KEY=sk-ant-your-key-here
 ARRAKIS_OPENAI_API_KEY=sk-your-key-here
 ```
 
-### 5. Update config.yaml
+### 5. Create your config.yaml
 
-Edit `config.yaml` to match your setup:
+Copy the example template and fill in your details:
+
+```bash
+cp config.yaml.example config.yaml
+```
+
+Edit `config.yaml` to match your setup (this file is gitignored — your personal config stays local):
 
 ```yaml
 players:
@@ -204,6 +210,8 @@ python main.py coach --limit 5
 # Combine provider and limit
 python main.py coach --provider openai --limit 5
 ```
+
+> **⚠️ LLM Cost Warning:** Each coaching call sends a detailed prompt (~3,000–7,000 tokens) and receives a structured response (~2,000–4,000 tokens). At current API pricing, coaching a single game costs approximately **$0.03–0.10 with Claude Opus 4.6** and **$0.02–0.08 with GPT-5.4**. For a backlog of 400+ games, this can add up to **$15–40 or more**. Start with `--limit 5` to verify quality and estimate your costs before running large batches. Monitor your API usage dashboards at [Anthropic Console](https://console.anthropic.com/) or [OpenAI Platform](https://platform.openai.com/usage).
 
 > **Rate limits:** OpenAI's `gpt-5.4` has a 10,000 TPM limit (~1 game/min on free/low tiers). Use `--limit 5` per batch to avoid 429 errors. Claude typically has higher throughput — `--limit 10-20` is safe. The dashboard shows which model was used for each game's coaching (purple badge = Claude, green badge = OpenAI).
 
@@ -367,7 +375,8 @@ The dashboard is a live web app served by a built-in Python HTTP server. It quer
 ArrakisEngine/
 ├── CLAUDE.md              # Project context for Claude Code
 ├── README.md              # This file
-├── config.yaml            # Player usernames, Stockfish settings, LLM config
+├── config.yaml.example    # Template config (copy to config.yaml)
+├── config.yaml            # Your personal config (gitignored)
 ├── requirements.txt       # Python dependencies
 ├── .env                   # API keys (gitignored)
 ├── .gitignore
