@@ -14,6 +14,7 @@ from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 
 from src.models import get_connection
+from src.tiers import get_tier
 
 logger = logging.getLogger(__name__)
 
@@ -151,7 +152,25 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         conn = self._get_conn()
         try:
             rows = conn.execute("SELECT * FROM players").fetchall()
-            return [dict_from_row(r) for r in rows]
+            players = []
+            for r in rows:
+                p = dict_from_row(r)
+                # Add tier info based on latest game rating
+                latest = conn.execute(
+                    """SELECT player_rating FROM games
+                    WHERE player_id = ? AND player_rating IS NOT NULL
+                    ORDER BY date_played DESC LIMIT 1""",
+                    (r["id"],),
+                ).fetchone()
+                rating = latest["player_rating"] if latest else r["rating"]
+                tier = get_tier(rating)
+                p["tier"] = tier.name
+                p["tier_label"] = tier.label
+                p["tier_icon"] = tier.icon
+                p["tier_description"] = tier.description
+                p["latest_rating"] = rating
+                players.append(p)
+            return players
         finally:
             conn.close()
 
@@ -200,7 +219,15 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             sql += " ORDER BY g.date_played DESC"
 
             rows = conn.execute(sql, values).fetchall()
-            return [dict_from_row(r) for r in rows]
+            games = []
+            for r in rows:
+                g = dict_from_row(r)
+                tier = get_tier(r["player_rating"])
+                g["tier"] = tier.name
+                g["tier_label"] = tier.label
+                g["tier_icon"] = tier.icon
+                games.append(g)
+            return games
         finally:
             conn.close()
 
@@ -244,8 +271,15 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 except (json.JSONDecodeError, TypeError):
                     coaching_data["opening_analysis"] = {}
 
+            game_data = dict_from_row(game)
+            tier = get_tier(game["player_rating"])
+            game_data["tier"] = tier.name
+            game_data["tier_label"] = tier.label
+            game_data["tier_icon"] = tier.icon
+            game_data["tier_description"] = tier.description
+
             return {
-                "game": dict_from_row(game),
+                "game": game_data,
                 "moves": [dict_from_row(m) for m in moves],
                 "coaching": coaching_data,
             }

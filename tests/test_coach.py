@@ -154,7 +154,7 @@ class TestCoachGame:
             "SELECT * FROM game_coaching WHERE game_id = ?",
             (game_with_analysis,),
         ).fetchone()
-        assert coaching["provider"] == "claude"
+        assert coaching["provider"].startswith("claude:")
         assert "great opening" in coaching["narrative"]
 
         game = conn.execute(

@@ -187,6 +187,7 @@
   <div class="view" id="view-detail">
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
       <button class="back-btn" onclick="showView('games')" style="margin-bottom:0;">&larr; Back to Games</button>
+      <span id="tierBadge" style="font-size:13px;padding:3px 10px;border-radius:4px;background:var(--surface2);color:var(--text);font-weight:600;"></span>
       <div id="coachButtons" style="display:flex;gap:8px;margin-left:auto;">
         <button onclick="runCoaching('claude')" class="coach-btn claude-btn" title="Coach with Claude Opus 4.6">🟣 Coach with Claude</button>
         <button onclick="runCoaching('openai')" class="coach-btn openai-btn" title="Coach with GPT-5.4">🟢 Coach with ChatGPT</button>
@@ -544,6 +545,19 @@ async function runCoaching(provider) {
 
 function renderGameDetail(detail) {
   const { game, moves, coaching } = detail;
+
+  // Tier badge
+  const tierBadge = document.getElementById('tierBadge');
+  const tierColors = {
+    beginner: '#ef4444', elementary: '#f59e0b',
+    intermediate: '#3b82f6', advanced: '#8b5cf6', expert: '#ec4899'
+  };
+  if (game.tier) {
+    tierBadge.textContent = `${game.tier_icon} ${game.tier_label} (${game.player_rating || '?'})`;
+    tierBadge.style.background = tierColors[game.tier] || 'var(--surface2)';
+    tierBadge.style.color = '#fff';
+    tierBadge.title = game.tier_description || '';
+  }
 
   // Setup chess.js and board
   chess = new Chess();

@@ -12,6 +12,7 @@ import time
 from dotenv import load_dotenv
 
 from src.models import init_db
+from src.tiers import get_tier
 
 load_dotenv()
 
@@ -21,18 +22,25 @@ logger = logging.getLogger(__name__)
 GAME_COACHING_PROMPT = """You are a professional chess coach for a {age}-year-old player named {name} (rated ~{rating}).
 Analyze this game and produce coaching insights.
 
+## Skill Tier: {tier_label} {tier_icon} ({tier_description})
+
 ## Tone Guidelines
 - Professional, succinct, and encouraging — like a warm but serious coach who respects the child's intelligence.
 - Keep language age-appropriate for a {age}-year-old: short sentences, concrete examples, no abstract theory.
+- Language level: {language_level}
 - Celebrate effort and good decisions, not just results. A loss with brave play deserves praise.
 - When pointing out mistakes, frame them as learning opportunities, never criticism.
 - Be specific — say "your knight move to f3 was smart because it protects the center" rather than "good move."
 - Keep it brief: quality over quantity. One clear point beats three vague ones.
 
+## Focus Areas for {tier_label} Players
+{focus_areas}
+
 ## Player Info
 - Name: {name}
 - Age: {age}
 - Rating: {rating}
+- Tier: {tier_label}
 - Color: {player_color}
 - Result: {result}
 
@@ -58,7 +66,7 @@ Produce a JSON response with these exact keys:
 3. "practical_focus" — One specific thing to practice, framed as a fun challenge.
    Example: "Before moving a piece, count how many enemy pieces are looking at that square."
 
-4. "critical_moments" — A JSON array of the 3-5 most important moments. Each object has:
+4. "critical_moments" — A JSON array of the {critical_moments_count} most important moments. Each object has:
    - "move_number": int
    - "side": "white" or "black"
    - "what_happened": 1-2 sentences a child can understand
@@ -214,10 +222,20 @@ def coach_game(game_id: int, provider: str = "claude",
     age = game["age"] or 9
     rating = game["player_rating"] or game["player_current_rating"] or 1000
 
+    # Get tier for adaptive coaching
+    tier = get_tier(rating)
+    focus_areas_text = "\n".join(f"- {area}" for area in tier.focus_areas)
+
     prompt = GAME_COACHING_PROMPT.format(
         name=name,
         age=age,
         rating=rating,
+        tier_label=tier.label,
+        tier_icon=tier.icon,
+        tier_description=tier.description,
+        language_level=tier.language_level,
+        focus_areas=focus_areas_text,
+        critical_moments_count=tier.critical_moments_count,
         player_color=game["player_color"],
         result=game["result"],
         pgn=game["pgn"][:3000],  # Truncate very long PGNs

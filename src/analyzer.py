@@ -15,6 +15,7 @@ import chess.engine
 import chess.pgn
 
 from src.models import get_connection, init_db
+from src.tiers import get_tier, classify_move as tier_classify_move, TierConfig
 
 logger = logging.getLogger(__name__)
 
@@ -61,11 +62,21 @@ def analyze_game(game_id: int, pgn_text: str, player_color: str,
                  stockfish_path: str, depth: int = 22,
                  threads: int = 6, hash_mb: int = 512,
                  move_time_limit: float = 10.0,
-                 db_path: str | None = None) -> dict:
+                 db_path: str | None = None,
+                 tier: TierConfig | None = None) -> dict:
     """Analyze a single game move-by-move with Stockfish.
+
+    If tier is provided, uses tier-specific depth, time limit, and
+    classification thresholds. Otherwise uses the passed-in defaults.
 
     Returns a dict with analysis stats.
     """
+    # Apply tier overrides if provided
+    if tier:
+        depth = tier.depth
+        move_time_limit = tier.time_limit
+        logger.info("  Tier: %s %s (depth=%d, time=%.0fs, blunder>%dcp)",
+                     tier.icon, tier.label, depth, move_time_limit, tier.blunder_cp)
     conn = init_db(db_path)
 
     # Mark as analyzing
@@ -152,7 +163,7 @@ def analyze_game(game_id: int, pgn_text: str, player_color: str,
             cp_loss = max(0, (eval_after_cp or 0) - (eval_before_cp or 0))
 
         swing_cp = cp_loss
-        classification = classify_move(cp_loss)
+        classification = tier_classify_move(cp_loss, tier) if tier else classify_move(cp_loss)
 
         win_prob_before = cp_to_win_prob(eval_before_cp or 0)
         win_prob_after = cp_to_win_prob(eval_after_cp or 0)
@@ -233,14 +244,23 @@ def analyze_pending(stockfish_path: str, depth: int = 22,
         logger.info("Reset %d interrupted games back to pending", stuck)
 
     pending = conn.execute(
-        "SELECT id, pgn, player_color FROM games WHERE analysis_status = 'pending'"
+        """SELECT g.id, g.pgn, g.player_color, g.player_id, g.player_rating,
+                  p.rating as profile_rating
+           FROM games g
+           JOIN players p ON g.player_id = p.id
+           WHERE g.analysis_status = 'pending'"""
     ).fetchall()
     conn.close()
 
     logger.info("Found %d games pending analysis", len(pending))
 
     for i, row in enumerate(pending):
-        logger.info("Analyzing game %d/%d (id=%d)", i + 1, len(pending), row["id"])
+        # Determine tier from the game's player rating
+        game_rating = row["player_rating"] or row["profile_rating"]
+        game_tier = get_tier(game_rating)
+        logger.info("Analyzing game %d/%d (id=%d) — %s %s (rating %s)",
+                     i + 1, len(pending), row["id"],
+                     game_tier.icon, game_tier.label, game_rating or "unknown")
         try:
             analyze_game(
                 game_id=row["id"],
@@ -252,6 +272,7 @@ def analyze_pending(stockfish_path: str, depth: int = 22,
                 hash_mb=hash_mb,
                 move_time_limit=move_time_limit,
                 db_path=db_path,
+                tier=game_tier,
             )
         except Exception as e:
             logger.error("Failed to analyze game %d: %s", row["id"], e)
