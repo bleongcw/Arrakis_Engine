@@ -2,6 +2,7 @@ data/
 reports/
 venv/
 .env
+config.yaml
 __pycache__/
 *.pyc
 *.db

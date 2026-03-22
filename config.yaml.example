@@ -1,0 +1,36 @@
+# ArrakisEngine Configuration
+# Copy this file to config.yaml and fill in your details:
+#   cp config.yaml.example config.yaml
+
+players:
+  - username: your_chess_com_username
+    display_name: Player 1
+    age: null
+    rating: null
+  - username: another_username
+    display_name: Player 2
+    age: null
+    rating: null
+
+stockfish:
+  path: /opt/homebrew/bin/stockfish
+  depth: 22
+  threads: 6
+  hash_mb: 512
+  move_time_limit: 10.0  # max seconds per move (prevents hangs on complex positions)
+
+analysis:
+  months_lookback: 6
+  time_classes:
+    - rapid
+    - blitz
+    - bullet
+    - daily
+
+coaching:
+  default_provider: claude
+  anthropic_model: claude-opus-4-6
+  openai_model: gpt-5.4
+
+database:
+  path: data/chess_coach.db
