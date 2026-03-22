@@ -128,27 +128,39 @@ def _compute_results(games: list[dict]) -> dict:
     }
 
 
-def _compute_opening_stats(games: list[dict]) -> list[dict]:
-    """Win rate by opening name."""
-    openings = defaultdict(lambda: {"games": 0, "wins": 0, "losses": 0, "draws": 0})
-    for g in games:
-        name = _get_opening_name(g["pgn"])
-        openings[name]["games"] += 1
-        if g["result"] == "win":
-            openings[name]["wins"] += 1
-        elif g["result"] == "loss":
-            openings[name]["losses"] += 1
-        else:
-            openings[name]["draws"] += 1
+def _compute_opening_stats(games: list[dict]) -> dict:
+    """Win rate by opening name, split by color.
 
-    result = []
-    for name, data in sorted(openings.items(), key=lambda x: x[1]["games"], reverse=True):
-        if data["games"] >= 2:  # Only show openings played 2+ times
-            data["name"] = name
-            data["win_rate"] = round(data["wins"] / data["games"] * 100, 1)
-            result.append(data)
+    Returns {"all": [...], "white": [...], "black": [...]}.
+    """
+    def _aggregate(game_list):
+        openings = defaultdict(lambda: {"games": 0, "wins": 0, "losses": 0, "draws": 0})
+        for g in game_list:
+            name = _get_opening_name(g["pgn"])
+            openings[name]["games"] += 1
+            if g["result"] == "win":
+                openings[name]["wins"] += 1
+            elif g["result"] == "loss":
+                openings[name]["losses"] += 1
+            else:
+                openings[name]["draws"] += 1
 
-    return result[:20]  # Top 20
+        result = []
+        for name, data in sorted(openings.items(), key=lambda x: x[1]["games"], reverse=True):
+            if data["games"] >= 2:
+                data["name"] = name
+                data["win_rate"] = round(data["wins"] / data["games"] * 100, 1)
+                result.append(data)
+        return result[:20]
+
+    white_games = [g for g in games if g["player_color"] == "white"]
+    black_games = [g for g in games if g["player_color"] == "black"]
+
+    return {
+        "all": _aggregate(games),
+        "white": _aggregate(white_games),
+        "black": _aggregate(black_games),
+    }
 
 
 def _compute_acpl_trend(games: list[dict],

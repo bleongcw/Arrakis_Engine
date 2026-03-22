@@ -118,6 +118,8 @@
   .chart-container { height: 300px; margin-top: 16px; }
   .opening-table { width: 100%; margin-top: 12px; }
   .opening-table th, .opening-table td { padding: 8px; text-align: left; border-bottom: 1px solid var(--surface2); font-size: 13px; }
+  .opening-tab { padding: 6px 14px; border: 1px solid var(--surface2); border-radius: 6px; background: transparent; color: var(--text-dim); cursor: pointer; font-size: 13px; }
+  .opening-tab.active { background: var(--accent); color: #fff; border-color: var(--accent); }
 
   .back-btn { padding: 8px 16px; border: 1px solid var(--surface2); border-radius: 6px; background: var(--surface); color: var(--text); cursor: pointer; margin-bottom: 16px; }
   .coach-btn { padding: 8px 16px; border: none; border-radius: 6px; color: #fff; cursor: pointer; font-size: 13px; font-weight: 600; transition: opacity 0.2s; }
@@ -257,6 +259,11 @@
     </div>
     <div class="panel" style="margin-top: 16px;">
       <h3>Opening Performance</h3>
+      <div class="opening-tabs" style="display:flex;gap:4px;margin-bottom:12px;">
+        <button class="opening-tab active" data-color="all" onclick="switchOpeningTab('all')">All</button>
+        <button class="opening-tab" data-color="white" onclick="switchOpeningTab('white')">♔ White</button>
+        <button class="opening-tab" data-color="black" onclick="switchOpeningTab('black')">♚ Black</button>
+      </div>
       <table class="opening-table">
         <thead><tr><th>Opening</th><th>Games</th><th>Wins</th><th>Losses</th><th>Win%</th></tr></thead>
         <tbody id="openingTable"></tbody>
@@ -286,6 +293,7 @@ let allGames = [];
 let allPlayers = [];
 let currentPlayer = null;
 let currentGame = null;
+let currentOpenings = { all: [], white: [], black: [] };
 let board = null;
 let chess = null;
 let gameMoves = [];
@@ -773,6 +781,19 @@ document.addEventListener('keydown', e => {
   else if (e.key === 'End') goToEnd();
 });
 
+function switchOpeningTab(color) {
+  document.querySelectorAll('.opening-tab').forEach(t => t.classList.toggle('active', t.dataset.color === color));
+  const tbody = document.getElementById('openingTable');
+  const data = currentOpenings[color] || [];
+  if (data.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" style="color:var(--text-dim);text-align:center;">No openings with 2+ games</td></tr>';
+  } else {
+    tbody.innerHTML = data.map(o =>
+      `<tr><td>${o.name}</td><td>${o.games}</td><td>${o.wins}</td><td>${o.losses}</td><td>${o.win_rate}%</td></tr>`
+    ).join('');
+  }
+}
+
 // ── Patterns ─────────────────────────────────────────────────────
 async function renderPatterns() {
   if (!currentPlayer) return;
@@ -838,12 +859,15 @@ async function renderPatterns() {
       });
     }
 
-    // Opening table
-    const tbody = document.getElementById('openingTable');
+    // Opening table (split by color)
     if (s.openings) {
-      tbody.innerHTML = s.openings.map(o =>
-        `<tr><td>${o.name}</td><td>${o.games}</td><td>${o.wins}</td><td>${o.losses}</td><td>${o.win_rate}%</td></tr>`
-      ).join('');
+      // Support both old format (array) and new format ({all, white, black})
+      if (Array.isArray(s.openings)) {
+        currentOpenings = { all: s.openings, white: [], black: [] };
+      } else {
+        currentOpenings = s.openings;
+      }
+      switchOpeningTab('all');
     }
 
     // Move quality donut
