@@ -39,6 +39,64 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         else:
             super().do_GET()
 
+    def do_POST(self):
+        parsed = urlparse(self.path)
+        path = parsed.path
+
+        if path == "/api/coach":
+            content_length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(content_length)) if content_length else {}
+            self._handle_coach(body)
+        else:
+            self._send_json({"error": "Not found"}, 404)
+
+    def _handle_coach(self, body):
+        """Trigger coaching for a single game via the dashboard."""
+        import threading
+        from src.coach import coach_game
+
+        game_id = body.get("game_id")
+        provider = body.get("provider", "claude")
+        model = body.get("model")
+
+        if not game_id:
+            self._send_json({"error": "game_id required"}, 400)
+            return
+
+        # Check game exists and is analyzed
+        conn = self._get_conn()
+        try:
+            game = conn.execute(
+                "SELECT analysis_status, coaching_status FROM games WHERE id = ?",
+                (game_id,),
+            ).fetchone()
+            if not game:
+                self._send_json({"error": "Game not found"}, 404)
+                return
+            if game["analysis_status"] != "complete":
+                self._send_json({"error": "Game not yet analyzed"}, 400)
+                return
+        finally:
+            conn.close()
+
+        # Run coaching in a background thread so the request doesn't block
+        def run_coach():
+            try:
+                coach_game(game_id, provider=provider, model=model, db_path=self.db_path)
+                logger.info("Dashboard coaching complete for game %d (%s)", game_id, provider)
+            except Exception as e:
+                logger.error("Dashboard coaching failed for game %d: %s", game_id, e)
+
+        thread = threading.Thread(target=run_coach, daemon=True)
+        thread.start()
+
+        self._send_json({
+            "status": "started",
+            "game_id": game_id,
+            "provider": provider,
+            "message": f"Coaching started for game {game_id} with {provider}. Refresh in ~30s to see results."
+        })
+
     def _handle_api(self, path, params):
         """Route API requests to handler functions."""
         try:

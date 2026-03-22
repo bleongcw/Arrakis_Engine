@@ -104,6 +104,11 @@
   .opening-table th, .opening-table td { padding: 8px; text-align: left; border-bottom: 1px solid var(--surface2); font-size: 13px; }
 
   .back-btn { padding: 8px 16px; border: 1px solid var(--surface2); border-radius: 6px; background: var(--surface); color: var(--text); cursor: pointer; margin-bottom: 16px; }
+  .coach-btn { padding: 8px 16px; border: none; border-radius: 6px; color: #fff; cursor: pointer; font-size: 13px; font-weight: 600; transition: opacity 0.2s; }
+  .coach-btn:hover { opacity: 0.85; }
+  .coach-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .claude-btn { background: #7c3aed; }
+  .openai-btn { background: #059669; }
 
   .loading { text-align: center; padding: 60px; color: var(--text-dim); }
 
@@ -149,7 +154,14 @@
 
   <!-- Game Detail -->
   <div class="view" id="view-detail">
-    <button class="back-btn" onclick="showView('games')">&larr; Back to Games</button>
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
+      <button class="back-btn" onclick="showView('games')" style="margin-bottom:0;">&larr; Back to Games</button>
+      <div id="coachButtons" style="display:flex;gap:8px;margin-left:auto;">
+        <button onclick="runCoaching('claude')" class="coach-btn claude-btn" title="Coach with Claude Opus 4.6">🟣 Coach with Claude</button>
+        <button onclick="runCoaching('openai')" class="coach-btn openai-btn" title="Coach with GPT-5.4">🟢 Coach with ChatGPT</button>
+      </div>
+      <span id="coachingStatus" style="font-size:13px;color:var(--text-dim);"></span>
+    </div>
     <div class="game-detail">
       <div class="board-container">
         <div id="board" style="width: 400px;"></div>
@@ -403,7 +415,10 @@ document.querySelectorAll('.filters select, .filters input').forEach(el => {
 });
 
 // ── Game Detail ──────────────────────────────────────────────────
+let currentGameId = null;
+
 async function loadGame(gameId) {
+  currentGameId = gameId;
   try {
     const detail = await fetch(API + '/games/' + gameId).then(r => r.json());
     if (detail.error) {
@@ -415,6 +430,69 @@ async function loadGame(gameId) {
     showView('detail');
   } catch (e) {
     alert('Could not load game detail. Has this game been analyzed?');
+  }
+}
+
+async function runCoaching(provider) {
+  if (!currentGameId) return;
+
+  const statusEl = document.getElementById('coachingStatus');
+  const buttons = document.querySelectorAll('.coach-btn');
+  const providerName = provider === 'claude' ? 'Claude Opus 4.6' : 'GPT-5.4';
+
+  // Disable buttons
+  buttons.forEach(b => b.disabled = true);
+  statusEl.textContent = `⏳ Coaching with ${providerName}...`;
+  statusEl.style.color = 'var(--yellow)';
+
+  try {
+    const res = await fetch(API + '/coach', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ game_id: currentGameId, provider: provider }),
+    });
+    const data = await res.json();
+
+    if (data.error) {
+      statusEl.textContent = `❌ ${data.error}`;
+      statusEl.style.color = 'var(--red)';
+      buttons.forEach(b => b.disabled = false);
+      return;
+    }
+
+    statusEl.textContent = `⏳ ${providerName} is thinking... (auto-refreshes in 30s)`;
+
+    // Poll for completion every 10s, up to 2 minutes
+    let attempts = 0;
+    const poll = setInterval(async () => {
+      attempts++;
+      try {
+        const detail = await fetch(API + '/games/' + currentGameId).then(r => r.json());
+        if (detail.coaching && detail.coaching.narrative) {
+          clearInterval(poll);
+          currentGame = detail;
+          renderGameDetail(detail);
+          statusEl.textContent = `✅ Coaching complete!`;
+          statusEl.style.color = 'var(--green)';
+          buttons.forEach(b => b.disabled = false);
+          // Also refresh game list
+          await fetchGames();
+          renderGameList();
+        } else if (attempts >= 12) {
+          clearInterval(poll);
+          statusEl.textContent = `⚠️ Taking longer than expected. Refresh manually.`;
+          statusEl.style.color = 'var(--yellow)';
+          buttons.forEach(b => b.disabled = false);
+        } else {
+          statusEl.textContent = `⏳ ${providerName} is thinking... (${attempts * 10}s)`;
+        }
+      } catch (e) { /* ignore polling errors */ }
+    }, 10000);
+
+  } catch (e) {
+    statusEl.textContent = `❌ Failed: ${e.message}`;
+    statusEl.style.color = 'var(--red)';
+    buttons.forEach(b => b.disabled = false);
   }
 }
 
