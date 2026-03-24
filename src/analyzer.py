@@ -42,17 +42,30 @@ def classify_move(cp_loss: int) -> str:
         return "blunder"
 
 
+EVAL_CAP = 1000  # Cap evaluations at ±1000cp (industry standard: Lichess, Chess.com)
+
+
+def cap_eval(cp: int) -> int:
+    """Cap a centipawn evaluation at ±EVAL_CAP.
+
+    Positions beyond ±10 pawns are effectively won/lost regardless of
+    exact value. Capping prevents mate scores and extreme evals from
+    distorting ACPL calculations.
+    """
+    return max(-EVAL_CAP, min(EVAL_CAP, cp))
+
+
 def score_to_cp(score: chess.engine.PovScore, side: chess.Color) -> int | None:
     """Convert a PovScore to centipawns from white's perspective.
 
-    Mate scores are converted to large centipawn values.
+    Mate scores are mapped to ±1000cp (the eval cap).
     """
     pov = score.white()
     if pov.is_mate():
         mate_in = pov.mate()
         if mate_in is not None:
             # Positive mate = white winning, negative = black winning
-            return 30000 - abs(mate_in) * 10 if mate_in > 0 else -30000 + abs(mate_in) * 10
+            return EVAL_CAP if mate_in > 0 else -EVAL_CAP
         return 0
     cp = pov.score()
     return cp if cp is not None else 0
@@ -115,6 +128,7 @@ def analyze_game(game_id: int, pgn_text: str, player_color: str,
     prev_cp = score_to_cp(info["score"], board.turn)
 
     stats = {"moves": 0, "blunders": 0, "mistakes": 0, "inaccuracies": 0}
+    player_cp_losses = []  # Track player's capped cp losses for ACPL
 
     for i, move in enumerate(moves):
         move_number = (i // 2) + 1
@@ -153,14 +167,19 @@ def analyze_game(game_id: int, pgn_text: str, player_color: str,
 
         eval_after_cp = current_cp
 
+        # Cap evaluations at ±1000cp BEFORE computing loss (Lichess/Chess.com standard).
+        # This prevents mate scores and extreme positions from distorting ACPL.
+        capped_before = cap_eval(eval_before_cp or 0)
+        capped_after = cap_eval(eval_after_cp or 0)
+
         # Calculate centipawn loss from the moving side's perspective
         if side == "white":
             # White wants positive eval. Loss = before - after (from white POV)
-            cp_loss = max(0, (eval_before_cp or 0) - (eval_after_cp or 0))
+            cp_loss = max(0, capped_before - capped_after)
         else:
             # Black wants negative eval. Loss = after - before (from white POV)
             # i.e., if eval goes from -100 to +50, black lost 150cp
-            cp_loss = max(0, (eval_after_cp or 0) - (eval_before_cp or 0))
+            cp_loss = max(0, capped_after - capped_before)
 
         swing_cp = cp_loss
         classification = tier_classify_move(cp_loss, tier) if tier else classify_move(cp_loss)
@@ -185,6 +204,8 @@ def analyze_game(game_id: int, pgn_text: str, player_color: str,
         )
 
         stats["moves"] += 1
+        if side == player_color:
+            player_cp_losses.append(cp_loss)
         if classification == "blunder":
             stats["blunders"] += 1
         elif classification == "mistake":
@@ -206,19 +227,22 @@ def analyze_game(game_id: int, pgn_text: str, player_color: str,
 
     engine.quit()
 
-    # Mark as complete
+    # Compute per-game ACPL (capped, player's side only)
+    game_acpl = round(sum(player_cp_losses) / len(player_cp_losses), 1) if player_cp_losses else 0
+
+    # Mark as complete and store ACPL
     conn.execute(
-        "UPDATE games SET analysis_status = 'complete' WHERE id = ?",
-        (game_id,),
+        "UPDATE games SET analysis_status = 'complete', acpl = ? WHERE id = ?",
+        (game_acpl, game_id),
     )
     conn.commit()
 
     elapsed = time.time() - start_time
     logger.info(
         "Game %d analysis complete: %d moves in %.1fs (%.1f moves/sec). "
-        "Blunders: %d, Mistakes: %d, Inaccuracies: %d",
+        "ACPL: %.1f, Blunders: %d, Mistakes: %d, Inaccuracies: %d",
         game_id, stats["moves"], elapsed, stats["moves"] / elapsed if elapsed > 0 else 0,
-        stats["blunders"], stats["mistakes"], stats["inaccuracies"],
+        game_acpl, stats["blunders"], stats["mistakes"], stats["inaccuracies"],
     )
 
     conn.close()

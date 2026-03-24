@@ -165,38 +165,65 @@ def _compute_opening_stats(games: list[dict]) -> dict:
 
 def _compute_acpl_trend(games: list[dict],
                         moves_by_game: dict[int, list[dict]]) -> list[dict]:
-    """ACPL (average centipawn loss) trend in weekly buckets."""
-    weekly = defaultdict(lambda: {"total_cp_loss": 0, "total_moves": 0, "games": 0})
+    """ACPL trend using per-game stored ACPL (±1000cp capped).
+
+    Uses the pre-computed ACPL stored on each game (backfilled with
+    capped evaluations). Falls back to computing from moves if ACPL
+    is not yet stored.
+
+    Returns weekly buckets with average ACPL and individual game data points.
+    """
+    EVAL_CAP = 1000
+    weekly = defaultdict(lambda: {"acpl_sum": 0, "games": 0, "game_points": []})
 
     for g in games:
         if not g["date_played"]:
             continue
-        # Week bucket
         try:
             date = datetime.strptime(g["date_played"], "%Y-%m-%d")
         except ValueError:
             continue
         week_start = (date - timedelta(days=date.weekday())).strftime("%Y-%m-%d")
 
-        player_moves = [
-            m for m in moves_by_game.get(g["id"], [])
-            if m["side"] == g["player_color"]
-        ]
-        if not player_moves:
-            continue
+        game_acpl = g.get("acpl")
 
-        total_loss = sum(m["swing_cp"] or 0 for m in player_moves)
-        weekly[week_start]["total_cp_loss"] += total_loss
-        weekly[week_start]["total_moves"] += len(player_moves)
-        weekly[week_start]["games"] += 1
+        # Fallback: compute from moves with cap if not stored
+        if game_acpl is None:
+            player_moves = [
+                m for m in moves_by_game.get(g["id"], [])
+                if m["side"] == g["player_color"]
+            ]
+            if not player_moves:
+                continue
+            losses = []
+            for m in player_moves:
+                before = m.get("eval_before_cp") or 0
+                after = m.get("eval_after_cp") or 0
+                cb = max(-EVAL_CAP, min(EVAL_CAP, before))
+                ca = max(-EVAL_CAP, min(EVAL_CAP, after))
+                if m["side"] == "white":
+                    losses.append(max(0, cb - ca))
+                else:
+                    losses.append(max(0, ca - cb))
+            game_acpl = round(sum(losses) / len(losses), 1) if losses else None
+
+        if game_acpl is not None:
+            weekly[week_start]["acpl_sum"] += game_acpl
+            weekly[week_start]["games"] += 1
+            weekly[week_start]["game_points"].append({
+                "date": g["date_played"],
+                "acpl": game_acpl,
+                "result": g["result"],
+            })
 
     trend = []
     for week, data in sorted(weekly.items()):
-        if data["total_moves"] > 0:
+        if data["games"] > 0:
             trend.append({
                 "week": week,
-                "acpl": round(data["total_cp_loss"] / data["total_moves"], 1),
+                "acpl": round(data["acpl_sum"] / data["games"], 1),
                 "games": data["games"],
+                "game_points": data["game_points"],
             })
 
     return trend
@@ -211,6 +238,7 @@ def _compute_phase_analysis(games: list[dict],
         "endgame": {"moves": 0, "blunders": 0, "mistakes": 0, "inaccuracies": 0, "cp_loss": 0},
     }
 
+    EVAL_CAP = 1000
     for g in games:
         player_moves = [
             m for m in moves_by_game.get(g["id"], [])
@@ -219,7 +247,14 @@ def _compute_phase_analysis(games: list[dict],
         for m in player_moves:
             phase = _classify_game_phase(m["move_number"])
             phases[phase]["moves"] += 1
-            phases[phase]["cp_loss"] += m["swing_cp"] or 0
+            # Use capped cp_loss for phase ACPL
+            before = max(-EVAL_CAP, min(EVAL_CAP, m.get("eval_before_cp") or 0))
+            after = max(-EVAL_CAP, min(EVAL_CAP, m.get("eval_after_cp") or 0))
+            if m["side"] == "white":
+                capped_loss = max(0, before - after)
+            else:
+                capped_loss = max(0, after - before)
+            phases[phase]["cp_loss"] += capped_loss
             if m["classification"] == "blunder":
                 phases[phase]["blunders"] += 1
             elif m["classification"] == "mistake":

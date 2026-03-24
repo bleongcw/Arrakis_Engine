@@ -66,6 +66,61 @@ def _backfill_opponent_usernames(conn: sqlite3.Connection):
         conn.commit()
 
 
+def _backfill_acpl(conn: sqlite3.Connection):
+    """Backfill per-game ACPL from existing move_analysis data.
+
+    Applies ±1000cp cap to stored evals before computing loss,
+    matching the Lichess/Chess.com standard. Only considers moves
+    from the player's side.
+    """
+    EVAL_CAP = 1000
+
+    games = conn.execute(
+        """SELECT g.id, g.player_color FROM games g
+        WHERE g.analysis_status = 'complete' AND g.acpl IS NULL"""
+    ).fetchall()
+
+    if not games:
+        return
+
+    updated = 0
+    for game in games:
+        moves = conn.execute(
+            """SELECT eval_before_cp, eval_after_cp, side FROM move_analysis
+            WHERE game_id = ? ORDER BY move_number""",
+            (game["id"],),
+        ).fetchall()
+
+        player_losses = []
+        for m in moves:
+            if m["side"] != game["player_color"]:
+                continue
+            before = m["eval_before_cp"]
+            after = m["eval_after_cp"]
+            if before is None or after is None:
+                continue
+
+            # Cap evals at ±1000 BEFORE computing difference
+            capped_before = max(-EVAL_CAP, min(EVAL_CAP, before))
+            capped_after = max(-EVAL_CAP, min(EVAL_CAP, after))
+
+            if m["side"] == "white":
+                loss = max(0, capped_before - capped_after)
+            else:
+                loss = max(0, capped_after - capped_before)
+
+            player_losses.append(loss)
+
+        if player_losses:
+            acpl = round(sum(player_losses) / len(player_losses), 1)
+            conn.execute("UPDATE games SET acpl = ? WHERE id = ?", (acpl, game["id"]))
+            updated += 1
+
+    if updated:
+        conn.commit()
+        print(f"  Backfilled ACPL for {updated} games (±1000cp capped)")
+
+
 def _migrate(conn: sqlite3.Connection):
     """Add columns that may not exist in older databases."""
     cols = {r[1] for r in conn.execute("PRAGMA table_info(game_coaching)").fetchall()}
@@ -85,6 +140,12 @@ def _migrate(conn: sqlite3.Connection):
     if "platform" not in game_cols:
         conn.execute("ALTER TABLE games ADD COLUMN platform TEXT DEFAULT 'chess.com'")
         conn.commit()
+
+    if "acpl" not in game_cols:
+        conn.execute("ALTER TABLE games ADD COLUMN acpl REAL")
+        conn.commit()
+        # Backfill ACPL from existing move analysis with ±1000cp cap
+        _backfill_acpl(conn)
 
     player_cols = {r[1] for r in conn.execute("PRAGMA table_info(players)").fetchall()}
     if "fide_id" not in player_cols:

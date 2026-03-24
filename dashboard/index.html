@@ -290,8 +290,10 @@
             <strong>Average Centipawn Loss (ACPL)</strong><br><br>
             ACPL measures how much your moves deviate from the engine's best move, averaged across all moves in a game. One centipawn = 1/100th of a pawn.<br><br>
             <strong>How it's calculated:</strong><br>
-            For each move: loss = |best move eval − your move eval|<br>
-            ACPL = sum of all losses ÷ number of moves<br><br>
+            1. Evaluations capped at ±1000cp (industry standard)<br>
+            2. For each of YOUR moves: loss = capped(before) − capped(after)<br>
+            3. ACPL = sum of losses ÷ number of your moves<br>
+            4. Mate scores count as ±1000cp<br><br>
             <strong>What the numbers mean:</strong><br>
             • 10–20: Super Grandmaster level<br>
             • 20–30: Master (2200+)<br>
