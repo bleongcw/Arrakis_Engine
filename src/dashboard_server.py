@@ -167,14 +167,18 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             players = []
             for r in rows:
                 p = dict_from_row(r)
-                # Add tier info based on latest game rating
-                latest = conn.execute(
-                    """SELECT player_rating FROM games
-                    WHERE player_id = ? AND player_rating IS NOT NULL
-                    ORDER BY date_played DESC LIMIT 1""",
-                    (r["id"],),
-                ).fetchone()
-                rating = latest["player_rating"] if latest else r["rating"]
+                # Add tier info — use FIDE rating if available, else latest game rating
+                fide_rating = r["fide_rating"] if "fide_rating" in r.keys() else None
+                if fide_rating:
+                    rating = fide_rating
+                else:
+                    latest = conn.execute(
+                        """SELECT player_rating FROM games
+                        WHERE player_id = ? AND player_rating IS NOT NULL
+                        ORDER BY date_played DESC LIMIT 1""",
+                        (r["id"],),
+                    ).fetchone()
+                    rating = latest["player_rating"] if latest else r["rating"]
                 tier = get_tier(rating)
                 p["tier"] = tier.name
                 p["tier_label"] = tier.label
