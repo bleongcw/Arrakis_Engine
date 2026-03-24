@@ -330,15 +330,19 @@ python main.py dashboard
 
 ### Move Classification
 
-Each move is classified by centipawn loss (how much worse it is than the engine's best move):
+Each move is classified by centipawn loss (how much worse it is than the engine's best move). Thresholds adapt to the player's tier — stricter for advanced players, looser for beginners:
 
-| Classification | CP Loss | What it means |
-|---|---|---|
-| Excellent | 0–30 | Great move |
-| Good | 31–50 | Solid move |
-| Inaccuracy | 51–100 | Small slip — could have been better |
-| Mistake | 101–300 | Gave the opponent a real chance |
-| Blunder | 300+ | Changed who's winning |
+| Classification | Beginner (<800) | Elementary (800–1200) | Intermediate (1200–1600) | Advanced (1600+) |
+|---|---|---|---|---|
+| Excellent | < 50cp | < 30cp | < 20cp | < 15cp |
+| Good | < 100cp | < 50cp | < 40cp | < 30cp |
+| Inaccuracy | < 200cp | < 100cp | < 70cp | < 60cp |
+| Mistake | < 500cp | < 300cp | < 200cp | < 150cp |
+| Blunder | 500+ | 300+ | 200+ | 150+ |
+
+### Evaluation Capping
+
+All engine evaluations are **capped at ±1000 centipawns** before computing centipawn loss, matching the industry standard used by Lichess and Chess.com. This prevents mate scores and extreme positions from distorting ACPL calculations. Mate-in-X scores are mapped to ±1000cp.
 
 ### Win Probability
 
@@ -361,15 +365,16 @@ For each analyzed game, the LLM produces:
 | **Practical focus** | Child | One specific thing to practice |
 | **Opening analysis** | Both | Opening name, quality rating, counter-move assessment, and tip |
 | **Critical moments** | Both | 3–5 positions with what happened vs. what was better |
+| **Player feedback** | Child | Personal letter with 3 actionable tips, growth mindset framing |
 | **Coach notes** | Coach | Technical summary for lesson planning |
 
 ### Pattern Tracking
 
 Patterns are aggregated across all games per player:
 
-- **Opening performance** — win rate by opening name
-- **ACPL trend** — average centipawn loss in weekly buckets over time
-- **Phase analysis** — error frequency in opening (moves 1–15), middlegame (16–30), endgame (31+)
+- **Opening performance** — win rate by opening name, split by color (All / White / Black)
+- **ACPL trend** — per-game ACPL (±1000cp capped) averaged in weekly buckets; hover to see game count per week
+- **Phase analysis** — error frequency and ACPL in opening (moves 1–15), middlegame (16–30), endgame (31+) — all using capped evaluations
 - **Rating performance** — win rate vs. higher/lower/equal rated opponents
 - **Move quality distribution** — percentage of excellent/good/inaccuracy/mistake/blunder moves
 - **Time class stats** — win rate by rapid/blitz/bullet/daily
@@ -441,10 +446,10 @@ ArrakisEngine/
 
 | Table | Purpose |
 |---|---|
-| `players` | Player profiles (username, display name, age, rating) |
-| `games` | Game records with PGN, ratings, result, analysis/coaching status |
-| `move_analysis` | Per-move Stockfish evaluation (centipawn, win prob, classification) |
-| `game_coaching` | LLM-generated coaching output per game |
+| `players` | Player profiles (username, display name, age, rating, FIDE ID/rating) |
+| `games` | Game records with PGN, ratings, result, platform, ACPL, analysis/coaching status |
+| `move_analysis` | Per-move Stockfish evaluation (capped centipawn, win prob, classification) |
+| `game_coaching` | LLM-generated coaching output per game (narrative, feedback, opening analysis) |
 | `player_patterns` | Aggregated pattern statistics per player per period |
 
 ## Running Tests

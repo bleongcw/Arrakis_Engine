@@ -1044,9 +1044,19 @@ async function renderPatterns() {
         options: {
           responsive: true,
           maintainAspectRatio: false,
-          plugins: { legend: { display: false } },
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: function(ctx) {
+                  const t = s.acpl_trend[ctx.dataIndex];
+                  return `ACPL: ${t.acpl} (${t.games} game${t.games !== 1 ? 's' : ''})`;
+                }
+              }
+            }
+          },
           scales: {
-            y: { title: { display: true, text: 'Avg CP Loss', color: '#999' }, ticks: { color: '#999' }, grid: { color: '#333' } },
+            y: { title: { display: true, text: 'Avg CP Loss (capped ±1000)', color: '#999' }, ticks: { color: '#999' }, grid: { color: '#333' } },
             x: { ticks: { color: '#999', maxRotation: 45 }, grid: { display: false } },
           },
         },
