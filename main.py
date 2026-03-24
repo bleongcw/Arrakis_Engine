@@ -28,11 +28,13 @@ def load_config(path: str = "config.yaml") -> dict:
 
 
 def cmd_harvest(args, config):
-    """Harvest games from chess.com for all configured players."""
+    """Harvest games from chess.com and/or lichess for configured players."""
     db_path = config["database"]["path"]
     months = config["analysis"]["months_lookback"]
     conn = init_db(db_path)
     conn.close()
+
+    platform_filter = getattr(args, "platform", None)
 
     players = config["players"]
     if args.player:
@@ -40,7 +42,14 @@ def cmd_harvest(args, config):
 
     for player in players:
         username = player["username"]
-        logging.info("Harvesting games for %s...", username)
+        lichess_username = player.get("lichess_username")
+        platforms = []
+        if platform_filter is None or platform_filter == "chess.com":
+            platforms.append("chess.com")
+        if lichess_username and (platform_filter is None or platform_filter == "lichess"):
+            platforms.append("lichess")
+
+        logging.info("Harvesting games for %s from %s...", username, ", ".join(platforms))
 
         # Ensure player record exists with config data
         from src.models import ensure_player
@@ -53,7 +62,11 @@ def cmd_harvest(args, config):
         )
         conn.close()
 
-        stats = harvest_player(username, db_path=db_path, months=months)
+        stats = harvest_player(
+            username, db_path=db_path, months=months,
+            lichess_username=lichess_username,
+            platform=platform_filter,
+        )
         print(f"  {username}: {stats['new']} new games "
               f"({stats['skipped']} already stored, "
               f"{stats['errors']} errors)")
@@ -167,10 +180,14 @@ def main():
     subparsers = parser.add_subparsers(dest="command")
 
     # harvest
-    harvest_parser = subparsers.add_parser("harvest", help="Fetch games from chess.com")
+    harvest_parser = subparsers.add_parser("harvest", help="Fetch games from chess.com and/or lichess")
     harvest_parser.add_argument(
         "--player", action="append",
         help="Username(s) to harvest (default: all configured players)",
+    )
+    harvest_parser.add_argument(
+        "--platform", choices=["chess.com", "lichess"],
+        help="Harvest from a specific platform only (default: all configured)",
     )
 
     # analyze

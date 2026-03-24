@@ -3,11 +3,12 @@
 #   cp config.yaml.example config.yaml
 
 players:
-  - username: your_chess_com_username
+  - username: your_chess_com_username       # Chess.com username (required)
+    lichess_username: your_lichess_username  # Lichess username (optional)
     display_name: Player 1
     age: null
     rating: null
-  - username: another_username
+  - username: another_chess_com_username
     display_name: Player 2
     age: null
     rating: null

@@ -82,6 +82,9 @@ def _migrate(conn: sqlite3.Connection):
         conn.commit()
         # Backfill from PGN headers
         _backfill_opponent_usernames(conn)
+    if "platform" not in game_cols:
+        conn.execute("ALTER TABLE games ADD COLUMN platform TEXT DEFAULT 'chess.com'")
+        conn.commit()
 
 
 SCHEMA = """

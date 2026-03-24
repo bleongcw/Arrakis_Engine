@@ -179,11 +179,12 @@
       <select id="filterTimeClass"><option value="">All Time Controls</option></select>
       <select id="filterCoaching"><option value="">All Coaching Status</option><option value="complete">✅ Coached</option><option value="pending">⏳ Pending</option><option value="error">❌ Error</option></select>
       <select id="filterMonth"><option value="">All Months</option></select>
+      <select id="filterPlatform"><option value="">All Platforms</option><option value="chess.com">♜ Chess.com</option><option value="lichess">♞ Lichess</option></select>
       <input type="date" id="filterDateFrom" placeholder="From">
       <input type="date" id="filterDateTo" placeholder="To">
     </div>
     <table class="game-table">
-      <thead><tr><th>#</th><th>Date</th><th>Color</th><th>Player</th><th>Opponent</th><th>Result</th><th>Time</th><th>Analysis</th><th>Coaching</th></tr></thead>
+      <thead><tr><th>#</th><th>Date</th><th>Platform</th><th>Color</th><th>Player</th><th>Opponent</th><th>Result</th><th>Time</th><th>Analysis</th><th>Coaching</th></tr></thead>
       <tbody id="gameList"></tbody>
     </table>
   </div>
@@ -448,9 +449,12 @@ function renderGameList() {
     const coachIcon = g.coaching_status === 'complete' ? '✅' : g.coaching_status === 'error' ? '❌' : '⏳';
     const colorIcon = g.player_color === 'white' ? '♔' : '♚';
     const oppName = g.opponent_username || '?';
+    const platformIcon = g.platform === 'lichess' ? '♞' : '♜';
+    const platformTitle = g.platform === 'lichess' ? 'Lichess' : 'Chess.com';
     return `<tr onclick="loadGame(${g.id})">
       <td style="color:var(--text-dim);font-size:12px;">${idx + 1}</td>
       <td>${g.date_played || '\u2014'}</td>
+      <td title="${platformTitle}" style="text-align:center;">${platformIcon}</td>
       <td>${colorIcon}</td>
       <td>${g.display_name || g.username} (${g.player_rating || '?'})</td>
       <td>${oppName} (${g.opponent_rating || '?'})</td>
@@ -468,12 +472,14 @@ function getFilteredGames() {
   const tc = document.getElementById('filterTimeClass').value;
   const coaching = document.getElementById('filterCoaching').value;
   const month = document.getElementById('filterMonth').value;
+  const platform = document.getElementById('filterPlatform').value;
   const from = document.getElementById('filterDateFrom').value;
   const to = document.getElementById('filterDateTo').value;
   if (result) games = games.filter(g => g.result === result);
   if (tc) games = games.filter(g => g.time_class === tc);
   if (coaching) games = games.filter(g => g.coaching_status === coaching);
   if (month) games = games.filter(g => g.date_played && g.date_played.startsWith(month));
+  if (platform) games = games.filter(g => (g.platform || 'chess.com') === platform);
   if (from) games = games.filter(g => g.date_played >= from);
   if (to) games = games.filter(g => g.date_played <= to);
   return games;

@@ -193,7 +193,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 SELECT g.id, g.player_id, g.game_url, g.player_color,
                        g.player_rating, g.opponent_rating, g.opponent_username,
                        g.result, g.time_control, g.time_class, g.date_played,
-                       g.analysis_status, g.coaching_status,
+                       g.analysis_status, g.coaching_status, g.platform,
                        p.username, p.display_name
                 FROM games g JOIN players p ON g.player_id = p.id
             """

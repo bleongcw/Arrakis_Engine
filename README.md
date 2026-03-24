@@ -1,6 +1,6 @@
 # Arrakis Engine
 
-A local Python application that pulls chess.com games, runs deep Stockfish analysis on every move, and uses LLMs (Claude Opus 4.6 / GPT-5.4) to generate age-appropriate coaching insights. Built for tracking improvement over time with pattern detection, a live web dashboard, and exportable coach-ready reports.
+A local Python application that pulls games from **Chess.com** and **Lichess**, runs deep Stockfish analysis on every move, and uses LLMs (Claude Opus 4.6 / GPT-5.4) to generate age-appropriate coaching insights. Built for tracking improvement over time with pattern detection, a live web dashboard, and exportable coach-ready reports.
 
 Inspired by my three children — Eleanor, Evan, and Estella — and their journey learning chess.
 
@@ -128,11 +128,12 @@ Edit `config.yaml` to match your setup (this file is gitignored — your persona
 
 ```yaml
 players:
-  - username: your_chess_com_username
+  - username: your_chess_com_username       # Chess.com username (required)
+    lichess_username: your_lichess_id       # Lichess username (optional)
     display_name: Player 1
     age: null
     rating: null
-  - username: another_username
+  - username: another_chess_com_username
     display_name: Player 2
     age: null
     rating: null
@@ -163,7 +164,7 @@ database:
 
 | Command | Description |
 |---|---|
-| `python main.py harvest` | Fetch games from chess.com for all configured players |
+| `python main.py harvest` | Fetch games from Chess.com and Lichess for all configured players |
 | `python main.py analyze` | Run Stockfish analysis on all pending games |
 | `python main.py coach` | Generate LLM coaching insights (supports `--limit` and `--provider`) |
 | `python main.py patterns` | Compute cross-game pattern statistics |
@@ -177,14 +178,23 @@ database:
 **Harvest games:**
 
 ```bash
-# All configured players
+# All configured players from all platforms
 python main.py harvest
 
 # Specific player only
 python main.py harvest --player your_chess_com_username
+
+# Filter by platform
+python main.py harvest --platform chess.com
+python main.py harvest --platform lichess
+
+# Combine filters
+python main.py harvest --player your_chess_com_username --platform lichess
 ```
 
-> **Incremental by design:** The harvester deduplicates by `game_url` — it only fetches new games since your last harvest. Safe to run repeatedly without duplicating data.
+> **Multi-platform:** Games are fetched from Chess.com (via monthly archives API) and Lichess (via PGN export API). Add `lichess_username` to your player config to enable Lichess harvesting.
+>
+> **Incremental by design:** The harvester deduplicates by `game_url` — it only fetches new games since your last harvest. Safe to run repeatedly without duplicating data. The dashboard shows which platform each game came from (♜ Chess.com / ♞ Lichess).
 
 **Analyze with Stockfish:**
 
