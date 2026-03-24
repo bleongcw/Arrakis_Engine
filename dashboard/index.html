@@ -134,6 +134,17 @@
   .tooltip-icon .tooltip-content { display: none; position: absolute; left: 50%; transform: translateX(-50%); top: 24px; width: 340px; padding: 14px 16px; background: var(--surface); border: 1px solid var(--surface2); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.3); font-size: 13px; font-weight: 400; line-height: 1.6; color: var(--text); z-index: 100; text-transform: none; letter-spacing: 0; }
   .tooltip-icon:hover .tooltip-content { display: block; }
 
+  /* Platform cards */
+  .platform-card { display: block; padding: 16px; background: var(--surface); border-radius: 8px; text-decoration: none; color: var(--text); transition: transform 0.15s, box-shadow 0.15s; }
+  .platform-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
+  .platform-card.platform-disabled { cursor: default; }
+  .platform-card.platform-disabled:hover { transform: none; box-shadow: none; }
+  .platform-icon { font-size: 28px; margin-bottom: 6px; }
+  .platform-name { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); margin-bottom: 4px; }
+  .platform-rating { font-size: 28px; font-weight: 700; margin-bottom: 2px; }
+  .platform-games { font-size: 12px; color: var(--text-dim); margin-bottom: 8px; }
+  .platform-link { font-size: 12px; color: var(--accent); font-weight: 600; }
+
   .theme-toggle { padding: 6px 12px; border: 1px solid var(--surface2); border-radius: 6px; background: var(--surface); color: var(--text); cursor: pointer; font-size: 16px; line-height: 1; transition: background 0.2s; }
   .theme-toggle:hover { background: var(--surface2); }
 
@@ -167,13 +178,19 @@
 </div>
 
 <div class="nav">
-  <button class="nav-btn active" data-view="games">Games</button>
+  <button class="nav-btn active" data-view="dashboard">Dashboard</button>
+  <button class="nav-btn" data-view="games">Games</button>
   <button class="nav-btn" data-view="patterns">Patterns</button>
 </div>
 
 <div class="container">
+  <!-- Player Dashboard (default landing) -->
+  <div class="view active" id="view-dashboard">
+    <div id="playerDashboard"></div>
+  </div>
+
   <!-- Games List -->
-  <div class="view active" id="view-games">
+  <div class="view" id="view-games">
     <div class="filters">
       <select id="filterResult"><option value="">All Results</option><option value="win">Wins</option><option value="loss">Losses</option><option value="draw">Draws</option></select>
       <select id="filterTimeClass"><option value="">All Time Controls</option></select>
@@ -341,6 +358,7 @@ async function init() {
   try {
     allPlayers = await fetch(API + '/players').then(r => r.json());
     renderPlayerTabs();
+    renderPlayerDashboard();
     if (allPlayers.length > 0) await selectPlayer(allPlayers[0].username);
     startAutoRefresh();
   } catch (e) {
@@ -357,6 +375,96 @@ function renderPlayerTabs() {
   tabs.querySelectorAll('.player-tab').forEach(btn => {
     btn.onclick = () => selectPlayer(btn.dataset.username);
   });
+}
+
+function renderPlayerDashboard() {
+  const container = document.getElementById('playerDashboard');
+  if (!allPlayers.length) {
+    container.innerHTML = '<div class="loading">No players configured.</div>';
+    return;
+  }
+
+  container.innerHTML = allPlayers.map(p => {
+    const tierColors = {
+      beginner: '#ef4444', elementary: '#f59e0b',
+      intermediate: '#3b82f6', advanced: '#8b5cf6', expert: '#ec4899'
+    };
+    const tierColor = tierColors[p.tier] || '#666';
+
+    const cards = [];
+
+    // Chess.com card
+    cards.push(`
+      <a href="${p.chesscom_url}" target="_blank" rel="noopener" class="platform-card" style="border-left: 3px solid #81b64c;">
+        <div class="platform-icon">♜</div>
+        <div class="platform-name">Chess.com</div>
+        <div class="platform-rating">${p.latest_rating || p.rating || '—'}</div>
+        <div class="platform-games">${p.chesscom_games || 0} games</div>
+        <div class="platform-link">View Profile →</div>
+      </a>
+    `);
+
+    // Lichess card
+    if (p.lichess_url) {
+      cards.push(`
+        <a href="${p.lichess_url}" target="_blank" rel="noopener" class="platform-card" style="border-left: 3px solid #629924;">
+          <div class="platform-icon">♞</div>
+          <div class="platform-name">Lichess</div>
+          <div class="platform-rating">${p.lichess_games > 0 ? '—' : '—'}</div>
+          <div class="platform-games">${p.lichess_games || 0} games</div>
+          <div class="platform-link">View Profile →</div>
+        </a>
+      `);
+    } else {
+      cards.push(`
+        <div class="platform-card platform-disabled" style="border-left: 3px solid var(--surface2);">
+          <div class="platform-icon" style="opacity:0.3;">♞</div>
+          <div class="platform-name" style="opacity:0.5;">Lichess</div>
+          <div class="platform-rating" style="opacity:0.3;">—</div>
+          <div class="platform-games" style="opacity:0.3;">Not configured</div>
+        </div>
+      `);
+    }
+
+    // FIDE card
+    if (p.fide_id) {
+      cards.push(`
+        <a href="${p.fide_url}" target="_blank" rel="noopener" class="platform-card" style="border-left: 3px solid #c8a415;">
+          <div class="platform-icon">🏛</div>
+          <div class="platform-name">FIDE</div>
+          <div class="platform-rating">${p.fide_rating || '—'}</div>
+          <div class="platform-games">ID: ${p.fide_id}</div>
+          <div class="platform-link">View Profile →</div>
+        </a>
+      `);
+    } else {
+      cards.push(`
+        <div class="platform-card platform-disabled" style="border-left: 3px solid var(--surface2);">
+          <div class="platform-icon" style="opacity:0.3;">🏛</div>
+          <div class="platform-name" style="opacity:0.5;">FIDE</div>
+          <div class="platform-rating" style="opacity:0.3;">—</div>
+          <div class="platform-games" style="opacity:0.3;">Not configured</div>
+        </div>
+      `);
+    }
+
+    return `
+      <div class="panel" style="margin-bottom: 16px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+          <div>
+            <h2 style="margin:0;font-size:22px;color:var(--text);font-weight:700;">${p.display_name || p.username}</h2>
+            <span style="font-size:13px;color:var(--text-dim);">${p.age ? p.age + ' years old' : ''}</span>
+          </div>
+          <span style="font-size:14px;padding:4px 12px;border-radius:6px;background:${tierColor};color:#fff;font-weight:600;">
+            ${p.tier_icon} ${p.tier_label}
+          </span>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:12px;">
+          ${cards.join('')}
+        </div>
+      </div>
+    `;
+  }).join('');
 }
 
 async function selectPlayer(username) {

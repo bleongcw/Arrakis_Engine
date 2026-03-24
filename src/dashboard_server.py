@@ -181,6 +181,56 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 p["tier_icon"] = tier.icon
                 p["tier_description"] = tier.description
                 p["latest_rating"] = rating
+
+                # Profile URLs
+                p["chesscom_url"] = f"https://www.chess.com/member/{r['username']}"
+
+                # Lichess URL — look up from config or games
+                lichess_game = conn.execute(
+                    """SELECT game_url FROM games
+                    WHERE player_id = ? AND platform = 'lichess' LIMIT 1""",
+                    (r["id"],),
+                ).fetchone()
+                if lichess_game:
+                    # Extract lichess username from game URL
+                    p["lichess_url"] = "https://lichess.org"
+                    # We'll get the actual username from the games data
+                    lichess_pgn = conn.execute(
+                        """SELECT pgn FROM games
+                        WHERE player_id = ? AND platform = 'lichess' LIMIT 1""",
+                        (r["id"],),
+                    ).fetchone()
+                    if lichess_pgn:
+                        import re as _re
+                        w = _re.search(r'\[White\s+"([^"]+)"\]', lichess_pgn["pgn"])
+                        b = _re.search(r'\[Black\s+"([^"]+)"\]', lichess_pgn["pgn"])
+                        # Whichever isn't a known chess.com username
+                        for name_match in [w, b]:
+                            if name_match and name_match.group(1).lower() != r["username"].lower():
+                                continue
+                            if name_match:
+                                p["lichess_username"] = name_match.group(1)
+                                p["lichess_url"] = f"https://lichess.org/@/{name_match.group(1)}"
+                                break
+                else:
+                    p["lichess_url"] = None
+
+                # FIDE URL
+                if r["fide_id"]:
+                    p["fide_url"] = f"https://ratings.fide.com/profile/{r['fide_id']}"
+                else:
+                    p["fide_url"] = None
+
+                # Game counts by platform
+                p["chesscom_games"] = conn.execute(
+                    "SELECT COUNT(*) as c FROM games WHERE player_id = ? AND platform = 'chess.com'",
+                    (r["id"],),
+                ).fetchone()["c"]
+                p["lichess_games"] = conn.execute(
+                    "SELECT COUNT(*) as c FROM games WHERE player_id = ? AND platform = 'lichess'",
+                    (r["id"],),
+                ).fetchone()["c"]
+
                 players.append(p)
             return players
         finally:

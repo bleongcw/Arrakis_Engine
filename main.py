@@ -59,6 +59,8 @@ def cmd_harvest(args, config):
             display_name=player.get("display_name"),
             age=player.get("age"),
             rating=player.get("rating"),
+            fide_id=player.get("fide_id"),
+            fide_rating=player.get("fide_rating"),
         )
         conn.close()
 
@@ -146,6 +148,59 @@ def cmd_dashboard(args, config):
     run_dashboard(db_path=db_path, port=port, static_dir="dashboard")
 
 
+def cmd_fide_update(args, config):
+    """Update FIDE rating for a player."""
+    db_path = config["database"]["path"]
+    conn = init_db(db_path)
+
+    username = args.player
+    rating = args.rating
+    fide_id = getattr(args, "fide_id", None)
+
+    # Find the player
+    player = conn.execute(
+        "SELECT id, username, display_name, fide_id, fide_rating FROM players WHERE username = ?",
+        (username,),
+    ).fetchone()
+
+    if not player:
+        print(f"Player '{username}' not found in database.")
+        conn.close()
+        return
+
+    updates = []
+    values = []
+    if rating is not None:
+        updates.append("fide_rating = ?")
+        values.append(rating)
+    if fide_id is not None:
+        updates.append("fide_id = ?")
+        values.append(fide_id)
+
+    if not updates:
+        print("Nothing to update. Provide --rating and/or --fide-id.")
+        conn.close()
+        return
+
+    values.append(player["id"])
+    conn.execute(
+        f"UPDATE players SET {', '.join(updates)} WHERE id = ?",
+        values,
+    )
+    conn.commit()
+
+    # Show result
+    updated = conn.execute("SELECT * FROM players WHERE id = ?", (player["id"],)).fetchone()
+    conn.close()
+
+    name = updated["display_name"] or updated["username"]
+    fide = updated["fide_rating"] or "—"
+    fid = updated["fide_id"] or "—"
+    print(f"Updated {name}: FIDE ID={fid}, FIDE rating={fide}")
+    if updated["fide_id"]:
+        print(f"  Profile: https://ratings.fide.com/profile/{updated['fide_id']}")
+
+
 def cmd_run_all(args, config):
     """Run the full pipeline: harvest → analyze → coach → patterns → export."""
     print("=== Step 1/5: Harvesting games ===")
@@ -225,6 +280,12 @@ def main():
     dashboard_parser = subparsers.add_parser("dashboard", help="Launch local dashboard server")
     dashboard_parser.add_argument("--port", type=int, default=8000, help="Port (default: 8000)")
 
+    # fide-update
+    fide_parser = subparsers.add_parser("fide-update", help="Update FIDE rating for a player")
+    fide_parser.add_argument("--player", required=True, help="Chess.com username of the player")
+    fide_parser.add_argument("--rating", type=int, help="New FIDE rating")
+    fide_parser.add_argument("--fide-id", help="FIDE player ID (e.g., 5871042)")
+
     # run-all
     run_all_parser = subparsers.add_parser("run-all", help="Run full pipeline")
     run_all_parser.add_argument("--player", action="append", help="Username(s)")
@@ -258,6 +319,8 @@ def main():
         cmd_report(args, config)
     elif args.command == "dashboard":
         cmd_dashboard(args, config)
+    elif args.command == "fide-update":
+        cmd_fide_update(args, config)
     elif args.command == "run-all":
         cmd_run_all(args, config)
 

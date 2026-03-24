@@ -134,6 +134,7 @@ Edit `config.yaml` to match your setup (this file is gitignored — your persona
 players:
   - username: your_chess_com_username       # Chess.com username (required)
     lichess_username: your_lichess_id       # Lichess username (optional)
+    fide_id: null                           # FIDE player ID (optional, e.g., 5871042)
     display_name: Player 1
     age: null
     rating: null
@@ -175,6 +176,7 @@ database:
 | `python main.py export-json` | Export database to JSON for the web dashboard |
 | `python main.py report` | Generate Markdown coaching reports |
 | `python main.py dashboard` | Launch the local web dashboard |
+| `python main.py fide-update` | Update a player's FIDE rating |
 | `python main.py run-all` | Run the full pipeline end-to-end |
 
 ### Command details
@@ -230,6 +232,18 @@ python main.py coach --provider openai --limit 5
 > **Rate limits:** OpenAI's `gpt-5.4` has a 10,000 TPM limit (~1 game/min on free/low tiers). Use `--limit 5` per batch to avoid 429 errors. Claude typically has higher throughput — `--limit 10-20` is safe. The dashboard shows which model was used for each game's coaching (purple badge = Claude, green badge = OpenAI).
 
 > **Dashboard coaching:** You can also coach individual games directly from the dashboard — click the 🟣 **Coach with Claude** or 🟢 **Coach with ChatGPT** button on any game's detail page. Results auto-refresh when complete.
+
+**Update FIDE rating:**
+
+```bash
+# Update FIDE rating for a player
+python main.py fide-update --player evanleongxinyu --rating 1544
+
+# Set FIDE ID and rating together
+python main.py fide-update --player evanleongxinyu --fide-id 5871042 --rating 1544
+```
+
+> FIDE ratings are updated manually via the CLI. You can also set `fide_id` in `config.yaml` to have it linked on first harvest. The dashboard links directly to the player's FIDE profile at `ratings.fide.com/profile/{fide_id}`.
 
 **Generate reports:**
 
@@ -375,6 +389,8 @@ The dashboard is a live web app served by a built-in Python HTTP server. It quer
 - **On-demand coaching** — 🟣 Coach with Claude / 🟢 Coach with ChatGPT buttons on each game, with auto-refresh on completion
 - **Coaching model badge** — shows which LLM model generated the coaching (🟣 Claude / 🟢 OpenAI)
 - **Patterns dashboard** — stat cards, ACPL trend line chart, opening performance split by color (All / ♔ White / ♚ Black), move quality donut chart, phase analysis bar chart
+- **Player dashboard** — default landing page showing each player's profile with Chess.com, Lichess, and FIDE ratings, tier badge, and direct links to external profiles
+- **FIDE integration** — optional FIDE ID links to `ratings.fide.com/profile/{id}`, manually updated via `fide-update` CLI command
 - **Light/dark mode** — toggle with 🌙/☀️ button, persists across sessions
 - **Live data** — dashboard reads from the database directly, so you can view results while analysis or coaching is still running
 

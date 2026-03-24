@@ -86,6 +86,14 @@ def _migrate(conn: sqlite3.Connection):
         conn.execute("ALTER TABLE games ADD COLUMN platform TEXT DEFAULT 'chess.com'")
         conn.commit()
 
+    player_cols = {r[1] for r in conn.execute("PRAGMA table_info(players)").fetchall()}
+    if "fide_id" not in player_cols:
+        conn.execute("ALTER TABLE players ADD COLUMN fide_id TEXT")
+        conn.commit()
+    if "fide_rating" not in player_cols:
+        conn.execute("ALTER TABLE players ADD COLUMN fide_rating INTEGER")
+        conn.commit()
+
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS players (
@@ -165,26 +173,30 @@ CREATE TABLE IF NOT EXISTS player_patterns (
 
 def ensure_player(conn: sqlite3.Connection, username: str,
                   display_name: str | None = None, age: int | None = None,
-                  rating: int | None = None) -> int:
+                  rating: int | None = None, fide_id: str | None = None,
+                  fide_rating: int | None = None) -> int:
     """Insert or update a player, returning the player id."""
     row = conn.execute(
         "SELECT id FROM players WHERE username = ?", (username,)
     ).fetchone()
     if row:
-        if display_name or age or rating:
+        if display_name or age or rating or fide_id or fide_rating:
             conn.execute(
                 """UPDATE players SET
                     display_name = COALESCE(?, display_name),
                     age = COALESCE(?, age),
-                    rating = COALESCE(?, rating)
+                    rating = COALESCE(?, rating),
+                    fide_id = COALESCE(?, fide_id),
+                    fide_rating = COALESCE(?, fide_rating)
                 WHERE username = ?""",
-                (display_name, age, rating, username),
+                (display_name, age, rating, fide_id, fide_rating, username),
             )
             conn.commit()
         return row["id"]
     conn.execute(
-        "INSERT INTO players (username, display_name, age, rating) VALUES (?, ?, ?, ?)",
-        (username, display_name, age, rating),
+        """INSERT INTO players (username, display_name, age, rating, fide_id, fide_rating)
+        VALUES (?, ?, ?, ?, ?, ?)""",
+        (username, display_name, age, rating, fide_id, fide_rating),
     )
     conn.commit()
     return conn.execute(
