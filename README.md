@@ -7,21 +7,25 @@ Inspired by my three children — Eleanor, Evan, and Estella — and their journ
 ## Architecture
 
 ```
-┌──────────────────┐     ┌──────────────────┐     ┌──────────────────┐
-│   Chess.com API  │────▶│  Game Harvester   │────▶│  SQLite Database │
-│   (Public, free) │     │  (Python script)  │     │  (games + evals) │
-└──────────────────┘     └──────────────────┘     └────────┬─────────┘
-                                                           │
-                         ┌──────────────────┐              │
-                         │  Stockfish Local  │◀─────────────┤
-                         │  (Apple Silicon)  │              │
-                         └────────┬─────────┘              │
-                                  │ per-move evals         │
-                                  ▼                        │
-                         ┌──────────────────┐              │
-                         │  LLM Coaching    │◀─────────────┘
-                         │  (Claude / GPT)  │
-                         └────────┬─────────┘
+┌──────────────────┐
+│   Chess.com API  │──────┐
+│   (Public, free) │      │
+└──────────────────┘      │     ┌──────────────────┐     ┌──────────────────┐
+                          ├────▶│  Game Harvester   │────▶│  SQLite Database │
+┌──────────────────┐      │     │  (Multi-platform) │     │  (games + evals) │
+│   Lichess API    │──────┘     └──────────────────┘     └────────┬─────────┘
+│   (Public, free) │                                              │
+└──────────────────┘                                              │
+                              ┌──────────────────┐                │
+                              │  Stockfish Local  │◀──────────────┤
+                              │  (Apple Silicon)  │               │
+                              └────────┬─────────┘               │
+                                       │ per-move evals          │
+                                       ▼                         │
+                         ┌───────────────────────┐               │
+                         │     LLM Coaching       │◀─────────────┘
+                         │ (Claude Opus / GPT-5.4)│
+                         └────────┬──────────────┘
                                   │
                     ┌─────────────┴─────────────┐
                     ▼                           ▼
