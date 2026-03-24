@@ -185,33 +185,9 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 # Profile URLs
                 p["chesscom_url"] = f"https://www.chess.com/member/{r['username']}"
 
-                # Lichess URL — look up from config or games
-                lichess_game = conn.execute(
-                    """SELECT game_url FROM games
-                    WHERE player_id = ? AND platform = 'lichess' LIMIT 1""",
-                    (r["id"],),
-                ).fetchone()
-                if lichess_game:
-                    # Extract lichess username from game URL
-                    p["lichess_url"] = "https://lichess.org"
-                    # We'll get the actual username from the games data
-                    lichess_pgn = conn.execute(
-                        """SELECT pgn FROM games
-                        WHERE player_id = ? AND platform = 'lichess' LIMIT 1""",
-                        (r["id"],),
-                    ).fetchone()
-                    if lichess_pgn:
-                        import re as _re
-                        w = _re.search(r'\[White\s+"([^"]+)"\]', lichess_pgn["pgn"])
-                        b = _re.search(r'\[Black\s+"([^"]+)"\]', lichess_pgn["pgn"])
-                        # Whichever isn't a known chess.com username
-                        for name_match in [w, b]:
-                            if name_match and name_match.group(1).lower() != r["username"].lower():
-                                continue
-                            if name_match:
-                                p["lichess_username"] = name_match.group(1)
-                                p["lichess_url"] = f"https://lichess.org/@/{name_match.group(1)}"
-                                break
+                # Lichess URL — from stored lichess_username
+                if r["lichess_username"]:
+                    p["lichess_url"] = f"https://lichess.org/@/{r['lichess_username']}"
                 else:
                     p["lichess_url"] = None
 

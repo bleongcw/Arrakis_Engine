@@ -61,6 +61,7 @@ def cmd_harvest(args, config):
             rating=player.get("rating"),
             fide_id=player.get("fide_id"),
             fide_rating=player.get("fide_rating"),
+            lichess_username=player.get("lichess_username"),
         )
         conn.close()
 
