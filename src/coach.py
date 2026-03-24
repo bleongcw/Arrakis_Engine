@@ -108,24 +108,76 @@ Produce a JSON response with these exact keys:
 Respond with ONLY valid JSON, no markdown code fences or extra text."""
 
 
-def _build_analysis_text(moves: list[dict]) -> str:
-    """Format move analysis into readable text for the prompt."""
+def _build_analysis_text(moves: list[dict], max_moves: int = 80) -> str:
+    """Format move analysis into readable text for the prompt.
+
+    For games with many moves, sends a compact summary:
+    - Always include the first 10 moves (opening)
+    - Always include all inaccuracies, mistakes, and blunders with context
+    - Include a stats summary for skipped sections
+    - Cap total output to max_moves lines to control token usage
+    """
+    if len(moves) <= max_moves:
+        # Short game — send everything
+        return _format_moves(moves)
+
+    # Long game — send smart selection
+    noteworthy = {"inaccuracy", "mistake", "blunder"}
+    opening_end = min(20, len(moves))  # first 10 full moves = 20 half-moves
+
+    selected = set()
+    # Always include opening
+    for i in range(opening_end):
+        selected.add(i)
+
+    # Include all noteworthy moves + 1 move of context before/after
+    for i, m in enumerate(moves):
+        if m.get("classification") in noteworthy:
+            for j in range(max(0, i - 1), min(len(moves), i + 2)):
+                selected.add(j)
+
+    # Build output with gap markers
     lines = []
-    for m in moves:
-        classification = m["classification"] or "?"
-        symbol = {"excellent": "!", "good": ".", "inaccuracy": "?!",
-                  "mistake": "?", "blunder": "??", "?": ""}.get(classification, "")
-        line = (
-            f"  {m['move_number']}.{'.. ' if m['side'] == 'black' else ' '}"
-            f"{m['move_played']}{symbol} "
-            f"(eval: {m['eval_before_cp']}cp → {m['eval_after_cp']}cp, "
-            f"swing: {m['swing_cp']}cp, "
-            f"win%: {m['win_prob_before']:.1f}% → {m['win_prob_after']:.1f}%)"
-        )
-        if m["best_move"] and m["best_move"] != m["move_played"]:
-            line += f" [best: {m['best_move']}]"
-        lines.append(line)
+    total_moves = len(moves)
+    player_moves = [m for m in moves if m.get("swing_cp", 0) is not None]
+    avg_loss = sum(m.get("swing_cp", 0) or 0 for m in player_moves) / max(len(player_moves), 1)
+    lines.append(f"  [Game summary: {total_moves} half-moves, avg loss {avg_loss:.0f}cp]")
+
+    prev_idx = -2
+    for i in sorted(selected):
+        if i > prev_idx + 1:
+            gap = i - prev_idx - 1
+            lines.append(f"  [...{gap} moves omitted (good/excellent)...]")
+        lines.append(_format_single_move(moves[i]))
+        prev_idx = i
+
+    if prev_idx < len(moves) - 1:
+        gap = len(moves) - 1 - prev_idx
+        lines.append(f"  [...{gap} moves omitted (good/excellent)...]")
+
     return "\n".join(lines)
+
+
+def _format_single_move(m: dict) -> str:
+    """Format a single move for the prompt."""
+    classification = m["classification"] or "?"
+    symbol = {"excellent": "!", "good": ".", "inaccuracy": "?!",
+              "mistake": "?", "blunder": "??", "?": ""}.get(classification, "")
+    line = (
+        f"  {m['move_number']}.{'.. ' if m['side'] == 'black' else ' '}"
+        f"{m['move_played']}{symbol} "
+        f"(eval: {m['eval_before_cp']}cp → {m['eval_after_cp']}cp, "
+        f"swing: {m['swing_cp']}cp, "
+        f"win%: {m['win_prob_before']:.1f}% → {m['win_prob_after']:.1f}%)"
+    )
+    if m["best_move"] and m["best_move"] != m["move_played"]:
+        line += f" [best: {m['best_move']}]"
+    return line
+
+
+def _format_moves(moves: list[dict]) -> str:
+    """Format all moves (for short games)."""
+    return "\n".join(_format_single_move(m) for m in moves)
 
 
 def _build_critical_moments(moves: list[dict], top_n: int = 5) -> str:
@@ -256,7 +308,7 @@ def coach_game(game_id: int, provider: str = "claude",
         critical_moments_count=tier.critical_moments_count,
         player_color=game["player_color"],
         result=game["result"],
-        pgn=game["pgn"][:3000],  # Truncate very long PGNs
+        pgn=game["pgn"][:2000],  # Truncate long PGNs to save tokens
         analysis_text=_build_analysis_text(moves),
         critical_moments=_build_critical_moments(moves),
     )
