@@ -6,7 +6,7 @@ Inspired by my three children — Eleanor, Evan, and Estella — and their journ
 
 ## Architecture
 
-![Arrakis Engine Architecture](docs/screenshots/arrakis-engine-architecture.png)
+![Arrakis Engine Architecture](docs/screenshots/Arrakis-Engine-Architecture-TB.jpg)
 
 The pipeline is three layers:
 1. **Stockfish engine evaluation** — objective, per-move centipawn analysis
