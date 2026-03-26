@@ -6,6 +6,7 @@ import { fetchPatterns } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
 import { ACPLTrendChart } from "@/components/patterns/acpl-trend-chart";
 import { MoveQualityDonut } from "@/components/patterns/move-quality-donut";
+import { PhasePerformance } from "@/components/patterns/phase-performance";
 import { OpeningPerformance } from "@/components/patterns/opening-performance";
 import type { PatternStats } from "@/lib/types";
 
@@ -63,21 +64,28 @@ export default function PatternsPage() {
         />
       </div>
 
-      {/* Charts */}
+      {/* ACPL Trend - full width */}
+      <Card>
+        <CardContent className="pt-6">
+          <ACPLTrendChart data={stats.acpl_trend || []} />
+        </CardContent>
+      </Card>
+
+      {/* Move Quality + Phase Performance side by side */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card>
-          <CardContent className="pt-6">
-            <ACPLTrendChart data={stats.acpl_trend || []} />
-          </CardContent>
-        </Card>
         <Card>
           <CardContent className="pt-6">
             <MoveQualityDonut data={stats.move_quality} />
           </CardContent>
         </Card>
+        <Card>
+          <CardContent className="pt-6">
+            <PhasePerformance data={stats.phase_analysis} />
+          </CardContent>
+        </Card>
       </div>
 
-      {/* Opening Performance */}
+      {/* Opening Performance - full width */}
       <Card>
         <CardContent className="pt-6">
           <OpeningPerformance openings={stats.openings || {}} />
