@@ -1,6 +1,6 @@
 "use client";
 
-import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip } from "recharts";
+import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip, Label } from "recharts";
 
 interface MoveQualityData {
   count: number;
@@ -33,11 +33,17 @@ function extractCount(val: number | MoveQualityData | undefined): number {
 }
 
 export function MoveQualityDonut({ data }: MoveQualityDonutProps) {
-  const chartData = COLORS.map((c) => ({
+  const rawData = COLORS.map((c) => ({
     name: c.name,
     value: extractCount(data[c.key as keyof typeof data] as number | MoveQualityData),
     color: c.color,
   })).filter((d) => d.value > 0);
+
+  const total = rawData.reduce((sum, d) => sum + d.value, 0);
+  const chartData = rawData.map((d) => ({
+    ...d,
+    pct: total > 0 ? ((d.value / total) * 100).toFixed(1) : "0",
+  }));
 
   if (chartData.length === 0) {
     return (
@@ -49,6 +55,17 @@ export function MoveQualityDonut({ data }: MoveQualityDonutProps) {
       </div>
     );
   }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const renderLabel = (props: any) => {
+    const { x, y, percent } = props;
+    if (percent < 0.03) return null; // Skip tiny slices
+    return (
+      <text x={x} y={y} textAnchor="middle" fill="var(--foreground)" fontSize={11}>
+        {`${(percent * 100).toFixed(1)}%`}
+      </text>
+    );
+  };
 
   return (
     <div>
@@ -65,6 +82,7 @@ export function MoveQualityDonut({ data }: MoveQualityDonutProps) {
             outerRadius={90}
             paddingAngle={2}
             dataKey="value"
+            label={renderLabel}
           >
             {chartData.map((entry, idx) => (
               <Cell key={idx} fill={entry.color} />
@@ -76,8 +94,18 @@ export function MoveQualityDonut({ data }: MoveQualityDonutProps) {
               border: "1px solid var(--border)",
               borderRadius: "6px",
             }}
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            formatter={(value: any, name: any) => [
+              `${Number(value).toLocaleString()} moves (${total > 0 ? ((Number(value) / total) * 100).toFixed(1) : 0}%)`,
+              name,
+            ]}
           />
-          <Legend />
+          <Legend
+            formatter={(value: string) => {
+              const item = chartData.find((d) => d.name === value);
+              return `${value} (${item?.pct || 0}%)`;
+            }}
+          />
         </PieChart>
       </ResponsiveContainer>
     </div>
