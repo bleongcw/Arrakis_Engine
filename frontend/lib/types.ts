@@ -114,15 +114,11 @@ export interface PatternStats {
     acpl: number;
     games: number;
   }>;
-  openings: Array<{
-    opening: string;
-    games: number;
-    wins: number;
-    losses: number;
-    draws: number;
-    win_rate: number;
-    color?: string;
-  }>;
+  openings: {
+    all?: Array<{ name: string; games: number; wins: number; losses: number; draws: number; win_rate: number }>;
+    white?: Array<{ name: string; games: number; wins: number; losses: number; draws: number; win_rate: number }>;
+    black?: Array<{ name: string; games: number; wins: number; losses: number; draws: number; win_rate: number }>;
+  };
   move_quality: {
     excellent: number;
     good: number;

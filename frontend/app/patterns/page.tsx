@@ -80,7 +80,7 @@ export default function PatternsPage() {
       {/* Opening Performance */}
       <Card>
         <CardContent className="pt-6">
-          <OpeningPerformance openings={stats.openings || []} />
+          <OpeningPerformance openings={stats.openings || {}} />
         </CardContent>
       </Card>
     </div>

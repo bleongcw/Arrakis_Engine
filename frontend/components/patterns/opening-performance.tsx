@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Table,
@@ -12,21 +11,24 @@ import {
 } from "@/components/ui/table";
 
 interface Opening {
-  opening: string;
+  name: string;
   games: number;
   wins: number;
   losses: number;
   draws: number;
   win_rate: number;
-  color?: string;
 }
 
 interface OpeningPerformanceProps {
-  openings: Opening[];
+  openings: {
+    all?: Opening[];
+    white?: Opening[];
+    black?: Opening[];
+  } | Opening[];
 }
 
 function OpeningTable({ openings }: { openings: Opening[] }) {
-  if (openings.length === 0) {
+  if (!openings || openings.length === 0) {
     return <p className="text-sm text-muted-foreground py-4">No data available.</p>;
   }
 
@@ -44,7 +46,7 @@ function OpeningTable({ openings }: { openings: Opening[] }) {
       <TableBody>
         {openings.map((o, i) => (
           <TableRow key={i}>
-            <TableCell className="font-medium">{o.opening}</TableCell>
+            <TableCell className="font-medium">{o.name}</TableCell>
             <TableCell className="text-right">{o.games}</TableCell>
             <TableCell className="text-right text-green-500">{o.wins}</TableCell>
             <TableCell className="text-right text-red-500">{o.losses}</TableCell>
@@ -59,9 +61,18 @@ function OpeningTable({ openings }: { openings: Opening[] }) {
 }
 
 export function OpeningPerformance({ openings }: OpeningPerformanceProps) {
-  const allOpenings = openings;
-  const whiteOpenings = openings.filter((o) => o.color === "white");
-  const blackOpenings = openings.filter((o) => o.color === "black");
+  // Handle both array and dict formats
+  let allOpenings: Opening[] = [];
+  let whiteOpenings: Opening[] = [];
+  let blackOpenings: Opening[] = [];
+
+  if (Array.isArray(openings)) {
+    allOpenings = openings;
+  } else if (openings && typeof openings === "object") {
+    allOpenings = openings.all || [];
+    whiteOpenings = openings.white || [];
+    blackOpenings = openings.black || [];
+  }
 
   return (
     <div>
