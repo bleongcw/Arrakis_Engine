@@ -10,7 +10,14 @@ const BASE = "/api";
 
 async function fetchJSON<T>(url: string): Promise<T> {
   const res = await fetch(url);
-  if (!res.ok) throw new Error(`API error: ${res.status} ${res.statusText}`);
+  if (!res.ok) {
+    let detail = "";
+    try {
+      const body = await res.text();
+      detail = ` — ${body.substring(0, 200)}`;
+    } catch {}
+    throw new Error(`API error: ${res.status} ${res.statusText}${detail}`);
+  }
   return res.json();
 }
 

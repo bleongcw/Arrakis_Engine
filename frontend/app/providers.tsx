@@ -32,6 +32,8 @@ function PlayerProvider({ children }: { children: ReactNode }) {
   const [currentPlayer, setCurrentPlayer] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const [error, setError] = useState<string | null>(null);
+
   useEffect(() => {
     fetchPlayers()
       .then((data) => {
@@ -40,7 +42,10 @@ function PlayerProvider({ children }: { children: ReactNode }) {
           setCurrentPlayer(data[0].username);
         }
       })
-      .catch(console.error)
+      .catch((err) => {
+        console.error("Failed to load players:", err);
+        setError(err.message);
+      })
       .finally(() => setLoading(false));
   }, []);
 
