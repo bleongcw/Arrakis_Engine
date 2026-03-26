@@ -16,7 +16,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className="min-h-screen bg-background text-foreground font-sans">
+      <body className="min-h-screen bg-background text-foreground font-sans" suppressHydrationWarning>
         <Providers>
           <AppHeader />
           <NavBar />
