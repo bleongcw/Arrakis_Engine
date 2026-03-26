@@ -28,6 +28,17 @@ interface PhasePerformanceProps {
 }
 
 export function PhasePerformance({ data }: PhasePerformanceProps) {
+  console.log("PhasePerformance data:", JSON.stringify(data));
+  if (!data || !data.opening) {
+    return (
+      <div>
+        <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+          Performance by Phase
+        </h3>
+        <p className="text-sm text-muted-foreground py-8 text-center">No phase data available.</p>
+      </div>
+    );
+  }
   const chartData = [
     {
       phase: "Opening",
@@ -55,8 +66,13 @@ export function PhasePerformance({ data }: PhasePerformanceProps) {
         Performance by Phase
       </h3>
       <ResponsiveContainer width="100%" height={250}>
-        <BarChart data={chartData} margin={{ top: 5, right: 5, bottom: 5, left: -10 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#333" />
+        <BarChart
+          data={chartData}
+          margin={{ top: 5, right: 20, bottom: 5, left: 0 }}
+          barCategoryGap="20%"
+          barGap={4}
+        >
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
           <XAxis dataKey="phase" tick={{ fontSize: 12 }} />
           <YAxis tick={{ fontSize: 11 }} />
           <Tooltip
@@ -67,9 +83,9 @@ export function PhasePerformance({ data }: PhasePerformanceProps) {
             }}
           />
           <Legend />
-          <Bar dataKey="ACPL" fill="#ef4444" radius={[2, 2, 0, 0]} />
-          <Bar dataKey="Blunders" fill="#f9a8d4" radius={[2, 2, 0, 0]} />
-          <Bar dataKey="Mistakes" fill="#fb923c" radius={[2, 2, 0, 0]} />
+          <Bar dataKey="ACPL" name="ACPL" fill="#ef4444" radius={[2, 2, 0, 0]} barSize={30} />
+          <Bar dataKey="Blunders" name="Blunders" fill="#f9a8d4" radius={[2, 2, 0, 0]} barSize={30} />
+          <Bar dataKey="Mistakes" name="Mistakes" fill="#fb923c" radius={[2, 2, 0, 0]} barSize={30} />
         </BarChart>
       </ResponsiveContainer>
     </div>
