@@ -8,6 +8,7 @@ import { ChessBoard } from "@/components/game-detail/chess-board";
 import { MoveControls } from "@/components/game-detail/move-controls";
 import { MoveList } from "@/components/game-detail/move-list";
 import { EvalChart } from "@/components/game-detail/eval-chart";
+import { MoveQualitySummary } from "@/components/game-detail/move-quality-summary";
 import { CoachingPanels } from "@/components/game-detail/coaching-panels";
 import { CoachingButtons } from "@/components/game-detail/coaching-buttons";
 import { TierBadge } from "@/components/tier-badge";
@@ -48,11 +49,18 @@ function GameDetailView({
 
   const nav = useChessNavigation(game.pgn || "", game.player_color);
 
-  const resultColors = {
-    win: "text-green-500",
-    loss: "text-red-500",
-    draw: "text-yellow-500",
-  };
+  // Build score string
+  const scoreMap = { win: game.player_color === "white" ? "1-0" : "0-1", loss: game.player_color === "white" ? "0-1" : "1-0", draw: "½-½" };
+  const score = scoreMap[game.result];
+
+  const resultColors = { win: "text-green-500", loss: "text-red-500", draw: "text-yellow-500" };
+
+  // Determine white and black players
+  const isWhite = game.player_color === "white";
+  const whiteName = isWhite ? (game.display_name || game.username) : (game.opponent_username || "?");
+  const blackName = isWhite ? (game.opponent_username || "?") : (game.display_name || game.username);
+  const whiteRating = isWhite ? game.player_rating : game.opponent_rating;
+  const blackRating = isWhite ? game.opponent_rating : game.player_rating;
 
   return (
     <div>
@@ -74,21 +82,25 @@ function GameDetailView({
 
       {/* Matchup bar */}
       <Card className="mb-4">
-        <CardContent className="py-3 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="text-lg">{game.player_color === "white" ? "\u2654" : "\u265A"}</span>
-            <span className="font-semibold">
-              {game.display_name || game.username}
+        <CardContent className="py-3">
+          <div className="flex items-center justify-center gap-4 text-center">
+            <div className="flex items-center gap-2">
+              <span className="text-lg">{"\u2654"}</span>
+              <span className="font-semibold">{whiteName}</span>
+              <span className="text-muted-foreground">({whiteRating || "?"})</span>
+            </div>
+            <span className={`text-xl font-bold ${resultColors[game.result]}`}>
+              {score}
             </span>
-            <span className="text-muted-foreground">({game.player_rating || "?"})</span>
+            <div className="flex items-center gap-2">
+              <span className="text-lg">{"\u265A"}</span>
+              <span className="font-semibold">{blackName}</span>
+              <span className="text-muted-foreground">({blackRating || "?"})</span>
+            </div>
           </div>
-          <span className={`text-lg font-bold ${resultColors[game.result]}`}>
-            {game.result.toUpperCase()}
-          </span>
-          <div className="flex items-center gap-2">
-            <span className="text-muted-foreground">({game.opponent_rating || "?"})</span>
-            <span className="font-semibold">{game.opponent_username || "?"}</span>
-            <span className="text-lg">{game.player_color === "white" ? "\u265A" : "\u2654"}</span>
+          <div className="text-center text-xs text-muted-foreground mt-1">
+            {game.time_class || "?"} &middot; {game.date_played || "?"}
+            {game.platform && <> &middot; {game.platform === "lichess" ? "\u265E Lichess" : "\u265C Chess.com"}</>}
           </div>
         </CardContent>
       </Card>
@@ -123,8 +135,9 @@ function GameDetailView({
           </Card>
         </div>
 
-        {/* Right column: Charts + coaching */}
+        {/* Right column: Eval + Quality + Coaching */}
         <div className="space-y-4">
+          {/* Evaluation Chart */}
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm">Evaluation</CardTitle>
@@ -134,6 +147,14 @@ function GameDetailView({
             </CardContent>
           </Card>
 
+          {/* Move Quality Summary */}
+          <MoveQualitySummary
+            moves={moves}
+            playerColor={game.player_color}
+            playerName={game.display_name || game.username}
+          />
+
+          {/* Coaching Panels */}
           <CoachingPanels coaching={coaching} />
         </div>
       </div>
