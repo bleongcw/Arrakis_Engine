@@ -2,13 +2,19 @@
 
 import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip } from "recharts";
 
+interface MoveQualityData {
+  count: number;
+  pct: number;
+}
+
 interface MoveQualityDonutProps {
   data: {
-    excellent: number;
-    good: number;
-    inaccuracy: number;
-    mistake: number;
-    blunder: number;
+    excellent: number | MoveQualityData;
+    good: number | MoveQualityData;
+    inaccuracy: number | MoveQualityData;
+    mistake: number | MoveQualityData;
+    blunder: number | MoveQualityData;
+    total_moves?: number;
   };
 }
 
@@ -20,12 +26,29 @@ const COLORS = [
   { name: "Blunder", key: "blunder", color: "#ef4444" },
 ];
 
+function extractCount(val: number | MoveQualityData | undefined): number {
+  if (val === undefined || val === null) return 0;
+  if (typeof val === "number") return val;
+  return val.count || 0;
+}
+
 export function MoveQualityDonut({ data }: MoveQualityDonutProps) {
   const chartData = COLORS.map((c) => ({
     name: c.name,
-    value: data[c.key as keyof typeof data] || 0,
+    value: extractCount(data[c.key as keyof typeof data] as number | MoveQualityData),
     color: c.color,
   })).filter((d) => d.value > 0);
+
+  if (chartData.length === 0) {
+    return (
+      <div>
+        <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+          Move Quality Distribution
+        </h3>
+        <p className="text-sm text-muted-foreground py-8 text-center">No data available.</p>
+      </div>
+    );
+  }
 
   return (
     <div>
