@@ -40,7 +40,7 @@ export function MoveList({ moves, playerColor, currentMoveIndex, onMoveClick }: 
                 className={cn(
                   "px-1.5 py-0.5 rounded text-xs font-mono cursor-pointer transition-colors",
                   whiteIdx === currentMoveIndex && "ring-2 ring-[#1e40af]",
-                  whiteMv.classification && whiteMv.side === playerColor
+                  whiteMv.classification
                     ? CLASSIFICATION_COLORS[whiteMv.classification]
                     : "hover:bg-muted"
                 )}
@@ -54,7 +54,7 @@ export function MoveList({ moves, playerColor, currentMoveIndex, onMoveClick }: 
                 className={cn(
                   "px-1.5 py-0.5 rounded text-xs font-mono cursor-pointer transition-colors",
                   blackIdx === currentMoveIndex && "ring-2 ring-[#1e40af]",
-                  blackMv.classification && blackMv.side === playerColor
+                  blackMv.classification
                     ? CLASSIFICATION_COLORS[blackMv.classification]
                     : "hover:bg-muted"
                 )}
