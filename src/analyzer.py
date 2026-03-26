@@ -117,6 +117,18 @@ def analyze_game(game_id: int, pgn_text: str, player_color: str,
     total_moves = len(moves)
     start_time = time.time()
 
+    # Skip games with no moves (abandoned, etc.)
+    if total_moves == 0:
+        logger.info("Game %d has no moves (abandoned/forfeit), marking complete", game_id)
+        engine.quit()
+        conn.execute(
+            "UPDATE games SET analysis_status = 'complete' WHERE id = ?",
+            (game_id,),
+        )
+        conn.commit()
+        conn.close()
+        return {"moves": 0, "blunders": 0, "mistakes": 0, "inaccuracies": 0, "skipped": True}
+
     logger.info("Analyzing game %d: %d moves at depth %d", game_id, total_moves, depth)
 
     # Use both depth and time limit — whichever is reached first.
