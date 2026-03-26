@@ -105,6 +105,20 @@ function GameDetailView({
         </CardContent>
       </Card>
 
+      {/* Abandoned game notice */}
+      {moves.length === 0 && (
+        <Card className="mb-4 border-yellow-500/50 bg-yellow-500/5">
+          <CardContent className="py-4 text-center">
+            <p className="text-sm font-medium text-yellow-600 dark:text-yellow-400">
+              This game was abandoned by the opponent before any moves were played.
+            </p>
+            <p className="text-xs text-muted-foreground mt-1">
+              No analysis is available for abandoned games.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Main grid */}
       <div className="grid grid-cols-1 lg:grid-cols-[420px_1fr] gap-6">
         {/* Left column: Board + moves */}

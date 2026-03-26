@@ -56,33 +56,21 @@ export function MoveQualityDonut({ data }: MoveQualityDonutProps) {
     );
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const renderLabel = (props: any) => {
-    const { x, y, percent } = props;
-    if (percent < 0.03) return null; // Skip tiny slices
-    return (
-      <text x={x} y={y} textAnchor="middle" fill="var(--foreground)" fontSize={11}>
-        {`${(percent * 100).toFixed(1)}%`}
-      </text>
-    );
-  };
-
   return (
     <div>
       <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-3">
         Move Quality Distribution
       </h3>
-      <ResponsiveContainer width="100%" height={250}>
+      <ResponsiveContainer width="100%" height={280}>
         <PieChart>
           <Pie
             data={chartData}
             cx="50%"
-            cy="50%"
-            innerRadius={50}
-            outerRadius={90}
+            cy="45%"
+            innerRadius={55}
+            outerRadius={95}
             paddingAngle={2}
             dataKey="value"
-            label={renderLabel}
           >
             {chartData.map((entry, idx) => (
               <Cell key={idx} fill={entry.color} />
@@ -101,9 +89,13 @@ export function MoveQualityDonut({ data }: MoveQualityDonutProps) {
             ]}
           />
           <Legend
-            formatter={(value: string) => {
+            layout="horizontal"
+            verticalAlign="bottom"
+            align="center"
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            formatter={(value: any) => {
               const item = chartData.find((d) => d.name === value);
-              return `${value} (${item?.pct || 0}%)`;
+              return `${value}: ${item?.value.toLocaleString()} (${item?.pct || 0}%)`;
             }}
           />
         </PieChart>
