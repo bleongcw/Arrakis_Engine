@@ -368,28 +368,57 @@ Patterns are aggregated across all games per player:
 
 ## Web Dashboard
 
-The dashboard is a live web app served by a built-in Python HTTP server. It queries SQLite directly — no JSON export needed, and data updates in real-time as analysis and coaching complete.
+Two dashboard options are available — both connect to the same Python backend API:
 
-**Features:**
-- **Player selector** — toggle between configured players
-- **Games list** — filterable by result, time control, coaching status (✅ Coached / ⏳ Pending / ❌ Error), and date range
-- **Status columns** — separate Analysis and Coaching status icons per game for at-a-glance pipeline progress
-- **Month/year filter** — filter games by month (e.g. "Mar 2026") alongside result, time control, and coaching status
-- **Game analysis** — interactive chessboard with proper piece SVGs (lichess cburnett set), move-by-move eval chart, color-coded move list (green/blue/yellow/orange/red by classification)
-- **Move quality summary** — per-game table showing counts of excellent, good, inaccuracy, mistake, and blunder moves for player vs opponent with proportional bars
-- **Opening analysis** — LLM-generated assessment of the opening choice, quality rating, counter-move correctness, and tips
-- **On-demand coaching** — 🟣 Coach with Claude / 🟢 Coach with ChatGPT buttons on each game, with auto-refresh on completion
-- **Coaching model badge** — shows which LLM model generated the coaching (🟣 Claude / 🟢 OpenAI)
-- **Patterns dashboard** — overview stat cards (games, win rate, accuracy %, ACPL, consistency, vs higher-rated), ACPL trend chart, move quality donut, danger zone histogram, phase performance, endgame conversion rates, time control breakdown, opening performance by color
-- **Player dashboard** — default landing page showing each player's profile with Chess.com, Lichess, and FIDE ratings, tier badge, and direct links to external profiles
-- **FIDE integration** — optional FIDE ID links to `ratings.fide.com/profile/{id}`, manually updated via `fide-update` CLI command
-- **Light/dark mode** — toggle with 🌙/☀️ button, persists across sessions
-- **Live data** — dashboard reads from the database directly, so you can view results while analysis or coaching is still running
+### Next.js Dashboard (recommended)
 
-**Libraries used (all loaded from CDN):**
-- [chessboard.js](https://chessboardjs.com/) — board rendering
-- [chess.js](https://github.com/jhlywa/chess.js) — PGN parsing and move validation
-- [Chart.js](https://www.chartjs.org/) — eval graphs and trend charts
+Built with Next.js 16, React, shadcn/ui, Tailwind CSS, and Recharts. Requires Node.js 18+.
+
+```bash
+# Terminal 1: Start the Python API backend
+python main.py dashboard
+
+# Terminal 2: Start the Next.js frontend
+cd frontend && pnpm install && pnpm dev
+# Open http://localhost:3000
+```
+
+### Legacy Dashboard
+
+Single-file vanilla HTML/JS/CSS dashboard served directly by the Python backend.
+
+```bash
+python main.py dashboard
+# Open http://localhost:8000
+```
+
+### Dashboard Features
+
+- **Player Hub** — default landing page with Chess.com, Lichess, and FIDE profiles, tier badge, game counts, and direct links to external profiles
+- **Games list** — filterable by result, time control, coaching status, month, platform (Chess.com / Lichess), and date range
+- **Platform icons** — ♜ Chess.com / ♞ Lichess shown per game
+- **Game analysis** — interactive chessboard, move-by-move eval chart (bars colored by move classification), color-coded move list for both player and opponent
+- **Move quality summary** — per-game table with proportional bars for excellent/good/inaccuracy/mistake/blunder
+- **Opening analysis** — LLM-generated assessment with opening name, quality rating, counter-move correctness, and tips
+- **On-demand coaching** — Coach with Claude / Coach with ChatGPT buttons on each game, with auto-refresh
+- **Feedback to Player** — personal letter with 3 actionable tips and growth mindset framing
+- **Patterns page** — 10 visualization panels:
+  - Overview stat cards (games, win rate, accuracy %, ACPL, consistency, vs higher-rated)
+  - ACPL Trend chart with clickable info modal
+  - Move Quality Distribution donut with percentages
+  - Danger Zones histogram (blunders/mistakes by move range)
+  - Phase Performance bar chart (opening/middlegame/endgame)
+  - Endgame Conversion rates (winning/losing/equal positions)
+  - Critical Position gauges (under pressure + capitalizing on opponent mistakes)
+  - Tactical Awareness bars (found vs missed by phase)
+  - Resilience & Composure (comeback rate + collapse rate)
+  - Repertoire Consistency (white/black focus scores with top-3 openings)
+  - Time Control Performance table (win%, ACPL, blunder% per format)
+  - Opening Quality Analysis table (ACPL per opening with verdict badges)
+  - Opening Win Rate table (split by All / White / Black)
+- **Tier badge** — color-coded skill tier displayed per game and on player profiles
+- **Light/dark mode** — toggle with theme button, persists across sessions
+- **Live data** — reads from SQLite directly, updates in real-time
 
 ## Project Structure
 
@@ -405,25 +434,35 @@ ArrakisEngine/
 ├── main.py                # CLI entry point — all commands
 ├── src/
 │   ├── models.py          # SQLite schema (5 tables) and data helpers
-│   ├── harvester.py       # Chess.com API game fetcher
+│   ├── harvester.py       # Multi-platform game fetcher (Chess.com + Lichess)
 │   ├── analyzer.py        # Stockfish move-by-move analysis engine
 │   ├── coach.py           # LLM coaching layer (Claude / OpenAI via Responses API)
-│   ├── patterns.py        # Cross-game pattern detection
+│   ├── tiers.py           # Adaptive tier system (Beginner → Expert)
+│   ├── patterns.py        # Cross-game pattern detection (Phase 1 + 2)
 │   ├── export.py          # JSON export for dashboard
 │   ├── dashboard_server.py # Live dashboard HTTP server with SQLite API
 │   └── report.py          # Markdown report generator
 ├── dashboard/
-│   ├── index.html         # Web dashboard (served by dashboard_server.py)
+│   ├── index.html         # Legacy web dashboard (served by dashboard_server.py)
 │   ├── img/pieces/        # Lichess cburnett SVG chess pieces
 │   └── data/              # Exported JSON (auto-generated, gitignored)
-├── tests/                 # Test suite (56 tests)
+├── frontend/              # Next.js + shadcn/ui dashboard (recommended)
+│   ├── app/               # Next.js app router pages (dashboard, games, patterns)
+│   ├── components/        # React components (patterns, games, UI)
+│   ├── lib/               # API client, types, utilities
+│   └── package.json       # Node dependencies
+├── docs/
+│   └── screenshots/       # Architecture diagram and screenshots
+├── tests/                 # Test suite (113+ tests)
 │   ├── test_models.py
 │   ├── test_harvester.py
 │   ├── test_analyzer.py
 │   ├── test_coach.py
-│   ├── test_patterns.py
+│   ├── test_patterns.py   # 32 tests (Phase 1 + 2 metrics)
+│   ├── test_tiers.py      # 21 tests (tier system)
 │   ├── test_export.py
-│   └── test_report.py
+│   ├── test_report.py
+│   └── test_dashboard_server.py
 ├── data/
 │   └── chess_coach.db     # SQLite database (auto-created, gitignored)
 └── reports/               # Generated coach reports (gitignored)
