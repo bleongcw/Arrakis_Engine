@@ -8,7 +8,6 @@ import {
   CartesianGrid,
   ResponsiveContainer,
   Tooltip,
-  Legend,
 } from "recharts";
 
 interface DangerZoneData {
@@ -25,6 +24,36 @@ interface DangerZoneData {
     blunder_rate: number;
   } | null;
   bucket_size: number;
+}
+
+const BLUNDER_COLOR = "#dc2626";  // distinct red
+const MISTAKE_COLOR = "#facc15";  // yellow — clearly different from red
+
+function CustomTooltip({ active, payload, label }: any) {
+  if (!active || !payload?.length) return null;
+  const blunders = payload.find((p: any) => p.dataKey === "blunders")?.value || 0;
+  const mistakes = payload.find((p: any) => p.dataKey === "mistakes")?.value || 0;
+  const total = payload[0]?.payload?.total_moves || 0;
+  const errorRate = payload[0]?.payload?.error_rate || 0;
+
+  return (
+    <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-lg p-3 text-sm">
+      <p className="font-semibold mb-1">Moves {label}</p>
+      <div className="space-y-0.5 text-xs">
+        <p>
+          <span className="inline-block w-3 h-3 rounded-sm mr-1.5" style={{ backgroundColor: BLUNDER_COLOR }} />
+          Blunders: <strong>{blunders}</strong>
+        </p>
+        <p>
+          <span className="inline-block w-3 h-3 rounded-sm mr-1.5" style={{ backgroundColor: MISTAKE_COLOR }} />
+          Mistakes: <strong>{mistakes}</strong>
+        </p>
+        <p className="text-muted-foreground pt-1 border-t mt-1">
+          {total} total moves · {errorRate}% error rate
+        </p>
+      </div>
+    </div>
+  );
 }
 
 export function DangerZones({ data }: { data: DangerZoneData }) {
@@ -49,53 +78,39 @@ export function DangerZones({ data }: { data: DangerZoneData }) {
         Where blunders and mistakes cluster by move number — reveals opening
         gaps, middlegame tactical weakness, or endgame fatigue.
       </p>
+
+      {/* Custom legend */}
+      <div className="flex items-center gap-4 mb-2 text-xs">
+        <div className="flex items-center gap-1.5">
+          <span className="inline-block w-3 h-3 rounded-sm" style={{ backgroundColor: BLUNDER_COLOR }} />
+          <span>Blunders</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="inline-block w-3 h-3 rounded-sm" style={{ backgroundColor: MISTAKE_COLOR }} />
+          <span>Mistakes</span>
+        </div>
+      </div>
+
       <ResponsiveContainer width="100%" height={250}>
-        <BarChart data={data.histogram}>
-          <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
+        <BarChart data={data.histogram} barCategoryGap="15%">
+          <CartesianGrid strokeDasharray="3 3" className="stroke-border" vertical={false} />
           <XAxis
             dataKey="range"
             tick={{ fontSize: 10 }}
             className="fill-muted-foreground"
-            label={{
-              value: "Move Range",
-              position: "insideBottom",
-              offset: -5,
-              fontSize: 11,
-              className: "fill-muted-foreground",
-            }}
+            interval={0}
+            angle={-45}
+            textAnchor="end"
+            height={50}
           />
           <YAxis
             tick={{ fontSize: 11 }}
             className="fill-muted-foreground"
-            label={{
-              value: "Count",
-              angle: -90,
-              position: "insideLeft",
-              fontSize: 11,
-              className: "fill-muted-foreground",
-            }}
+            allowDecimals={false}
           />
-          <Tooltip
-            contentStyle={{
-              background: "hsl(var(--card))",
-              border: "1px solid hsl(var(--border))",
-              borderRadius: "6px",
-              color: "hsl(var(--card-foreground))",
-            }}
-            formatter={(value: number, name: string) => [
-              value,
-              name === "blunders" ? "Blunders" : "Mistakes",
-            ]}
-            labelFormatter={(label) => `Moves ${label}`}
-          />
-          <Legend
-            wrapperStyle={{ fontSize: 12 }}
-            formatter={(value) =>
-              value === "blunders" ? "Blunders" : "Mistakes"
-            }
-          />
-          <Bar dataKey="blunders" fill="#ef4444" stackId="errors" radius={[0, 0, 0, 0]} />
-          <Bar dataKey="mistakes" fill="#f97316" stackId="errors" radius={[4, 4, 0, 0]} />
+          <Tooltip content={<CustomTooltip />} cursor={{ fill: "rgba(128,128,128,0.1)" }} />
+          <Bar dataKey="blunders" fill={BLUNDER_COLOR} stackId="errors" />
+          <Bar dataKey="mistakes" fill={MISTAKE_COLOR} stackId="errors" radius={[3, 3, 0, 0]} />
         </BarChart>
       </ResponsiveContainer>
     </div>
