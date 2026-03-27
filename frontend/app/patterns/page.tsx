@@ -11,6 +11,11 @@ import { OpeningPerformance } from "@/components/patterns/opening-performance";
 import { DangerZones } from "@/components/patterns/danger-zones";
 import { EndgameConversion } from "@/components/patterns/endgame-conversion";
 import { TimeControlPerformance } from "@/components/patterns/time-control-performance";
+import { CriticalPositions } from "@/components/patterns/critical-positions";
+import { ComebackCollapse } from "@/components/patterns/comeback-collapse";
+import { OpeningACPL } from "@/components/patterns/opening-acpl";
+import { TacticalMisses } from "@/components/patterns/tactical-misses";
+import { RepertoireConsistency } from "@/components/patterns/repertoire-consistency";
 import type { PatternStats } from "@/lib/types";
 
 export default function PatternsPage() {
@@ -122,6 +127,34 @@ export default function PatternsPage() {
         </Card>
       </div>
 
+      {/* Critical Positions + Tactical Misses side by side */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <Card>
+          <CardContent className="pt-6">
+            <CriticalPositions data={stats.critical_positions as any} />
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-6">
+            <TacticalMisses data={stats.tactical_misses as any} />
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Comeback/Collapse + Repertoire Consistency side by side */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <Card>
+          <CardContent className="pt-6">
+            <ComebackCollapse data={stats.comeback_collapse as any} />
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-6">
+            <RepertoireConsistency data={stats.repertoire_consistency as any} />
+          </CardContent>
+        </Card>
+      </div>
+
       {/* Time Control Performance - full width */}
       <Card>
         <CardContent className="pt-6">
@@ -131,7 +164,14 @@ export default function PatternsPage() {
         </CardContent>
       </Card>
 
-      {/* Opening Performance - full width */}
+      {/* Opening Quality Analysis - full width */}
+      <Card>
+        <CardContent className="pt-6">
+          <OpeningACPL data={stats.opening_acpl as any} />
+        </CardContent>
+      </Card>
+
+      {/* Opening Win Rate Performance - full width */}
       <Card>
         <CardContent className="pt-6">
           <OpeningPerformance openings={stats.openings || {}} />

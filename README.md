@@ -359,6 +359,13 @@ Patterns are aggregated across all games per player:
 - **Endgame Conversion** — tracks how well the player converts advantages: winning endgames (>200cp at move 30) converted to wins, losing endgames saved/drawn, equal endgames outplayed; includes endgame reach percentage
 - **Time Control Performance** — win rate, ACPL, and blunder rate per time format (bullet/blitz/rapid/daily); highlights best and weakest formats
 
+**Deeper Insights (Phase 2):**
+- **Critical Position Success Rate** — how often the player finds good moves in high-stakes moments (>200cp swing possible); also tracks capitalizing on opponent blunders with SVG gauge charts
+- **Comeback & Collapse Rate** — comeback: was losing by >200cp but recovered to win/draw; collapse: was winning by >200cp but let it slip; measures mental resilience and composure
+- **Opening Quality Analysis** — ACPL during opening phase (moves 1-15) per opening name; rates each as "Strong — keep playing", "Solid", "Average", or "Struggling"; sorted by worst ACPL to highlight areas needing improvement
+- **Tactical Miss Rate** — positions where a tactic existed (>200cp advantage available) but the player missed it; broken down by game phase (opening/middlegame/endgame) with stacked bar chart
+- **Repertoire Consistency** — measures how focused the player's opening choices are, split by color; tracks unique openings, top-3 concentration %, and rates as Very focused / Reasonably consistent / Scattered / No clear repertoire
+
 ## Web Dashboard
 
 The dashboard is a live web app served by a built-in Python HTTP server. It queries SQLite directly — no JSON export needed, and data updates in real-time as analysis and coaching complete.

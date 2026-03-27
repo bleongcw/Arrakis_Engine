@@ -101,6 +101,12 @@ def compute_player_patterns(player_id: int, db_path: str | None = None,
         "danger_zones": _compute_danger_zones(games, moves_by_game),
         "endgame_conversion": _compute_endgame_conversion(games, moves_by_game),
         "time_control_performance": _compute_time_control_performance(games, moves_by_game),
+        # Phase 2 deeper insights
+        "critical_positions": _compute_critical_positions(games, moves_by_game),
+        "comeback_collapse": _compute_comeback_collapse(games, moves_by_game),
+        "opening_acpl": _compute_opening_acpl(games, moves_by_game),
+        "tactical_misses": _compute_tactical_misses(games, moves_by_game),
+        "repertoire_consistency": _compute_repertoire_consistency(games),
     }
 
     # Store patterns
@@ -687,6 +693,369 @@ def _compute_time_control_performance(games: list[dict],
         }
 
     return result
+
+
+def _compute_critical_positions(games: list[dict],
+                                moves_by_game: dict[int, list[dict]]) -> dict:
+    """Critical Position Success Rate.
+
+    A critical position is where a large eval swing was possible (>200cp
+    swing between best move and played move). Measures how often the
+    player found a good-enough move in these high-stakes moments.
+    """
+    CRITICAL_THRESHOLD = 200  # cp swing that makes a position "critical"
+    GOOD_ENOUGH_THRESHOLD = 50  # player's loss < 50cp = "handled well"
+
+    total_critical = 0
+    handled_well = 0
+    critical_details = []  # top examples
+
+    for g in games:
+        player_moves = [
+            m for m in moves_by_game.get(g["id"], [])
+            if m["side"] == g["player_color"]
+        ]
+        for m in player_moves:
+            swing = m.get("swing_cp") or 0
+            # A position is critical if the best move existed that could
+            # swing eval significantly — we detect this by looking at
+            # positions where the player DID lose a lot (they missed it)
+            # or positions where a big swing was available but they handled it
+            best_existed = m.get("best_move") and m["best_move"] != m.get("move_played")
+
+            # Critical = blunder or mistake (big swing was possible and missed)
+            # OR excellent/good in a complex position (swing was possible but handled)
+            if swing >= CRITICAL_THRESHOLD or (best_existed and swing >= CRITICAL_THRESHOLD):
+                total_critical += 1
+                if swing <= GOOD_ENOUGH_THRESHOLD:
+                    handled_well += 1
+                if len(critical_details) < 20:
+                    critical_details.append({
+                        "game_id": g["id"],
+                        "move_number": m["move_number"],
+                        "swing_cp": swing,
+                        "classification": m["classification"],
+                        "handled": swing <= GOOD_ENOUGH_THRESHOLD,
+                        "date": g["date_played"],
+                    })
+
+    # Also count positions where the player found good moves under pressure
+    # (opponent had just made a mistake creating a tactical opportunity)
+    opportunities_found = 0
+    opportunities_total = 0
+    for g in games:
+        player_color = g["player_color"]
+        opp_color = "black" if player_color == "white" else "white"
+        game_moves = moves_by_game.get(g["id"], [])
+        opp_moves = [m for m in game_moves if m["side"] == opp_color]
+
+        for opp_m in opp_moves:
+            if (opp_m.get("swing_cp") or 0) >= CRITICAL_THRESHOLD:
+                # Opponent blundered — did our player capitalize?
+                opportunities_total += 1
+                # Find the player's next move
+                next_player = [
+                    m for m in game_moves
+                    if m["side"] == player_color
+                    and m["move_number"] == opp_m["move_number"] + (1 if player_color == "black" else 0)
+                ]
+                if next_player and (next_player[0].get("swing_cp") or 0) <= GOOD_ENOUGH_THRESHOLD:
+                    opportunities_found += 1
+
+    return {
+        "total_critical": total_critical,
+        "handled_well": handled_well,
+        "success_rate": round(handled_well / total_critical * 100, 1) if total_critical else 0,
+        "opportunities_found": opportunities_found,
+        "opportunities_total": opportunities_total,
+        "opportunity_rate": round(opportunities_found / opportunities_total * 100, 1) if opportunities_total else 0,
+        "examples": critical_details[:10],
+    }
+
+
+def _compute_comeback_collapse(games: list[dict],
+                               moves_by_game: dict[int, list[dict]]) -> dict:
+    """Comeback and Collapse rates.
+
+    - Comeback: player was losing (>-200cp) at some point but won/drew
+    - Collapse: player was winning (>+200cp) at some point but lost/drew
+    """
+    EVAL_CAP = 1000
+    THRESHOLD = 200  # cp advantage/disadvantage
+
+    stats = {
+        "comebacks": {"total_losing_games": 0, "recovered": 0, "won": 0, "drawn": 0},
+        "collapses": {"total_winning_games": 0, "collapsed": 0, "lost": 0, "drawn": 0},
+    }
+
+    for g in games:
+        player_moves = [
+            m for m in moves_by_game.get(g["id"], [])
+            if m["side"] == g["player_color"]
+        ]
+        if not player_moves:
+            continue
+
+        # Track max advantage and max disadvantage during the game
+        max_advantage = 0
+        max_disadvantage = 0
+
+        for m in player_moves:
+            eval_cp = m.get("eval_before_cp") or 0
+            eval_cp = max(-EVAL_CAP, min(EVAL_CAP, eval_cp))
+            # Normalize to player perspective
+            if g["player_color"] == "black":
+                eval_cp = -eval_cp
+            max_advantage = max(max_advantage, eval_cp)
+            max_disadvantage = min(max_disadvantage, eval_cp)
+
+        # Was losing at some point?
+        if max_disadvantage <= -THRESHOLD:
+            stats["comebacks"]["total_losing_games"] += 1
+            if g["result"] == "win":
+                stats["comebacks"]["recovered"] += 1
+                stats["comebacks"]["won"] += 1
+            elif g["result"] == "draw":
+                stats["comebacks"]["recovered"] += 1
+                stats["comebacks"]["drawn"] += 1
+
+        # Was winning at some point?
+        if max_advantage >= THRESHOLD:
+            stats["collapses"]["total_winning_games"] += 1
+            if g["result"] == "loss":
+                stats["collapses"]["collapsed"] += 1
+                stats["collapses"]["lost"] += 1
+            elif g["result"] == "draw" and max_advantage >= THRESHOLD * 2:
+                # Only count draws as collapses if advantage was very large
+                stats["collapses"]["collapsed"] += 1
+                stats["collapses"]["drawn"] += 1
+
+    cb = stats["comebacks"]
+    cb["comeback_rate"] = round(
+        cb["recovered"] / cb["total_losing_games"] * 100, 1
+    ) if cb["total_losing_games"] else 0
+
+    cl = stats["collapses"]
+    cl["collapse_rate"] = round(
+        cl["collapsed"] / cl["total_winning_games"] * 100, 1
+    ) if cl["total_winning_games"] else 0
+
+    return stats
+
+
+def _compute_opening_acpl(games: list[dict],
+                          moves_by_game: dict[int, list[dict]]) -> list[dict]:
+    """ACPL per opening — reveals which openings the player handles well vs poorly.
+
+    Only includes openings with 3+ games for statistical relevance.
+    """
+    EVAL_CAP = 1000
+    opening_data = defaultdict(lambda: {
+        "acpl_sum": 0, "games": 0, "wins": 0, "losses": 0, "draws": 0,
+        "blunders": 0, "total_moves": 0,
+    })
+
+    for g in games:
+        name = _get_opening_name(g["pgn"])
+        opening_data[name]["games"] += 1
+        if g["result"] == "win":
+            opening_data[name]["wins"] += 1
+        elif g["result"] == "loss":
+            opening_data[name]["losses"] += 1
+        else:
+            opening_data[name]["draws"] += 1
+
+        # Compute ACPL for opening phase only (moves 1-15)
+        player_moves = [
+            m for m in moves_by_game.get(g["id"], [])
+            if m["side"] == g["player_color"] and m["move_number"] <= 15
+        ]
+        if player_moves:
+            losses = []
+            for m in player_moves:
+                before = max(-EVAL_CAP, min(EVAL_CAP, m.get("eval_before_cp") or 0))
+                after = max(-EVAL_CAP, min(EVAL_CAP, m.get("eval_after_cp") or 0))
+                if m["side"] == "white":
+                    losses.append(max(0, before - after))
+                else:
+                    losses.append(max(0, after - before))
+                if m["classification"] == "blunder":
+                    opening_data[name]["blunders"] += 1
+                opening_data[name]["total_moves"] += 1
+
+            game_acpl = sum(losses) / len(losses) if losses else 0
+            opening_data[name]["acpl_sum"] += game_acpl
+
+    # Filter to openings with 3+ games and sort by ACPL
+    result = []
+    for name, data in opening_data.items():
+        if data["games"] >= 3:
+            acpl = round(data["acpl_sum"] / data["games"], 1) if data["games"] else 0
+            win_rate = round(data["wins"] / data["games"] * 100, 1) if data["games"] else 0
+            blunder_rate = round(
+                data["blunders"] / data["total_moves"] * 100, 1
+            ) if data["total_moves"] else 0
+
+            # Rate the opening for this player
+            if acpl < 30 and win_rate >= 60:
+                recommendation = "Strong — keep playing"
+            elif acpl < 50 and win_rate >= 45:
+                recommendation = "Solid — room to improve"
+            elif acpl > 80 or win_rate < 35:
+                recommendation = "Struggling — study or consider alternatives"
+            else:
+                recommendation = "Average — needs more games"
+
+            result.append({
+                "name": name,
+                "games": data["games"],
+                "wins": data["wins"],
+                "losses": data["losses"],
+                "draws": data["draws"],
+                "win_rate": win_rate,
+                "opening_acpl": acpl,
+                "blunder_rate": blunder_rate,
+                "recommendation": recommendation,
+            })
+
+    # Sort: worst ACPL first (areas needing improvement)
+    result.sort(key=lambda x: -x["opening_acpl"])
+    return result
+
+
+def _compute_tactical_misses(games: list[dict],
+                             moves_by_game: dict[int, list[dict]]) -> dict:
+    """Tactical Miss Rate.
+
+    Positions where a large advantage (>200cp) was available but the
+    player missed it (played a move with >100cp loss). Counts how often
+    the player fails to capitalize on tactical opportunities.
+    """
+    EVAL_CAP = 1000
+    OPPORTUNITY_THRESHOLD = 200  # cp advantage available
+    MISS_THRESHOLD = 100  # cp loss that counts as "missed"
+
+    total_opportunities = 0
+    missed = 0
+    found = 0
+    miss_by_phase = {"opening": 0, "middlegame": 0, "endgame": 0}
+    opp_by_phase = {"opening": 0, "middlegame": 0, "endgame": 0}
+
+    for g in games:
+        player_color = g["player_color"]
+        opp_color = "black" if player_color == "white" else "white"
+        game_moves = moves_by_game.get(g["id"], [])
+
+        for m in game_moves:
+            if m["side"] != player_color:
+                continue
+
+            # Was there an opportunity? Check if best move gives big advantage
+            eval_before = max(-EVAL_CAP, min(EVAL_CAP, m.get("eval_before_cp") or 0))
+            eval_after = max(-EVAL_CAP, min(EVAL_CAP, m.get("eval_after_cp") or 0))
+
+            # Player's perspective
+            if player_color == "white":
+                player_eval_before = eval_before
+                cp_loss = max(0, eval_before - eval_after)
+            else:
+                player_eval_before = -eval_before
+                cp_loss = max(0, eval_after - eval_before)
+
+            # Tactical opportunity: position was good for the player AND
+            # best move was significantly better than what was played
+            best_move = m.get("best_move")
+            played = m.get("move_played")
+
+            if best_move and best_move != played and cp_loss >= MISS_THRESHOLD:
+                phase = _classify_game_phase(m["move_number"])
+                total_opportunities += 1
+                opp_by_phase[phase] += 1
+
+                if cp_loss >= OPPORTUNITY_THRESHOLD:
+                    missed += 1
+                    miss_by_phase[phase] += 1
+                else:
+                    found += 1
+
+    return {
+        "total_opportunities": total_opportunities,
+        "missed": missed,
+        "found": found,
+        "miss_rate": round(missed / total_opportunities * 100, 1) if total_opportunities else 0,
+        "find_rate": round(found / total_opportunities * 100, 1) if total_opportunities else 0,
+        "miss_by_phase": miss_by_phase,
+        "opportunities_by_phase": opp_by_phase,
+    }
+
+
+def _compute_repertoire_consistency(games: list[dict]) -> dict:
+    """Repertoire Consistency — does the player stick to a small set of openings?
+
+    A consistent repertoire aids improvement. Measures:
+    - How many unique openings used (as white and black)
+    - What % of games use the top 3 openings
+    - Consistency score (higher = more focused)
+    """
+    white_openings = defaultdict(int)
+    black_openings = defaultdict(int)
+
+    for g in games:
+        name = _get_opening_name(g["pgn"])
+        if g["player_color"] == "white":
+            white_openings[name] += 1
+        else:
+            black_openings[name] += 1
+
+    def _analyze_repertoire(opening_counts: dict, total_games: int) -> dict:
+        if not opening_counts:
+            return {
+                "unique_openings": 0, "top_3": [], "top_3_pct": 0,
+                "consistency_score": 0, "rating": "No games",
+            }
+
+        sorted_openings = sorted(opening_counts.items(), key=lambda x: -x[1])
+        top_3 = sorted_openings[:3]
+        top_3_games = sum(c for _, c in top_3)
+        top_3_pct = round(top_3_games / total_games * 100, 1) if total_games else 0
+
+        # Consistency score: % of games in top 3 openings
+        # Penalized by number of unique openings
+        unique = len(opening_counts)
+        if unique <= 3:
+            consistency = top_3_pct
+        elif unique <= 6:
+            consistency = top_3_pct * 0.9
+        else:
+            consistency = top_3_pct * 0.75
+
+        consistency = round(min(100, consistency), 1)
+
+        if consistency >= 75:
+            rating = "Very focused"
+        elif consistency >= 55:
+            rating = "Reasonably consistent"
+        elif consistency >= 35:
+            rating = "Scattered"
+        else:
+            rating = "No clear repertoire"
+
+        return {
+            "unique_openings": unique,
+            "top_3": [{"name": n, "games": c, "pct": round(c / total_games * 100, 1)} for n, c in top_3],
+            "top_3_pct": top_3_pct,
+            "consistency_score": consistency,
+            "rating": rating,
+        }
+
+    white_games = sum(white_openings.values())
+    black_games = sum(black_openings.values())
+
+    return {
+        "white": _analyze_repertoire(white_openings, white_games),
+        "black": _analyze_repertoire(black_openings, black_games),
+        "total_unique": len(set(list(white_openings.keys()) + list(black_openings.keys()))),
+    }
 
 
 def update_patterns(db_path: str | None = None) -> int:

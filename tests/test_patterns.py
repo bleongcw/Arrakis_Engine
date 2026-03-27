@@ -15,6 +15,11 @@ from src.patterns import (
     _compute_danger_zones,
     _compute_endgame_conversion,
     _compute_time_control_performance,
+    _compute_critical_positions,
+    _compute_comeback_collapse,
+    _compute_opening_acpl,
+    _compute_tactical_misses,
+    _compute_repertoire_consistency,
     compute_player_patterns,
     update_patterns,
 )
@@ -274,6 +279,160 @@ class TestComputeTimeControlPerformance:
         assert result["blitz"]["games"] == 1
         assert result["blitz"]["win_rate"] == 100.0
         assert result["rapid"]["acpl"] == 65.0  # (50+80)/2
+
+
+class TestComputeCriticalPositions:
+    def test_detects_critical_moments(self):
+        games = [{"id": 1, "player_color": "white", "date_played": "2026-03-01"}]
+        moves = {1: [
+            {"side": "white", "move_number": 5, "swing_cp": 300, "classification": "blunder",
+             "move_played": "Qh5", "best_move": "Nf3", "eval_before_cp": 50, "eval_after_cp": -250},
+            {"side": "white", "move_number": 10, "swing_cp": 10, "classification": "excellent",
+             "move_played": "e4", "best_move": "e4", "eval_before_cp": 0, "eval_after_cp": 0},
+            {"side": "black", "move_number": 6, "swing_cp": 400, "classification": "blunder",
+             "move_played": "a6", "best_move": "Nf6", "eval_before_cp": -250, "eval_after_cp": 150},
+        ]}
+        result = _compute_critical_positions(games, moves)
+        assert result["total_critical"] >= 1
+
+    def test_empty_games(self):
+        result = _compute_critical_positions([], {})
+        assert result["total_critical"] == 0
+        assert result["success_rate"] == 0
+
+
+class TestComputeComebackCollapse:
+    def test_comeback_detected(self):
+        games = [{"id": 1, "player_color": "white", "result": "win"}]
+        moves = {1: [
+            {"side": "white", "move_number": 10, "eval_before_cp": -300, "classification": "good"},
+            {"side": "white", "move_number": 20, "eval_before_cp": 100, "classification": "excellent"},
+        ]}
+        result = _compute_comeback_collapse(games, moves)
+        assert result["comebacks"]["total_losing_games"] == 1
+        assert result["comebacks"]["recovered"] == 1
+        assert result["comebacks"]["comeback_rate"] == 100.0
+
+    def test_collapse_detected(self):
+        games = [{"id": 1, "player_color": "white", "result": "loss"}]
+        moves = {1: [
+            {"side": "white", "move_number": 10, "eval_before_cp": 400, "classification": "good"},
+            {"side": "white", "move_number": 30, "eval_before_cp": -100, "classification": "blunder"},
+        ]}
+        result = _compute_comeback_collapse(games, moves)
+        assert result["collapses"]["total_winning_games"] == 1
+        assert result["collapses"]["collapsed"] == 1
+
+    def test_no_extremes(self):
+        games = [{"id": 1, "player_color": "white", "result": "draw"}]
+        moves = {1: [
+            {"side": "white", "move_number": 10, "eval_before_cp": 50, "classification": "good"},
+        ]}
+        result = _compute_comeback_collapse(games, moves)
+        assert result["comebacks"]["total_losing_games"] == 0
+        assert result["collapses"]["total_winning_games"] == 0
+
+
+class TestComputeOpeningACPL:
+    def test_filters_by_min_games(self):
+        # Only 2 games of Italian — should be excluded (needs 3+)
+        games = [
+            {"id": 1, "player_color": "white", "result": "win",
+             "pgn": '[Opening "Italian Game"]\n1. e4 e5 *'},
+            {"id": 2, "player_color": "white", "result": "loss",
+             "pgn": '[Opening "Italian Game"]\n1. e4 e5 *'},
+        ]
+        moves = {
+            1: [{"side": "white", "move_number": 5, "eval_before_cp": 20,
+                 "eval_after_cp": 10, "classification": "good"}],
+            2: [{"side": "white", "move_number": 5, "eval_before_cp": 20,
+                 "eval_after_cp": -100, "classification": "mistake"}],
+        }
+        result = _compute_opening_acpl(games, moves)
+        assert len(result) == 0  # Not enough games
+
+    def test_with_enough_games(self):
+        games = [
+            {"id": i, "player_color": "white", "result": "win",
+             "pgn": '[Opening "Sicilian Defense"]\n1. e4 c5 *'}
+            for i in range(1, 5)
+        ]
+        moves = {
+            i: [{"side": "white", "move_number": 5, "eval_before_cp": 20,
+                 "eval_after_cp": 10, "classification": "good"}]
+            for i in range(1, 5)
+        }
+        result = _compute_opening_acpl(games, moves)
+        assert len(result) == 1
+        assert result[0]["name"] == "Sicilian Defense"
+        assert result[0]["games"] == 4
+        assert result[0]["recommendation"] is not None
+
+
+class TestComputeTacticalMisses:
+    def test_counts_misses(self):
+        games = [{"id": 1, "player_color": "white"}]
+        moves = {1: [
+            # Missed opportunity: best was much better, played suboptimal
+            {"side": "white", "move_number": 10, "swing_cp": 250,
+             "move_played": "a3", "best_move": "Nxf7", "classification": "blunder",
+             "eval_before_cp": 100, "eval_after_cp": -150},
+            # Found the tactic
+            {"side": "white", "move_number": 15, "swing_cp": 5,
+             "move_played": "Nxf7", "best_move": "Nxf7", "classification": "excellent",
+             "eval_before_cp": 200, "eval_after_cp": 195},
+        ]}
+        result = _compute_tactical_misses(games, moves)
+        assert result["missed"] >= 1
+        assert result["total_opportunities"] >= 1
+
+    def test_empty(self):
+        result = _compute_tactical_misses([], {})
+        assert result["miss_rate"] == 0
+
+
+class TestComputeRepertoireConsistency:
+    def test_focused_repertoire(self):
+        # 10 games all the same opening
+        games = [
+            {"id": i, "player_color": "white",
+             "pgn": '[Opening "Italian Game"]\n1. e4 e5 *'}
+            for i in range(1, 11)
+        ]
+        result = _compute_repertoire_consistency(games)
+        assert result["white"]["unique_openings"] == 1
+        assert result["white"]["top_3_pct"] == 100.0
+        assert result["white"]["rating"] == "Very focused"
+
+    def test_scattered_repertoire(self):
+        games = [
+            {"id": i, "player_color": "white",
+             "pgn": f'[Opening "Opening {i}"]\n1. e4 e5 *'}
+            for i in range(1, 21)
+        ]
+        result = _compute_repertoire_consistency(games)
+        assert result["white"]["unique_openings"] == 20
+        assert result["white"]["rating"] in ("Scattered", "No clear repertoire")
+
+    def test_splits_by_color(self):
+        games = [
+            {"id": 1, "player_color": "white", "pgn": '[Opening "Italian"]\n1. e4 *'},
+            {"id": 2, "player_color": "black", "pgn": '[Opening "Sicilian"]\n1. e4 c5 *'},
+        ]
+        result = _compute_repertoire_consistency(games)
+        assert result["white"]["unique_openings"] == 1
+        assert result["black"]["unique_openings"] == 1
+        assert result["total_unique"] == 2
+
+
+class TestComputePlayerPatternsPhase2:
+    def test_includes_phase2_keys(self, db_path, populated_db):
+        stats = compute_player_patterns(populated_db, db_path=db_path)
+        assert "critical_positions" in stats
+        assert "comeback_collapse" in stats
+        assert "opening_acpl" in stats
+        assert "tactical_misses" in stats
+        assert "repertoire_consistency" in stats
 
 
 class TestUpdatePatterns:
