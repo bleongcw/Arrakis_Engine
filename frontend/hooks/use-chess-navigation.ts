@@ -8,22 +8,45 @@ export function useChessNavigation(pgn: string, playerColor: "white" | "black") 
 
   // Parse PGN into array of FENs
   const { fens, moves } = useMemo(() => {
+    if (!pgn || pgn.trim() === "") {
+      return { fens: [new Chess().fen()], moves: [] as string[] };
+    }
+
     const chess = new Chess();
+
+    // Try loading PGN — chess.js v1.0+ throws on failure
     try {
       chess.loadPgn(pgn);
-    } catch {
+    } catch (e) {
+      console.warn("Failed to load PGN:", e);
       return { fens: [chess.fen()], moves: [] as string[] };
     }
-    const history = chess.history();
-    chess.reset();
 
+    const history = chess.history();
+    if (history.length === 0) {
+      console.warn("PGN loaded but no moves found");
+      return { fens: [chess.fen()], moves: [] as string[] };
+    }
+
+    // Rebuild FEN for each position
+    chess.reset();
     const fenList = [chess.fen()];
     for (const move of history) {
-      chess.move(move);
-      fenList.push(chess.fen());
+      try {
+        chess.move(move);
+        fenList.push(chess.fen());
+      } catch (e) {
+        console.warn(`Failed to replay move ${move}:`, e);
+        break;
+      }
     }
 
     return { fens: fenList, moves: history };
+  }, [pgn]);
+
+  // Reset move index when PGN changes
+  useEffect(() => {
+    setMoveIndex(-1);
   }, [pgn]);
 
   const currentFen = fens[moveIndex + 1] || fens[0];
@@ -40,6 +63,10 @@ export function useChessNavigation(pgn: string, playerColor: "white" | "black") 
   // Keyboard navigation
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      // Don't intercept if user is typing in an input
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
       if (e.key === "ArrowLeft") {
         e.preventDefault();
         goBack();
