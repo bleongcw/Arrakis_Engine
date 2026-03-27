@@ -3,6 +3,7 @@
 
 import argparse
 import logging
+import os
 import sys
 
 import yaml
@@ -77,11 +78,38 @@ def cmd_harvest(args, config):
 
 def cmd_analyze(args, config):
     """Run Stockfish analysis on pending games."""
+    import shutil
     sf_config = config["stockfish"]
     db_path = config["database"]["path"]
+    sf_path = sf_config["path"]
+
+    # Validate Stockfish binary exists before starting
+    if not os.path.isfile(sf_path):
+        # Try to find it on PATH as a fallback
+        found = shutil.which("stockfish")
+        if found:
+            print(f"⚠️  Stockfish not found at '{sf_path}', but found at '{found}'.")
+            print(f"   Update stockfish.path in config.yaml to: {found}")
+            sf_path = found
+        else:
+            print(f"❌ Stockfish binary not found at '{sf_path}'.")
+            print()
+            print("To fix this:")
+            print("  1. Install Stockfish:")
+            print("     macOS:  brew install stockfish")
+            print("     Ubuntu: sudo apt install stockfish")
+            print("     Or download from: https://stockfishchess.org/download/")
+            print()
+            print("  2. Update stockfish.path in config.yaml:")
+            print("     stockfish:")
+            print(f"       path: /opt/homebrew/bin/stockfish  # or run: which stockfish")
+            print()
+            print("  3. Verify it works:")
+            print("     stockfish <<< 'quit'")
+            return
 
     count = analyze_pending(
-        stockfish_path=sf_config["path"],
+        stockfish_path=sf_path,
         depth=sf_config["depth"],
         threads=sf_config["threads"],
         hash_mb=sf_config["hash_mb"],

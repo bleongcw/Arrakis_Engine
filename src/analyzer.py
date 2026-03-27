@@ -268,7 +268,17 @@ def analyze_pending(stockfish_path: str, depth: int = 22,
     """Analyze all games with pending analysis status.
 
     Returns the number of games analyzed.
+
+    Raises FileNotFoundError if the Stockfish binary doesn't exist.
     """
+    import os
+    if not os.path.isfile(stockfish_path):
+        raise FileNotFoundError(
+            f"Stockfish binary not found at '{stockfish_path}'. "
+            f"Install Stockfish and update stockfish.path in config.yaml. "
+            f"Run 'which stockfish' to find the correct path."
+        )
+
     conn = init_db(db_path)
 
     # Reset any games stuck in 'analyzing' from interrupted runs
