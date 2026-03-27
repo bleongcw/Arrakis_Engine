@@ -21,14 +21,13 @@ export function ChessBoard({
   return (
     <div style={{ width: boardWidth, height: boardWidth }}>
       <Chessboard
-        options={{
-          position,
-          boardOrientation: orientation,
-          allowDragging: false,
-          boardStyle: {
-            borderRadius: "4px",
-            boxShadow: "0 2px 10px rgba(0,0,0,0.2)",
-          },
+        position={position}
+        boardOrientation={orientation}
+        arePiecesDraggable={false}
+        boardWidth={boardWidth}
+        customBoardStyle={{
+          borderRadius: "4px",
+          boxShadow: "0 2px 10px rgba(0,0,0,0.2)",
         }}
       />
     </div>

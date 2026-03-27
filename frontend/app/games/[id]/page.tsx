@@ -105,15 +105,33 @@ function GameDetailView({
         </CardContent>
       </Card>
 
-      {/* Abandoned game notice */}
-      {moves.length === 0 && (
+      {/* Game status notices */}
+      {moves.length === 0 && game.analysis_status === "complete" && (
         <Card className="mb-4 border-yellow-500/50 bg-yellow-500/5">
           <CardContent className="py-4 text-center">
             <p className="text-sm font-medium text-yellow-600 dark:text-yellow-400">
-              This game was abandoned by the opponent before any moves were played.
+              ⚠ This game was abandoned or ended before meaningful moves were played.
             </p>
             <p className="text-xs text-muted-foreground mt-1">
-              No analysis is available for abandoned games.
+              No move analysis or coaching is available for this game.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+      {game.analysis_status === "pending" && (
+        <Card className="mb-4 border-blue-500/50 bg-blue-500/5">
+          <CardContent className="py-4 text-center">
+            <p className="text-sm font-medium text-blue-600 dark:text-blue-400">
+              ⏳ Analysis pending — run <code className="bg-muted px-1.5 py-0.5 rounded text-xs">python main.py analyze</code> to process this game.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+      {game.analysis_status === "error" && (
+        <Card className="mb-4 border-red-500/50 bg-red-500/5">
+          <CardContent className="py-4 text-center">
+            <p className="text-sm font-medium text-red-500">
+              ❌ Analysis failed for this game. Check server logs for details.
             </p>
           </CardContent>
         </Card>
