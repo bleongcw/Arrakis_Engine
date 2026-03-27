@@ -33,35 +33,44 @@ export function ACPLTrendChart({ data }: ACPLTrendChartProps) {
             ⓘ
           </span>
           {showInfo && (
-            <div className="absolute left-0 top-6 z-50 w-[340px] p-4 rounded-lg border bg-card text-card-foreground shadow-lg text-sm">
-              <p className="font-semibold mb-2">Average Centipawn Loss (ACPL)</p>
-              <p className="mb-2 text-muted-foreground">
-                Measures how much your moves deviate from the engine&apos;s best
-                move, averaged across all moves in a game. One centipawn = 1/100th
-                of a pawn.
-              </p>
-              <p className="font-medium mb-1">How it&apos;s calculated:</p>
-              <p className="text-xs text-muted-foreground mb-2">
-                For each move: loss = |best move eval − your move eval|<br />
-                ACPL = sum of all losses ÷ number of moves
-              </p>
-              <p className="font-medium mb-1">Benchmarks by level:</p>
-              <ul className="text-xs text-muted-foreground space-y-0.5 mb-2">
-                <li>• 10–20: Super Grandmaster</li>
-                <li>• 20–30: Master (2200+)</li>
-                <li>• 30–50: Expert (1800–2200)</li>
-                <li>• 50–100: Intermediate (1200–1800)</li>
-                <li>• 100–200: Beginner / Elementary</li>
-                <li>• 200+: Just starting out</li>
-              </ul>
-              <p className="font-medium text-green-600 dark:text-green-400 mb-1">
-                Lower is better.
-              </p>
-              <p className="text-xs text-muted-foreground italic">
-                A downward trend means you&apos;re improving! Note: ACPL varies by
-                time control (blitz tends higher) and engine depth.
-              </p>
-            </div>
+            <>
+              {/* Backdrop to catch mouse leave */}
+              <div className="fixed inset-0 z-40" onMouseEnter={() => setShowInfo(false)} />
+              <div className="fixed z-50 w-[320px] p-4 rounded-lg border bg-card text-card-foreground shadow-xl text-sm"
+                   style={{ top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }}>
+                <div className="flex justify-between items-start mb-2">
+                  <p className="font-semibold">Average Centipawn Loss (ACPL)</p>
+                  <button
+                    onClick={() => setShowInfo(false)}
+                    className="text-muted-foreground hover:text-foreground text-lg leading-none ml-2"
+                  >×</button>
+                </div>
+                <p className="mb-2 text-muted-foreground text-xs">
+                  Measures how much your moves deviate from the engine&apos;s best
+                  move, averaged across all moves. 1 centipawn = 1/100th of a pawn.
+                </p>
+                <p className="font-medium text-xs mb-1">Calculation:</p>
+                <p className="text-xs text-muted-foreground mb-2 font-mono">
+                  loss = |best eval − your eval|<br />
+                  ACPL = Σ losses ÷ moves
+                </p>
+                <p className="font-medium text-xs mb-1">Benchmarks:</p>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-xs text-muted-foreground mb-2">
+                  <span>10–20</span><span>Super GM</span>
+                  <span>20–30</span><span>Master (2200+)</span>
+                  <span>30–50</span><span>Expert (1800–2200)</span>
+                  <span>50–100</span><span>Intermediate</span>
+                  <span>100–200</span><span>Beginner</span>
+                  <span>200+</span><span>Just starting</span>
+                </div>
+                <p className="text-xs font-medium text-green-600 dark:text-green-400">
+                  ↓ Lower is better. Downward trend = improving!
+                </p>
+                <p className="text-[10px] text-muted-foreground italic mt-1">
+                  Varies by time control &amp; engine depth. Compare like with like.
+                </p>
+              </div>
+            </>
           )}
         </div>
       </div>
