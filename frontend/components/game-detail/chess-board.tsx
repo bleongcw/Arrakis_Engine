@@ -1,17 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import dynamic from "next/dynamic";
-
-const ReactChessboard = dynamic(
-  () => import("react-chessboard").then((mod) => mod.Chessboard),
-  {
-    ssr: false,
-    loading: () => (
-      <div className="w-[400px] h-[400px] bg-muted rounded animate-pulse" />
-    ),
-  }
-);
+import { useEffect, useState, useRef } from "react";
 
 interface ChessBoardProps {
   position: string;
@@ -24,13 +13,18 @@ export function ChessBoard({
   orientation,
   boardWidth = 400,
 }: ChessBoardProps) {
-  const [mounted, setMounted] = useState(false);
+  const [ChessboardComponent, setChessboardComponent] = useState<React.ComponentType<any> | null>(null);
+  const positionRef = useRef(position);
+  positionRef.current = position;
 
+  // Dynamically import on mount
   useEffect(() => {
-    setMounted(true);
+    import("react-chessboard").then((mod) => {
+      setChessboardComponent(() => mod.Chessboard);
+    });
   }, []);
 
-  if (!mounted) {
+  if (!ChessboardComponent) {
     return (
       <div
         style={{ width: boardWidth, height: boardWidth }}
@@ -41,7 +35,7 @@ export function ChessBoard({
 
   return (
     <div style={{ width: boardWidth, height: boardWidth }}>
-      <ReactChessboard
+      <ChessboardComponent
         id="analysis-board"
         position={position}
         boardOrientation={orientation}

@@ -146,6 +146,9 @@ function GameDetailView({
             orientation={nav.boardOrientation}
             boardWidth={400}
           />
+          <p className="text-[10px] text-muted-foreground font-mono truncate">
+            Move {nav.moveIndex + 1}/{nav.totalMoves} — {nav.currentFen.split(" ")[0].substring(0, 30)}…
+          </p>
           <MoveControls
             onStart={nav.goToStart}
             onBack={nav.goBack}
