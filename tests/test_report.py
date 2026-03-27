@@ -1,5 +1,7 @@
 """Tests for src/report.py"""
 
+from datetime import datetime, timedelta
+
 import pytest
 
 from src.report import generate_report
@@ -12,7 +14,8 @@ def db_with_games(tmp_path):
     conn = init_db(db_path)
     pid = ensure_player(conn, "testplayer", display_name="TestKid", age=9, rating=1050)
 
-    # Games within last week
+    # Games within last week — use relative dates so test never goes stale
+    recent_date = (datetime.now() - timedelta(days=2)).strftime("%Y-%m-%d")
     for i in range(3):
         result = ["win", "loss", "win"][i]
         conn.execute(
@@ -23,7 +26,7 @@ def db_with_games(tmp_path):
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (pid, f"https://chess.com/g/{i}", "1. e4 e5 *", "white",
              1050 + i * 10, 980 + i * 20, result, "600", "rapid",
-             "2026-03-19", "complete"),
+             recent_date, "complete"),
         )
     conn.commit()
     conn.close()
