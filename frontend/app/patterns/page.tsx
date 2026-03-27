@@ -8,6 +8,9 @@ import { ACPLTrendChart } from "@/components/patterns/acpl-trend-chart";
 import { MoveQualityDonut } from "@/components/patterns/move-quality-donut";
 import { PhasePerformance } from "@/components/patterns/phase-performance";
 import { OpeningPerformance } from "@/components/patterns/opening-performance";
+import { DangerZones } from "@/components/patterns/danger-zones";
+import { EndgameConversion } from "@/components/patterns/endgame-conversion";
+import { TimeControlPerformance } from "@/components/patterns/time-control-performance";
 import type { PatternStats } from "@/lib/types";
 
 export default function PatternsPage() {
@@ -39,28 +42,48 @@ export default function PatternsPage() {
     );
   }
 
+  const accuracy = stats.accuracy as any;
+  const consistency = stats.consistency as any;
+
   return (
     <div className="space-y-6">
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard
-          label="Total Games"
-          value={stats.total_games}
-        />
+      {/* Overview Stats Grid */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+        <StatCard label="Total Games" value={stats.total_games} />
         <StatCard
           label="Win Rate"
           value={`${stats.results.win_rate.toFixed(1)}%`}
           subtitle={`${stats.results.wins}W / ${stats.results.losses}L / ${stats.results.draws}D`}
         />
         <StatCard
+          label="Accuracy"
+          value={accuracy ? `${accuracy.overall_pct}%` : "—"}
+          subtitle={
+            accuracy
+              ? `${accuracy.best_moves}/${accuracy.total_moves} best moves`
+              : undefined
+          }
+        />
+        <StatCard
+          label="Avg ACPL"
+          value={consistency ? consistency.mean_acpl : "—"}
+          subtitle={
+            consistency
+              ? `Best: ${consistency.best_acpl} / Worst: ${consistency.worst_acpl}`
+              : undefined
+          }
+        />
+        <StatCard
+          label="Consistency"
+          value={consistency ? consistency.rating : "—"}
+          subtitle={
+            consistency ? `σ = ${consistency.std_dev}` : undefined
+          }
+        />
+        <StatCard
           label="vs Higher Rated"
           value={`${stats.rating_performance?.vs_higher?.win_rate?.toFixed(0) || 0}%`}
           subtitle={`${stats.rating_performance?.vs_higher?.games || 0} games`}
-        />
-        <StatCard
-          label="vs Lower Rated"
-          value={`${stats.rating_performance?.vs_lower?.win_rate?.toFixed(0) || 0}%`}
-          subtitle={`${stats.rating_performance?.vs_lower?.games || 0} games`}
         />
       </div>
 
@@ -71,7 +94,7 @@ export default function PatternsPage() {
         </CardContent>
       </Card>
 
-      {/* Move Quality + Phase Performance side by side */}
+      {/* Move Quality + Danger Zones side by side */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card>
           <CardContent className="pt-6">
@@ -80,10 +103,33 @@ export default function PatternsPage() {
         </Card>
         <Card>
           <CardContent className="pt-6">
-            <PhasePerformance data={stats.phase_analysis} />
+            <DangerZones data={stats.danger_zones as any} />
           </CardContent>
         </Card>
       </div>
+
+      {/* Phase Performance + Endgame Conversion side by side */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <Card>
+          <CardContent className="pt-6">
+            <PhasePerformance data={stats.phase_analysis} />
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-6">
+            <EndgameConversion data={stats.endgame_conversion as any} />
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Time Control Performance - full width */}
+      <Card>
+        <CardContent className="pt-6">
+          <TimeControlPerformance
+            data={stats.time_control_performance as any}
+          />
+        </CardContent>
+      </Card>
 
       {/* Opening Performance - full width */}
       <Card>
@@ -106,13 +152,13 @@ function StatCard({
 }) {
   return (
     <Card>
-      <CardContent className="pt-6">
-        <div className="text-xs text-muted-foreground uppercase tracking-wider">
+      <CardContent className="pt-5 pb-4">
+        <div className="text-[10px] text-muted-foreground uppercase tracking-wider">
           {label}
         </div>
-        <div className="text-3xl font-bold mt-1">{value}</div>
+        <div className="text-2xl font-bold mt-1">{value}</div>
         {subtitle && (
-          <div className="text-sm text-muted-foreground mt-1">{subtitle}</div>
+          <div className="text-xs text-muted-foreground mt-1">{subtitle}</div>
         )}
       </CardContent>
     </Card>

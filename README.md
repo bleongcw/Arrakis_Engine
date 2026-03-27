@@ -345,12 +345,19 @@ For each analyzed game, the LLM produces:
 
 Patterns are aggregated across all games per player:
 
+**Core Metrics:**
 - **Opening performance** — win rate by opening name, split by color (All / White / Black)
-- **ACPL trend** — per-game ACPL (±1000cp capped) averaged in weekly buckets; hover to see game count per week
-- **Phase analysis** — error frequency and ACPL in opening (moves 1–15), middlegame (16–30), endgame (31+) — all using capped evaluations
+- **ACPL trend** — per-game ACPL (±1000cp capped) averaged in weekly buckets with game data points
+- **Phase analysis** — error frequency and ACPL in opening (moves 1–15), middlegame (16–30), endgame (31+)
 - **Rating performance** — win rate vs. higher/lower/equal rated opponents
 - **Move quality distribution** — percentage of excellent/good/inaccuracy/mistake/blunder moves
-- **Time class stats** — win rate by rapid/blitz/bullet/daily
+
+**Advanced Metrics (Phase 1):**
+- **Accuracy %** — percentage of moves matching the engine's best move (higher = more precise play)
+- **Consistency Score** — standard deviation of per-game ACPL; rated as Very consistent / Consistent / Variable / Highly variable; includes best and worst game ACPL
+- **Danger Zones** — histogram of blunders and mistakes by move number range (5-move buckets), highlighting the move range with the highest error rate; reveals opening gaps, middlegame tactical weakness, or endgame fatigue
+- **Endgame Conversion** — tracks how well the player converts advantages: winning endgames (>200cp at move 30) converted to wins, losing endgames saved/drawn, equal endgames outplayed; includes endgame reach percentage
+- **Time Control Performance** — win rate, ACPL, and blunder rate per time format (bullet/blitz/rapid/daily); highlights best and weakest formats
 
 ## Web Dashboard
 
@@ -366,7 +373,7 @@ The dashboard is a live web app served by a built-in Python HTTP server. It quer
 - **Opening analysis** — LLM-generated assessment of the opening choice, quality rating, counter-move correctness, and tips
 - **On-demand coaching** — 🟣 Coach with Claude / 🟢 Coach with ChatGPT buttons on each game, with auto-refresh on completion
 - **Coaching model badge** — shows which LLM model generated the coaching (🟣 Claude / 🟢 OpenAI)
-- **Patterns dashboard** — stat cards, ACPL trend line chart, opening performance split by color (All / ♔ White / ♚ Black), move quality donut chart, phase analysis bar chart
+- **Patterns dashboard** — overview stat cards (games, win rate, accuracy %, ACPL, consistency, vs higher-rated), ACPL trend chart, move quality donut, danger zone histogram, phase performance, endgame conversion rates, time control breakdown, opening performance by color
 - **Player dashboard** — default landing page showing each player's profile with Chess.com, Lichess, and FIDE ratings, tier badge, and direct links to external profiles
 - **FIDE integration** — optional FIDE ID links to `ratings.fide.com/profile/{id}`, manually updated via `fide-update` CLI command
 - **Light/dark mode** — toggle with 🌙/☀️ button, persists across sessions
