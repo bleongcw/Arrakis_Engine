@@ -58,7 +58,7 @@ export function CriticalPositions({ data }: { data: CriticalPositionsData }) {
       </div>
 
       <div className="mt-4 pt-3 border-t text-xs text-muted-foreground space-y-1">
-        <p><strong>Under Pressure:</strong> % of critical moments (>200cp swing possible) where you found a good move</p>
+        <p><strong>Under Pressure:</strong> % of critical moments (&gt;200cp swing possible) where you found a good move</p>
         <p><strong>Capitalizing:</strong> % of opponent blunders where you took advantage</p>
       </div>
     </div>
