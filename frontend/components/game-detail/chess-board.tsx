@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import Image from "next/image";
 
 interface ChessBoardProps {
   position: string; // FEN string
@@ -8,10 +9,10 @@ interface ChessBoardProps {
   boardWidth?: number;
 }
 
-// Unicode chess pieces
-const PIECE_CHARS: Record<string, string> = {
-  K: "♔", Q: "♕", R: "♖", B: "♗", N: "♘", P: "♙",
-  k: "♚", q: "♛", r: "♜", b: "♝", n: "♞", p: "♟",
+// Map FEN characters to piece image filenames (lichess cburnett set)
+const PIECE_FILES: Record<string, string> = {
+  K: "wK", Q: "wQ", R: "wR", B: "wB", N: "wN", P: "wP",
+  k: "bK", q: "bQ", r: "bR", b: "bB", n: "bN", p: "bP",
 };
 
 function fenToBoard(fen: string): (string | null)[][] {
@@ -37,6 +38,7 @@ export function ChessBoard({
   const board = useMemo(() => fenToBoard(position), [position]);
   const squareSize = boardWidth / 8;
   const isFlipped = orientation === "black";
+  const pieceSize = squareSize * 0.85;
 
   const files = ["a", "b", "c", "d", "e", "f", "g", "h"];
   const ranks = ["8", "7", "6", "5", "4", "3", "2", "1"];
@@ -47,7 +49,7 @@ export function ChessBoard({
   return (
     <div
       style={{ width: boardWidth, height: boardWidth, position: "relative" }}
-      className="rounded shadow-lg overflow-hidden select-none"
+      className="rounded-md shadow-lg overflow-hidden select-none"
     >
       {displayRanks.map((rank, rowIdx) => {
         const boardRow = isFlipped ? 7 - rowIdx : rowIdx;
@@ -55,6 +57,7 @@ export function ChessBoard({
           const boardCol = isFlipped ? 7 - colIdx : colIdx;
           const isLight = (boardRow + boardCol) % 2 === 0;
           const piece = board[boardRow]?.[boardCol];
+          const pieceFile = piece ? PIECE_FILES[piece] : null;
 
           return (
             <div
@@ -69,24 +72,21 @@ export function ChessBoard({
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                fontSize: squareSize * 0.75,
-                lineHeight: 1,
-                userSelect: "none",
               }}
             >
-              {piece && (
-                <span
+              {pieceFile && (
+                <Image
+                  src={`/pieces/${pieceFile}.svg`}
+                  alt={pieceFile}
+                  width={pieceSize}
+                  height={pieceSize}
                   style={{
-                    textShadow: piece === piece.toUpperCase()
-                      ? "0 0 2px rgba(0,0,0,0.3)"
-                      : "0 0 2px rgba(255,255,255,0.3)",
-                    filter: piece === piece.toUpperCase()
-                      ? "drop-shadow(0 1px 1px rgba(0,0,0,0.2))"
-                      : "drop-shadow(0 1px 1px rgba(0,0,0,0.4))",
+                    filter: "drop-shadow(0 1px 2px rgba(0,0,0,0.3))",
+                    pointerEvents: "none",
                   }}
-                >
-                  {PIECE_CHARS[piece]}
-                </span>
+                  priority
+                  unoptimized
+                />
               )}
               {/* Rank label on left edge */}
               {colIdx === 0 && (
@@ -96,7 +96,7 @@ export function ChessBoard({
                     top: 2,
                     left: 3,
                     fontSize: 10,
-                    fontWeight: 600,
+                    fontWeight: 700,
                     color: isLight ? "#b58863" : "#f0d9b5",
                     fontFamily: "sans-serif",
                   }}
@@ -112,7 +112,7 @@ export function ChessBoard({
                     bottom: 1,
                     right: 3,
                     fontSize: 10,
-                    fontWeight: 600,
+                    fontWeight: 700,
                     color: isLight ? "#b58863" : "#f0d9b5",
                     fontFamily: "sans-serif",
                   }}
