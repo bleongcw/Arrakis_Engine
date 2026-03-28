@@ -230,6 +230,53 @@ def cmd_fide_update(args, config):
         print(f"  Profile: https://ratings.fide.com/profile/{updated['fide_id']}")
 
 
+def cmd_backfill_clocks(args, config):
+    """Backfill clock_seconds from PGN annotations for existing games."""
+    from src.analyzer import extract_clocks_from_pgn
+    db_path = config["database"]["path"]
+    conn = init_db(db_path)
+
+    # Find games that have been analyzed but have no clock data
+    games = conn.execute(
+        """SELECT g.id, g.pgn FROM games g
+        WHERE g.analysis_status = 'complete'
+        AND EXISTS (SELECT 1 FROM move_analysis m WHERE m.game_id = g.id AND m.clock_seconds IS NULL)"""
+    ).fetchall()
+
+    if not games:
+        print("No games need clock backfill.")
+        conn.close()
+        return
+
+    updated_games = 0
+    updated_moves = 0
+    for game in games:
+        clocks = extract_clocks_from_pgn(game["pgn"])
+        if not any(c is not None for c in clocks):
+            continue  # No clock data in this PGN
+
+        moves = conn.execute(
+            """SELECT id, move_number, side FROM move_analysis
+            WHERE game_id = ? ORDER BY move_number, CASE side WHEN 'white' THEN 0 ELSE 1 END""",
+            (game["id"],),
+        ).fetchall()
+
+        for idx, move in enumerate(moves):
+            clock_val = clocks[idx] if idx < len(clocks) else None
+            if clock_val is not None:
+                conn.execute(
+                    "UPDATE move_analysis SET clock_seconds = ? WHERE id = ?",
+                    (clock_val, move["id"]),
+                )
+                updated_moves += 1
+
+        updated_games += 1
+
+    conn.commit()
+    conn.close()
+    print(f"Backfilled clock data: {updated_games} games, {updated_moves} moves updated.")
+
+
 def cmd_run_all(args, config):
     """Run the full pipeline: harvest → analyze → coach → patterns → export."""
     print("=== Step 1/5: Harvesting games ===")
@@ -315,6 +362,9 @@ def main():
     fide_parser.add_argument("--rating", type=int, help="New FIDE rating")
     fide_parser.add_argument("--fide-id", help="FIDE player ID (e.g., 5871042)")
 
+    # backfill-clocks
+    backfill_parser = subparsers.add_parser("backfill-clocks", help="Backfill clock data from PGN annotations")
+
     # run-all
     run_all_parser = subparsers.add_parser("run-all", help="Run full pipeline")
     run_all_parser.add_argument("--player", action="append", help="Username(s)")
@@ -350,6 +400,8 @@ def main():
         cmd_dashboard(args, config)
     elif args.command == "fide-update":
         cmd_fide_update(args, config)
+    elif args.command == "backfill-clocks":
+        cmd_backfill_clocks(args, config)
     elif args.command == "run-all":
         cmd_run_all(args, config)
 

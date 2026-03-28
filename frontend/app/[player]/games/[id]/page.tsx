@@ -68,7 +68,7 @@ function GameDetailView({
   return (
     <div>
       {/* Header */}
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
         <div className="flex items-center gap-3">
           <Button variant="outline" size="sm" onClick={() => router.push(`/${playerUsername}/games`)}>
             &larr; Back to Games
@@ -141,13 +141,13 @@ function GameDetailView({
       )}
 
       {/* Main grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-[420px_1fr] gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(280px,420px)_1fr] gap-6">
         {/* Left column: Board + moves */}
         <div className="space-y-4">
           <ChessBoard
             position={nav.currentFen}
             orientation={nav.boardOrientation}
-            boardWidth={400}
+            maxWidth={400}
           />
           <MoveControls
             onStart={nav.goToStart}

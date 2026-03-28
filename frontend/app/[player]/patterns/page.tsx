@@ -17,6 +17,7 @@ import { ComebackCollapse } from "@/components/patterns/comeback-collapse";
 import { OpeningACPL } from "@/components/patterns/opening-acpl";
 import { TacticalMisses } from "@/components/patterns/tactical-misses";
 import { RepertoireConsistency } from "@/components/patterns/repertoire-consistency";
+import { TimePressure } from "@/components/patterns/time-pressure";
 import { TrendSummary } from "@/components/patterns/trend-summary";
 import type { PatternStats } from "@/lib/types";
 
@@ -183,6 +184,16 @@ export default function PatternsPage() {
           />
         </CardContent>
       </Card>
+
+      {/* Time Pressure Analysis - full width */}
+      {stats.time_pressure && (
+        <Card>
+          <CardContent className="pt-6">
+            <TimePressure data={stats.time_pressure} />
+          </CardContent>
+        </Card>
+      )}
+
 
       {/* Opening Quality Analysis - full width */}
       <Card>

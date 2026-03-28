@@ -119,6 +119,28 @@ export interface OpeningEntry {
   game_list?: OpeningGameEntry[];
 }
 
+export interface TimePressureStats {
+  games_with_clocks: number;
+  time_trouble_rate: number;
+  avg_time_per_move: number;
+  phase_avg_time: {
+    opening: number;
+    middlegame: number;
+    endgame: number;
+  };
+  blunder_rate_under_pressure: number;
+  blunder_rate_comfortable: number;
+  moves_under_pressure: number;
+  moves_comfortable: number;
+  time_management_score: number;
+}
+
+export interface OpeningBookEntry {
+  eco: string;
+  name: string;
+  moves: string;
+}
+
 export interface PatternStats {
   total_games: number;
   results: {
@@ -166,6 +188,8 @@ export interface PatternStats {
   opening_acpl?: unknown;
   tactical_misses?: unknown;
   repertoire_consistency?: unknown;
+  // Time pressure
+  time_pressure?: TimePressureStats | null;
 }
 
 export interface ReportData {

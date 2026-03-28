@@ -1,12 +1,13 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useRef, useState, useEffect } from "react";
 import Image from "next/image";
 
 interface ChessBoardProps {
   position: string; // FEN string
   orientation: "white" | "black";
-  boardWidth?: number;
+  boardWidth?: number; // If set, uses fixed width. If omitted, auto-sizes to fill container.
+  maxWidth?: number;
 }
 
 // Map FEN characters to piece image filenames (lichess cburnett set)
@@ -33,8 +34,27 @@ function fenToBoard(fen: string): (string | null)[][] {
 export function ChessBoard({
   position,
   orientation,
-  boardWidth = 400,
+  boardWidth: fixedWidth,
+  maxWidth = 400,
 }: ChessBoardProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [measuredWidth, setMeasuredWidth] = useState(fixedWidth ?? maxWidth);
+
+  useEffect(() => {
+    if (fixedWidth) return; // Skip ResizeObserver when width is explicitly set
+    const el = containerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width;
+      if (w) setMeasuredWidth(Math.min(w, maxWidth));
+    });
+    ro.observe(el);
+    // Initial measurement
+    setMeasuredWidth(Math.min(el.clientWidth, maxWidth));
+    return () => ro.disconnect();
+  }, [fixedWidth, maxWidth]);
+
+  const boardWidth = fixedWidth ?? measuredWidth;
   const board = useMemo(() => fenToBoard(position), [position]);
   const squareSize = boardWidth / 8;
   const isFlipped = orientation === "black";
@@ -47,8 +67,9 @@ export function ChessBoard({
   const displayFiles = isFlipped ? [...files].reverse() : files;
 
   return (
+    <div ref={containerRef} className={fixedWidth ? "" : "w-full"}>
     <div
-      style={{ width: boardWidth, height: boardWidth, position: "relative" }}
+      style={{ width: boardWidth, height: boardWidth, position: "relative", margin: fixedWidth ? undefined : "0 auto" }}
       className="rounded-md shadow-lg overflow-hidden select-none"
     >
       {displayRanks.map((rank, rowIdx) => {
@@ -124,6 +145,7 @@ export function ChessBoard({
           );
         });
       })}
+    </div>
     </div>
   );
 }

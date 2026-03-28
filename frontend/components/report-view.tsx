@@ -156,11 +156,11 @@ export function ReportView({ data, timeClassFilter = "all", playerUsername }: Re
               <TableHeader>
                 <TableRow>
                   <TableHead>Date</TableHead>
-                  <TableHead>Color</TableHead>
+                  <TableHead className="hidden sm:table-cell">Color</TableHead>
                   <TableHead>Opponent</TableHead>
                   <TableHead className="text-center">Result</TableHead>
-                  <TableHead className="text-center">ACPL</TableHead>
-                  <TableHead>Time</TableHead>
+                  <TableHead className="text-center hidden sm:table-cell">ACPL</TableHead>
+                  <TableHead className="hidden md:table-cell">Time</TableHead>
                   <TableHead className="text-center">View</TableHead>
                 </TableRow>
               </TableHeader>
@@ -168,8 +168,8 @@ export function ReportView({ data, timeClassFilter = "all", playerUsername }: Re
                 {filteredGames.map((g, i) => (
                   <TableRow key={i}>
                     <TableCell className="text-sm">{g.date}</TableCell>
-                    <TableCell className="capitalize">{g.color}</TableCell>
-                    <TableCell>
+                    <TableCell className="capitalize hidden sm:table-cell">{g.color}</TableCell>
+                    <TableCell className="text-sm">
                       {g.opponent_username || "?"}{" "}
                       <span className="text-muted-foreground">({g.opponent_rating || "?"})</span>
                     </TableCell>
@@ -178,8 +178,8 @@ export function ReportView({ data, timeClassFilter = "all", playerUsername }: Re
                         {g.result.toUpperCase()}
                       </Badge>
                     </TableCell>
-                    <TableCell className="text-center">{g.acpl ?? "N/A"}</TableCell>
-                    <TableCell className="capitalize">{g.time_class}</TableCell>
+                    <TableCell className="text-center hidden sm:table-cell">{g.acpl ?? "N/A"}</TableCell>
+                    <TableCell className="capitalize hidden md:table-cell">{g.time_class}</TableCell>
                     <TableCell className="text-center">
                       {playerUsername && g.game_id ? (
                         <Link
@@ -224,7 +224,7 @@ export function ReportView({ data, timeClassFilter = "all", playerUsername }: Re
         <Card>
           <CardHeader><CardTitle className="text-base">Move Quality Distribution</CardTitle></CardHeader>
           <CardContent>
-            <div className="grid grid-cols-5 gap-3">
+            <div className="grid grid-cols-3 sm:grid-cols-5 gap-3">
               {["excellent", "good", "inaccuracy", "mistake", "blunder"].map((cls) => {
                 const mq = data.move_quality![cls];
                 return (
@@ -245,7 +245,7 @@ export function ReportView({ data, timeClassFilter = "all", playerUsername }: Re
         <Card>
           <CardHeader><CardTitle className="text-base">Game Phase Analysis</CardTitle></CardHeader>
           <CardContent className="space-y-3">
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               {["opening", "middlegame", "endgame"].map((phase) => {
                 const pd = data.phase_analysis![phase];
                 const isWorst = phase === data.worst_phase;

@@ -33,23 +33,28 @@ export function PlayerSelector() {
   };
 
   return (
-    <div className="flex gap-2">
-      {players.map((p) => (
-        <Button
-          key={p.username}
-          variant={currentPlayer === p.username ? "default" : "outline"}
-          size="sm"
-          className={cn(
-            "text-sm font-medium transition-colors",
-            currentPlayer === p.username
-              ? "bg-[#1e40af] text-white hover:bg-[#1e3a8a]"
-              : "text-muted-foreground hover:text-foreground"
-          )}
-          onClick={() => handlePlayerSwitch(p.username)}
-        >
-          {p.display_name || p.username}
-        </Button>
-      ))}
+    <div className="flex gap-1.5 sm:gap-2">
+      {players.map((p) => {
+        const displayName = p.display_name || p.username;
+        const shortName = displayName.split(" ")[0]; // First name only on mobile
+        return (
+          <Button
+            key={p.username}
+            variant={currentPlayer === p.username ? "default" : "outline"}
+            size="sm"
+            className={cn(
+              "text-xs sm:text-sm font-medium transition-colors truncate max-w-[100px] sm:max-w-none",
+              currentPlayer === p.username
+                ? "bg-[#1e40af] text-white hover:bg-[#1e3a8a]"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+            onClick={() => handlePlayerSwitch(p.username)}
+          >
+            <span className="sm:hidden">{shortName}</span>
+            <span className="hidden sm:inline">{displayName}</span>
+          </Button>
+        );
+      })}
     </div>
   );
 }

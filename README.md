@@ -8,13 +8,14 @@ Inspired by my three children — Eleanor, Evan, and Estella — and their journ
 
 ![Arrakis Engine Architecture](docs/screenshots/Arrakis-Engine-Architecture-TB.jpg)
 
-The pipeline is four layers:
-1. **Stockfish engine evaluation** — objective, per-move centipawn analysis
+The pipeline is five layers:
+1. **Stockfish engine evaluation** — objective, per-move centipawn analysis with clock time extraction
 2. **LLM coaching interpretation** — transforms raw engine output into human-readable insights
 3. **Pattern aggregation** — tracks trends across games over weeks and months
 4. **LLM trend summaries** — interprets cross-game patterns into coaching narratives
+5. **Time pressure analysis** — per-move clock data reveals time management patterns and pressure-induced blunders
 
-The frontend is a Next.js 16 + React 19 dashboard with player-scoped URLs (`/<player>/games`, `/<player>/patterns`, `/<player>/reports`).
+The frontend is a fully mobile-responsive Next.js 16 + React 19 dashboard with player-scoped URLs (`/<player>/games`, `/<player>/patterns`, `/<player>/reports`).
 
 ## Screenshots
 
@@ -153,6 +154,7 @@ database:
 | `python main.py report` | Generate Markdown coaching reports |
 | `python main.py dashboard` | Launch the local web dashboard |
 | `python main.py fide-update` | Update a player's FIDE rating |
+| `python main.py backfill-clocks` | Backfill clock data from PGN annotations for existing games |
 | `python main.py run-all` | Run the full pipeline end-to-end |
 
 ### Command details
@@ -369,13 +371,19 @@ Patterns are aggregated across all games per player:
 - **Tactical Miss Rate** — positions where a tactic existed (>200cp advantage available) but the player missed it; broken down by game phase (opening/middlegame/endgame) with stacked bar chart
 - **Repertoire Consistency** — measures how focused the player's opening choices are, split by color; tracks unique openings, top-3 concentration %, and rates as Very focused / Reasonably consistent / Scattered / No clear repertoire
 
+**Time Pressure Analysis:**
+- **Time Trouble Rate** — percentage of games where the player's clock dropped below 30 seconds
+- **Average Time per Move by Phase** — how long the player spends per move in opening, middlegame, and endgame
+- **Blunder Rate Under Pressure** — comparison of blunder frequency when clock is below 60s vs above 60s
+- **Time Management Score** — composite 0–100 score based on time trouble frequency and pressure-induced blunder rate
+
 ## Web Dashboard
 
 Two dashboard options are available — both connect to the same Python backend API:
 
 ### Next.js Dashboard (recommended)
 
-Built with Next.js 16, React 19, shadcn/ui, Tailwind CSS, and Recharts. Requires Node.js 18+.
+Built with Next.js 16, React 19, shadcn/ui, Tailwind CSS, and Recharts. Fully mobile-responsive (320px+). Requires Node.js 18+.
 
 ```bash
 # Terminal 1: Start the Python API backend
@@ -423,7 +431,9 @@ python main.py dashboard
   - Repertoire Consistency (white/black focus scores with top-3 openings)
   - Time Control Performance table (win%, ACPL, blunder% per format)
   - Opening Quality Analysis table (ACPL per opening with verdict badges)
+  - Time Pressure Analysis: time management score, time trouble rate, avg time per move by phase (bar chart), blunder rate comparison under pressure vs comfortable
   - Opening Win Rate table (split by All / White / Black) with **interactive Opening Explorer** — click any opening to expand a chessboard showing the opening position with step-through move controls, plus a linked list of all games using that opening; board orientation flips on the Black tab
+  - **Opening Book Integration** — ECO code and opening name badge, moves annotated with green checkmarks (matches book theory) and orange markers (deviations), with "Book move: X" vs "Player played: Y" callouts
 - **Reports page** — monthly/weekly coaching reports for coaches:
   - Time class filter tabs: **Rapid** (default), **Daily**, **All** — stats recompute per filter
   - Summary cards: games, W/L/D, win rate, rating change
@@ -437,6 +447,7 @@ python main.py dashboard
   - Coaching recommendations (aggregated from individual game coaching)
   - **PDF export** via `window.print()` with print-optimized CSS
 - **Tier badge** — color-coded skill tier displayed per game and on player profiles
+- **Mobile responsive** — all pages adapt to mobile (320px+), tablet, and desktop; ChessBoard auto-sizes via ResizeObserver; tables progressively hide low-priority columns; nav bar scrolls horizontally; player selector shows first names on mobile
 - **Light/dark mode** — toggle with theme button, persists across sessions
 - **Live data** — reads from SQLite directly, updates in real-time
 
@@ -456,7 +467,7 @@ ArrakisEngine/
 ├── src/
 │   ├── models.py          # SQLite schema (5 tables) and data helpers
 │   ├── harvester.py       # Multi-platform game fetcher (Chess.com + Lichess)
-│   ├── analyzer.py        # Stockfish move-by-move analysis engine
+│   ├── analyzer.py        # Stockfish move-by-move analysis engine + clock extraction
 │   ├── coach.py           # LLM coaching layer (Claude / OpenAI)
 │   ├── tiers.py           # Adaptive tier system (Beginner → Expert)
 │   ├── patterns.py        # Cross-game pattern detection + LLM trend summaries
@@ -490,7 +501,7 @@ ArrakisEngine/
 │   │   ├── tier-badge.tsx     # Color-coded tier display
 │   │   ├── theme-toggle.tsx   # Dark/light mode toggle
 │   │   ├── game-detail/       # ChessBoard, EvalChart, MoveList, CoachingPanels
-│   │   ├── patterns/          # 13 visualization components + TrendSummary
+│   │   ├── patterns/          # 14 visualization components + TrendSummary + TimePressure + OpeningExplorer
 │   │   └── ui/                # shadcn/ui primitives (card, table, button, etc.)
 │   ├── hooks/                 # useChessNavigation
 │   └── lib/                   # API client (api.ts), types (types.ts), utils
@@ -521,7 +532,7 @@ ArrakisEngine/
 |---|---|
 | `players` | Player profiles (username, display name, age, rating, FIDE ID/rating) |
 | `games` | Game records with PGN, ratings, result, platform, ACPL, analysis/coaching status |
-| `move_analysis` | Per-move Stockfish evaluation (capped centipawn, win prob, classification) |
+| `move_analysis` | Per-move Stockfish evaluation (capped centipawn, win prob, classification, clock_seconds) |
 | `game_coaching` | LLM-generated coaching output per game (narrative, feedback, opening analysis) |
 | `player_patterns` | Aggregated pattern statistics per player per period |
 

@@ -10,7 +10,8 @@ pattern tracking over time. Inspired by Eleanor, Evan, and Estella.
 - Two-step analysis: Stockfish engine eval → LLM coaching interpretation
 - Third layer: cross-game pattern aggregation over time
 - Fourth layer: LLM-powered trend summaries interpreting cross-game patterns
-- Frontend: Next.js 16 + React 19 + shadcn/ui + Tailwind CSS + Recharts
+- Fifth layer: time pressure analysis from per-move clock data
+- Frontend: Next.js 16 + React 19 + shadcn/ui + Tailwind CSS + Recharts (mobile responsive)
 
 ## Players
 - Configured in config.yaml (chess.com usernames, lichess usernames, display names, ages, ratings, FIDE IDs)
@@ -46,10 +47,10 @@ ArrakisEngine/
 ├── main.py                    # CLI entry point
 ├── src/
 │   ├── harvester.py           # Chess.com + Lichess game fetcher
-│   ├── analyzer.py            # Stockfish analysis engine
+│   ├── analyzer.py            # Stockfish analysis engine + clock extraction
 │   ├── coach.py               # LLM coaching layer (Anthropic + OpenAI)
 │   ├── patterns.py            # Cross-game pattern detection + LLM trend summaries
-│   ├── models.py              # SQLite schema & data models (5 tables + migrations)
+│   ├── models.py              # SQLite schema & data models (5 tables + migrations, clock_seconds column)
 │   ├── tiers.py               # Adaptive tier system (rating-based)
 │   ├── report.py              # Report generator (structured JSON + markdown export)
 │   ├── export.py              # Data export utilities
@@ -63,7 +64,7 @@ ArrakisEngine/
 │   │   └── [player]/          # Player-scoped dynamic routes
 │   │       ├── games/page.tsx         # Games list with filters
 │   │       ├── games/[id]/page.tsx    # Game detail: board, eval, coaching
-│   │       ├── patterns/page.tsx      # Pattern analytics & trend summary
+│   │       ├── patterns/page.tsx      # Pattern analytics + trend summary + time pressure
 │   │       └── reports/page.tsx       # Coaching reports (Rapid/Daily/All)
 │   ├── components/
 │   │   ├── app-header.tsx     # Title + player selector
@@ -76,7 +77,7 @@ ArrakisEngine/
 │   │   ├── tier-badge.tsx     # Color-coded tier display
 │   │   ├── theme-toggle.tsx   # Dark/light mode
 │   │   ├── game-detail/       # Chessboard, eval chart, move list, coaching
-│   │   ├── patterns/          # 13 visualization components + trend summary + opening explorer
+│   │   ├── patterns/          # 14 visualization components + trend summary + opening explorer + time pressure
 │   │   └── ui/                # shadcn/ui primitives (card, table, button, etc.)
 │   ├── hooks/                 # useChessNavigation
 │   └── lib/                   # API client, types, utilities
@@ -161,6 +162,12 @@ Requires `ARRAKIS_ANTHROPIC_API_KEY` or `ARRAKIS_OPENAI_API_KEY`. Uses whichever
 - `stockfish_path` — auto-resolves: config.yaml → `STOCKFISH_PATH` env → `which stockfish` (skips if not found)
 - `llm_provider` — returns `(provider, model)` for whichever API key is set (skips if none)
 - `SAMPLE_PGN` / `SCHOLARS_MATE_PGN` — reusable PGN constants
+
+## New Features (Latest)
+- **Mobile responsive**: All pages adapt to mobile (320px+), tablet, and desktop. ChessBoard auto-sizes via ResizeObserver. Tables hide low-priority columns progressively. Nav scrolls horizontally.
+- **Time pressure analysis**: Per-move clock data extracted from PGN (`{[%clk H:MM:SS]}`). Lichess clocks enabled. New `clock_seconds` column in `move_analysis`. Patterns include time trouble rate, blunder rate under pressure, phase time distribution, and time management score.
+- **Opening book integration**: Static ECO opening book (`frontend/public/data/openings.json`, ~100 entries). Opening Explorer annotates moves with book comparison — green checkmarks for book moves, orange markers for deviations with "Book move: X" callouts.
+- **CLI**: `python main.py backfill-clocks` — re-parses PGN for existing games to populate clock data.
 
 ## Git Workflow
 - Commit after each working component

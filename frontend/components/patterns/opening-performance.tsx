@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { useParams } from "next/navigation";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -57,9 +57,8 @@ function OpeningTable({
           const isExpanded = expandedOpening === o.name;
           const hasExplorer = o.opening_moves && o.game_list && o.game_list.length > 0;
           return (
-            <>
+            <Fragment key={`opening-${i}`}>
               <TableRow
-                key={`row-${i}`}
                 className={hasExplorer ? "cursor-pointer hover:bg-muted/50" : ""}
                 onClick={() => hasExplorer && toggleOpening(o.name)}
               >
@@ -75,7 +74,7 @@ function OpeningTable({
                 </TableCell>
               </TableRow>
               {isExpanded && hasExplorer && player && (
-                <TableRow key={`explorer-${i}`}>
+                <TableRow>
                   <TableCell colSpan={6} className="p-2">
                     <OpeningExplorer
                       openingName={o.name}
@@ -87,7 +86,7 @@ function OpeningTable({
                   </TableCell>
                 </TableRow>
               )}
-            </>
+            </Fragment>
           );
         })}
       </TableBody>

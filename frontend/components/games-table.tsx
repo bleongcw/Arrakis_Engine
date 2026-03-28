@@ -38,16 +38,16 @@ export function GamesTable({ games }: GamesTableProps) {
     <Table>
       <TableHeader>
         <TableRow>
-          <TableHead className="w-[40px]">#</TableHead>
+          <TableHead className="w-[40px] hidden sm:table-cell">#</TableHead>
           <TableHead>Date</TableHead>
-          <TableHead className="text-center">Platform</TableHead>
-          <TableHead className="text-center">Color</TableHead>
-          <TableHead>Player</TableHead>
+          <TableHead className="text-center hidden md:table-cell">Platform</TableHead>
+          <TableHead className="text-center hidden sm:table-cell">Color</TableHead>
+          <TableHead className="hidden lg:table-cell">Player</TableHead>
           <TableHead>Opponent</TableHead>
           <TableHead>Result</TableHead>
-          <TableHead>Time</TableHead>
-          <TableHead className="text-center">Analysis</TableHead>
-          <TableHead className="text-center">Coaching</TableHead>
+          <TableHead className="hidden sm:table-cell">Time</TableHead>
+          <TableHead className="text-center hidden md:table-cell">Analysis</TableHead>
+          <TableHead className="text-center hidden md:table-cell">Coaching</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -57,30 +57,30 @@ export function GamesTable({ games }: GamesTableProps) {
             className="cursor-pointer hover:bg-muted/50"
             onClick={() => router.push(`/${currentPlayer}/games/${g.id}`)}
           >
-            <TableCell className="text-muted-foreground text-xs">
+            <TableCell className="text-muted-foreground text-xs hidden sm:table-cell">
               {idx + 1}
             </TableCell>
-            <TableCell>{g.date_played || "\u2014"}</TableCell>
-            <TableCell className="text-center" title={g.platform === "lichess" ? "Lichess" : "Chess.com"}>
+            <TableCell className="text-sm">{g.date_played || "\u2014"}</TableCell>
+            <TableCell className="text-center hidden md:table-cell" title={g.platform === "lichess" ? "Lichess" : "Chess.com"}>
               {g.platform === "lichess" ? "\u265E" : "\u265C"}
             </TableCell>
-            <TableCell className="text-center">
+            <TableCell className="text-center hidden sm:table-cell">
               {g.player_color === "white" ? "\u2654" : "\u265A"}
             </TableCell>
-            <TableCell>
+            <TableCell className="hidden lg:table-cell">
               {g.display_name || g.username} ({g.player_rating || "?"})
             </TableCell>
-            <TableCell>
+            <TableCell className="text-sm">
               {g.opponent_username || "?"} ({g.opponent_rating || "?"})
             </TableCell>
             <TableCell className={cn("font-medium", RESULT_COLORS[g.result])}>
               {g.result.toUpperCase()}
             </TableCell>
-            <TableCell>{g.time_class || "?"}</TableCell>
-            <TableCell className="text-center" title={g.analysis_status}>
+            <TableCell className="hidden sm:table-cell">{g.time_class || "?"}</TableCell>
+            <TableCell className="text-center hidden md:table-cell" title={g.analysis_status}>
               {STATUS_ICONS[g.analysis_status] || "\u23F3"}
             </TableCell>
-            <TableCell className="text-center" title={g.coaching_status}>
+            <TableCell className="text-center hidden md:table-cell" title={g.coaching_status}>
               {STATUS_ICONS[g.coaching_status] || "\u23F3"}
             </TableCell>
           </TableRow>

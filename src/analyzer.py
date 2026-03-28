@@ -8,6 +8,7 @@ and move classification.
 import io
 import logging
 import math
+import re
 import time
 
 import chess
@@ -71,6 +72,39 @@ def score_to_cp(score: chess.engine.PovScore, side: chess.Color) -> int | None:
     return cp if cp is not None else 0
 
 
+CLK_PATTERN = re.compile(r'\[%clk\s+(\d+):(\d+):(\d+)(?:\.(\d+))?\]')
+
+
+def extract_clock_seconds(comment: str) -> float | None:
+    """Extract clock time in seconds from a PGN move comment.
+
+    Handles formats like {[%clk 0:05:30]} and {[%clk 0:05:30.1]}.
+    """
+    m = CLK_PATTERN.search(comment)
+    if not m:
+        return None
+    hours, mins, secs = int(m.group(1)), int(m.group(2)), int(m.group(3))
+    frac = int(m.group(4)) / (10 ** len(m.group(4))) if m.group(4) else 0
+    return hours * 3600 + mins * 60 + secs + frac
+
+
+def extract_clocks_from_pgn(pgn_text: str) -> list[float | None]:
+    """Extract per-move clock data from a PGN string.
+
+    Returns a list of clock_seconds values, one per half-move, in move order.
+    """
+    game = chess.pgn.read_game(io.StringIO(pgn_text))
+    if game is None:
+        return []
+    clocks: list[float | None] = []
+    node = game
+    while node.variations:
+        node = node.variations[0]
+        comment = node.comment or ""
+        clocks.append(extract_clock_seconds(comment))
+    return clocks
+
+
 def analyze_game(game_id: int, pgn_text: str, player_color: str,
                  stockfish_path: str, depth: int = 22,
                  threads: int = 6, hash_mb: int = 512,
@@ -116,6 +150,9 @@ def analyze_game(game_id: int, pgn_text: str, player_color: str,
     moves = list(game.mainline_moves())
     total_moves = len(moves)
     start_time = time.time()
+
+    # Extract per-move clock data from PGN comments
+    clocks = extract_clocks_from_pgn(pgn_text)
 
     # Skip games with no moves (abandoned, etc.)
     if total_moves == 0:
@@ -204,15 +241,20 @@ def analyze_game(game_id: int, pgn_text: str, player_color: str,
             win_prob_before = 100.0 - win_prob_before
             win_prob_after = 100.0 - win_prob_after
 
+        # Get clock data for this move (index i = half-move index)
+        clock_secs = clocks[i] if i < len(clocks) else None
+
         conn.execute(
             """INSERT OR REPLACE INTO move_analysis
             (game_id, move_number, side, move_played, best_move,
              eval_before_cp, eval_after_cp, swing_cp,
-             win_prob_before, win_prob_after, classification, pv_line)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+             win_prob_before, win_prob_after, classification, pv_line,
+             clock_seconds)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (game_id, move_number, side, move_san, best_move_san,
              eval_before_cp, eval_after_cp, swing_cp,
-             win_prob_before, win_prob_after, classification, pv_line),
+             win_prob_before, win_prob_after, classification, pv_line,
+             clock_secs),
         )
 
         stats["moves"] += 1

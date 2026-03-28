@@ -107,6 +107,8 @@ def compute_player_patterns(player_id: int, db_path: str | None = None,
         "opening_acpl": _compute_opening_acpl(games, moves_by_game),
         "tactical_misses": _compute_tactical_misses(games, moves_by_game),
         "repertoire_consistency": _compute_repertoire_consistency(games),
+        # Time pressure analysis
+        "time_pressure": _compute_time_pressure(games, moves_by_game),
     }
 
     # Store patterns
@@ -1328,3 +1330,105 @@ def _find_worst_phase(phase_analysis: dict) -> str:
             worst_acpl = acpl
             worst = name
     return worst or "N/A"
+
+
+def _compute_time_pressure(games: list[dict],
+                           moves_by_game: dict[int, list[dict]]) -> dict | None:
+    """Compute time pressure statistics from clock data.
+
+    Returns None if no clock data is available.
+    """
+    TIME_TROUBLE_THRESHOLD = 30  # seconds remaining
+    LOW_TIME_THRESHOLD = 60  # seconds for "under pressure" comparison
+
+    games_with_clocks = 0
+    games_in_time_trouble = 0
+    total_moves_with_clock = 0
+
+    # Per-phase time consumption
+    phase_time_spent = {"opening": [], "middlegame": [], "endgame": []}
+    # Blunder tracking: under pressure vs comfortable
+    blunders_under_pressure = 0
+    moves_under_pressure = 0
+    blunders_comfortable = 0
+    moves_comfortable = 0
+    # Per-move time tracking
+    move_times: list[float] = []
+
+    for g in games:
+        game_moves = moves_by_game.get(g["id"], [])
+        player_color = g["player_color"]
+
+        player_moves = [m for m in game_moves if m["side"] == player_color]
+        clock_data = [m for m in player_moves if m.get("clock_seconds") is not None]
+
+        if len(clock_data) < 2:
+            continue  # Not enough clock data for this game
+
+        games_with_clocks += 1
+
+        # Check if player hit time trouble
+        min_clock = min(m["clock_seconds"] for m in clock_data)
+        if min_clock < TIME_TROUBLE_THRESHOLD:
+            games_in_time_trouble += 1
+
+        # Compute per-move times and phase distribution
+        prev_clock = None
+        for m in clock_data:
+            total_moves_with_clock += 1
+            clock = m["clock_seconds"]
+            phase = _classify_game_phase(m["move_number"])
+
+            if prev_clock is not None and prev_clock >= clock:
+                time_spent = prev_clock - clock
+                move_times.append(time_spent)
+                phase_time_spent[phase].append(time_spent)
+
+            # Blunder tracking by time pressure
+            is_under_pressure = clock < LOW_TIME_THRESHOLD
+            is_blunder = m.get("classification") == "blunder"
+            if is_under_pressure:
+                moves_under_pressure += 1
+                if is_blunder:
+                    blunders_under_pressure += 1
+            else:
+                moves_comfortable += 1
+                if is_blunder:
+                    blunders_comfortable += 1
+
+            prev_clock = clock
+
+    if games_with_clocks == 0:
+        return None
+
+    # Compute averages
+    avg_time_per_move = round(sum(move_times) / len(move_times), 1) if move_times else 0
+    phase_avg = {}
+    for phase, times in phase_time_spent.items():
+        phase_avg[phase] = round(sum(times) / len(times), 1) if times else 0
+
+    blunder_rate_pressure = round(
+        blunders_under_pressure / moves_under_pressure * 100, 1
+    ) if moves_under_pressure > 0 else 0
+    blunder_rate_comfortable = round(
+        blunders_comfortable / moves_comfortable * 100, 1
+    ) if moves_comfortable > 0 else 0
+
+    time_trouble_rate = round(games_in_time_trouble / games_with_clocks * 100, 1)
+
+    # Time management score (0-100): composite of trouble rate and pressure blunders
+    trouble_penalty = min(time_trouble_rate, 50)  # 0-50 points from trouble rate
+    blunder_penalty = min(blunder_rate_pressure * 2, 50)  # 0-50 points from pressure blunders
+    time_management_score = max(0, round(100 - trouble_penalty - blunder_penalty))
+
+    return {
+        "games_with_clocks": games_with_clocks,
+        "time_trouble_rate": time_trouble_rate,
+        "avg_time_per_move": avg_time_per_move,
+        "phase_avg_time": phase_avg,
+        "blunder_rate_under_pressure": blunder_rate_pressure,
+        "blunder_rate_comfortable": blunder_rate_comfortable,
+        "moves_under_pressure": moves_under_pressure,
+        "moves_comfortable": moves_comfortable,
+        "time_management_score": time_management_score,
+    }

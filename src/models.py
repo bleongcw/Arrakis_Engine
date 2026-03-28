@@ -147,6 +147,11 @@ def _migrate(conn: sqlite3.Connection):
         # Backfill ACPL from existing move analysis with ±1000cp cap
         _backfill_acpl(conn)
 
+    move_cols = {r[1] for r in conn.execute("PRAGMA table_info(move_analysis)").fetchall()}
+    if "clock_seconds" not in move_cols:
+        conn.execute("ALTER TABLE move_analysis ADD COLUMN clock_seconds REAL")
+        conn.commit()
+
     pattern_cols = {r[1] for r in conn.execute("PRAGMA table_info(player_patterns)").fetchall()}
     if "trend_summary" not in pattern_cols:
         conn.execute("ALTER TABLE player_patterns ADD COLUMN trend_summary TEXT")

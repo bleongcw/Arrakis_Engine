@@ -280,7 +280,7 @@ def harvest_lichess(username: str, player_id: int, conn,
     params = {
         "since": since_ms,
         "pgnInJson": "false",
-        "clocks": "false",
+        "clocks": "true",
         "evals": "false",
         "opening": "true",
     }

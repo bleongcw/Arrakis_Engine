@@ -18,7 +18,7 @@ export function NavBar() {
 
   return (
     <nav className="border-b border-border bg-card">
-      <div className="max-w-7xl mx-auto px-4 flex gap-0">
+      <div className="max-w-7xl mx-auto px-2 sm:px-4 flex gap-0 overflow-x-auto [&::-webkit-scrollbar]:hidden">
         {NAV_ITEMS.map(({ href, label, playerScoped }) => {
           const fullHref = playerScoped && currentPlayer
             ? `/${currentPlayer}${href}`
@@ -34,7 +34,7 @@ export function NavBar() {
               key={href}
               href={fullHref}
               className={cn(
-                "px-4 py-2.5 text-sm font-medium border-b-2 transition-colors",
+                "px-3 sm:px-4 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap",
                 isActive
                   ? "border-[#1e40af] text-foreground"
                   : "border-transparent text-muted-foreground hover:text-foreground"
