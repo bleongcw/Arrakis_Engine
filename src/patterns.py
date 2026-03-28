@@ -111,16 +111,25 @@ def compute_player_patterns(player_id: int, db_path: str | None = None,
         "time_pressure": _compute_time_pressure(games, moves_by_game),
     }
 
-    # Store patterns
+    # Store patterns — preserve existing trend_summary
     now = datetime.now()
     period_start = (now - timedelta(days=period_days)).strftime("%Y-%m-%d")
     period_end = now.strftime("%Y-%m-%d")
 
+    # Check for existing trend_summary to preserve it across recomputes
+    existing = conn.execute(
+        """SELECT id, trend_summary FROM player_patterns
+        WHERE player_id = ? ORDER BY updated_at DESC LIMIT 1""",
+        (player_id,),
+    ).fetchone()
+
+    existing_summary = existing["trend_summary"] if existing else None
+
     conn.execute(
         """INSERT OR REPLACE INTO player_patterns
-        (player_id, period_start, period_end, stats_json, updated_at)
-        VALUES (?, ?, ?, ?, datetime('now'))""",
-        (player_id, period_start, period_end, json.dumps(stats)),
+        (player_id, period_start, period_end, stats_json, trend_summary, updated_at)
+        VALUES (?, ?, ?, ?, ?, datetime('now'))""",
+        (player_id, period_start, period_end, json.dumps(stats), existing_summary),
     )
     conn.commit()
     conn.close()

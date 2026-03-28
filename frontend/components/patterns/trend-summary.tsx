@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { triggerTrendSummary, fetchPatterns } from "@/lib/api";
@@ -14,18 +14,22 @@ interface TrendSummaryProps {
 export function TrendSummary({ summary, player, onSummaryGenerated }: TrendSummaryProps) {
   const [generating, setGenerating] = useState(false);
   const [provider, setProvider] = useState<"claude" | "openai">("claude");
+  const previousSummaryRef = useRef(summary);
 
   const handleGenerate = useCallback(async (p: "claude" | "openai") => {
     setProvider(p);
     setGenerating(true);
+    // Capture the current summary so we can detect when it changes
+    const oldSummary = previousSummaryRef.current;
     try {
       await triggerTrendSummary(player, p);
-      // Poll for completion
+      // Poll for completion — detect when summary changes from the old value
       const poll = setInterval(async () => {
         try {
           const data = await fetchPatterns(player);
-          if (data.trend_summary) {
+          if (data.trend_summary && data.trend_summary !== oldSummary) {
             clearInterval(poll);
+            previousSummaryRef.current = data.trend_summary;
             setGenerating(false);
             onSummaryGenerated();
           }
