@@ -66,20 +66,60 @@ ArrakisEngine/
 
 ## Testing
 
-Three test tiers configured via pytest markers in `pyproject.toml`:
+182 tests across 13 test files, organized into three tiers via pytest markers (`pyproject.toml`).
 
-| Command | Tests | Time | Requirements |
-|---------|-------|------|-------------|
-| `pytest` | 169 unit tests | ~14s | None (all mocked) |
-| `pytest -m integration` | 7 Stockfish tests | ~25s | Stockfish binary |
-| `pytest -m live` | 5 LLM API tests | ~3min | API key (Anthropic or OpenAI) |
-| `pytest -m ""` | All 182 tests | ~5min | Stockfish + API key |
+### Running Tests
+```bash
+pytest                                  # 169 unit tests (~14s, no deps)
+pytest -m integration                   # 7 Stockfish tests (~25s)
+pytest -m live                          # 5 LLM API tests (~3min, ~$0.05)
+pytest -m "integration and live"        # 1 full pipeline E2E (~1min)
+pytest -m ""                            # All 182 tests
+```
 
-- Unit tests mock all external dependencies (Stockfish, LLM APIs, chess.com/Lichess)
-- Integration/live tests are excluded by default via `pyproject.toml` addopts
-- `stockfish_path` fixture auto-resolves from config.yaml → STOCKFISH_PATH env → PATH
-- `llm_provider` fixture picks whichever API key is available (prefers Claude)
-- Shared fixtures in `tests/conftest.py` (db_path, player_id, insert_game, insert_moves)
+### Tier 1: Unit Tests (169 tests, default)
+All external dependencies mocked. No Stockfish or API keys needed.
+
+| File | Tests | What it covers |
+|------|-------|---------------|
+| test_models.py | 16 | Schema init, ensure_player upsert, constraints, extract_opponent_from_pgn, get_db_path, migrations |
+| test_harvester.py | 20 | Chess.com + Lichess parsing: side detection, result classification, time control, date extraction, deduplication |
+| test_analyzer.py | 19 | cp_to_win_prob formula, classify_move thresholds, cap_eval clamping, score_to_cp with mock PovScore |
+| test_coach.py | 18 | Move formatting, analysis text truncation (short vs long games), critical moments sorting, JSON parsing, provider switching (Claude/OpenAI), coach_pending limit, DB status transitions |
+| test_patterns.py | 38 | Phase classification, results aggregation, rating buckets, accuracy, consistency, danger zones, endgame conversion, comeback/collapse, opening ACPL, tactical misses, repertoire consistency, opening name extraction, single-game and empty-game edge cases |
+| test_tiers.py | 21 | Rating→tier boundary mapping, tier-specific move classification, config validation (depth, thresholds, focus areas) |
+| test_report.py | 9 | Weekly/monthly report generation, ACPL interpretation thresholds (excellent/good/needs work), time control table, missing coaching data handling |
+| test_dashboard_server.py | 14 | Real HTTP server: players/games/status/patterns endpoints, result/time_class/date_from/date_to filtering, CORS headers, 404 handling |
+| test_export.py | 7 | JSON export, PGN preview truncation, coaching data inclusion, missing analysis, empty DB |
+
+### Tier 2: Integration Tests (7 tests, `pytest -m integration`)
+Requires Stockfish binary. Uses Scholar's Mate (4 moves) for fast, deterministic analysis.
+
+| File | Tests | What it covers |
+|------|-------|---------------|
+| test_analyzer_integration.py | 7 | Real Stockfish: move row creation, eval sanity (opening ~0cp, mate→±1000cp), ACPL storage, classification validity, batch processing, stuck game recovery, empty PGN handling |
+
+### Tier 3: Live Tests (5 tests, `pytest -m live`)
+Requires `ARRAKIS_ANTHROPIC_API_KEY` or `ARRAKIS_OPENAI_API_KEY`. Uses whichever is available (prefers Claude).
+
+| File | Tests | What it covers |
+|------|-------|---------------|
+| test_coach_live.py | 5 | Real LLM API: valid JSON response, required keys present (narrative, key_lesson, practical_focus, critical_moments, coach_notes), DB storage with provider:model format, missing API key error, unknown provider error |
+
+### Full Pipeline E2E (1 test, `pytest -m "integration and live"`)
+
+| File | Tests | What it covers |
+|------|-------|---------------|
+| test_pipeline_e2e.py | 1 | Insert game → Stockfish analysis → LLM coaching → verify analysis_status=complete, coaching_status=complete, move rows populated, coaching JSON valid |
+
+### Shared Fixtures (`tests/conftest.py`)
+- `db_path` — fresh SQLite test DB (used by most test files)
+- `player_id` — test player (TestKid, age 9, rating 1050)
+- `insert_game()` — callable: insert a game row with full control over all fields
+- `insert_moves()` — callable: insert move_analysis rows from a list of dicts
+- `stockfish_path` — auto-resolves: config.yaml → `STOCKFISH_PATH` env → `which stockfish` (skips if not found)
+- `llm_provider` — returns `(provider, model)` for whichever API key is set (skips if none)
+- `SAMPLE_PGN` / `SCHOLARS_MATE_PGN` — reusable PGN constants
 
 ## Git Workflow
 - Commit after each working component

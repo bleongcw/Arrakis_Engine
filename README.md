@@ -485,7 +485,9 @@ ArrakisEngine/
 
 ## Running Tests
 
-Tests are organized into three tiers using pytest markers:
+182 tests across 13 files, organized into three tiers using pytest markers. Integration and live tests are excluded by default — opt in explicitly.
+
+### Commands
 
 ```bash
 # Unit tests only (default — fast, no external dependencies)
@@ -494,22 +496,58 @@ python -m pytest tests/ -v
 
 # Stockfish integration tests (requires Stockfish binary)
 python -m pytest tests/ -m integration -v
-# → 7 tests: real Stockfish analysis on Scholar's Mate
+# → 7 tests: real Stockfish analysis on Scholar's Mate (~25s)
 
 # LLM API live tests (requires ARRAKIS_ANTHROPIC_API_KEY or ARRAKIS_OPENAI_API_KEY)
 python -m pytest tests/ -m live -v
-# → 5 tests: real coaching API calls (~$0.05 per run)
+# → 5 tests: real coaching API calls (~3min, ~$0.05 per run)
 
 # Full pipeline E2E (requires both Stockfish + API key)
 python -m pytest tests/ -m "integration and live" -v
-# → 1 test: harvest → analyze → coach end-to-end
+# → 1 test: analyze → coach end-to-end (~1min)
 
 # Everything
 python -m pytest tests/ -m "" -v
-# → All 182 tests
+# → All 182 tests (~5min)
 ```
 
-Unit tests run against in-memory SQLite databases with mocked external APIs. Integration and live tests are excluded by default — opt in explicitly with `-m integration` or `-m live`.
+### Test Coverage by Module
+
+**Unit tests** (169 tests — all mocked, no external dependencies):
+
+| File | Tests | Coverage |
+|------|-------|---------|
+| `test_models.py` | 16 | Schema init, player upsert, constraints, PGN opponent extraction, DB path creation, migrations |
+| `test_harvester.py` | 20 | Chess.com + Lichess parsing: player side, result, time control, date, game URL, deduplication, platform filtering |
+| `test_analyzer.py` | 19 | Win probability formula, move classification boundaries, eval capping (±1000cp), PovScore→centipawn conversion |
+| `test_coach.py` | 18 | Move formatting, smart truncation (short vs 80+ move games), critical moments, JSON parsing, Claude/OpenAI provider switching, batch limit, DB status transitions |
+| `test_patterns.py` | 38 | Game phase classification, results aggregation, rating performance, accuracy, consistency, danger zones, endgame conversion, comeback/collapse detection, opening ACPL, tactical misses, repertoire consistency, opening name extraction |
+| `test_tiers.py` | 21 | Rating→tier boundary mapping (Beginner→Expert), tier-specific move thresholds, config validation |
+| `test_report.py` | 9 | Report generation (weekly/monthly), ACPL interpretation thresholds, time control tables, missing data handling |
+| `test_dashboard_server.py` | 14 | HTTP endpoints (players/games/status/patterns), filtering (result, time class, date range, player), CORS headers, 404 |
+| `test_export.py` | 7 | JSON export, PGN preview truncation, coaching data, missing analysis, patterns |
+
+**Stockfish integration tests** (7 tests — requires Stockfish binary):
+
+| File | Tests | Coverage |
+|------|-------|---------|
+| `test_analyzer_integration.py` | 7 | End-to-end Stockfish analysis on Scholar's Mate: move row creation, eval sanity checks (opening ~0cp, mate→±1000cp), ACPL storage, move classifications, batch processing, stuck game recovery, empty PGN handling |
+
+The `stockfish_path` fixture auto-resolves from `config.yaml` → `STOCKFISH_PATH` env var → `which stockfish`. Tests skip with a clear message if Stockfish is not found.
+
+**LLM API live tests** (5 tests — requires API key, ~$0.05/run):
+
+| File | Tests | Coverage |
+|------|-------|---------|
+| `test_coach_live.py` | 5 | Real LLM coaching: valid JSON response, all required keys present (narrative, key_lesson, practical_focus, critical_moments, coach_notes), DB storage with provider:model format, error handling |
+
+The `llm_provider` fixture checks for `ARRAKIS_ANTHROPIC_API_KEY` first, falls back to `ARRAKIS_OPENAI_API_KEY`. Tests skip if neither is set.
+
+**Full pipeline E2E** (1 test — requires both Stockfish + API key):
+
+| File | Tests | Coverage |
+|------|-------|---------|
+| `test_pipeline_e2e.py` | 1 | Insert game → Stockfish analysis → LLM coaching → verify complete status, move rows, and valid coaching JSON |
 
 ## Troubleshooting
 
