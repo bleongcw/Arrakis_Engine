@@ -8,10 +8,13 @@ Inspired by my three children — Eleanor, Evan, and Estella — and their journ
 
 ![Arrakis Engine Architecture](docs/screenshots/Arrakis-Engine-Architecture-TB.jpg)
 
-The pipeline is three layers:
+The pipeline is four layers:
 1. **Stockfish engine evaluation** — objective, per-move centipawn analysis
 2. **LLM coaching interpretation** — transforms raw engine output into human-readable insights
 3. **Pattern aggregation** — tracks trends across games over weeks and months
+4. **LLM trend summaries** — interprets cross-game patterns into coaching narratives
+
+The frontend is a Next.js 16 + React 19 dashboard with player-scoped URLs (`/<player>/games`, `/<player>/patterns`, `/<player>/reports`).
 
 ## Screenshots
 
@@ -372,7 +375,7 @@ Two dashboard options are available — both connect to the same Python backend 
 
 ### Next.js Dashboard (recommended)
 
-Built with Next.js 16, React, shadcn/ui, Tailwind CSS, and Recharts. Requires Node.js 18+.
+Built with Next.js 16, React 19, shadcn/ui, Tailwind CSS, and Recharts. Requires Node.js 18+.
 
 ```bash
 # Terminal 1: Start the Python API backend
@@ -382,6 +385,8 @@ python main.py dashboard
 cd frontend && pnpm install && pnpm dev
 # Open http://localhost:3000
 ```
+
+**Player-scoped URLs:** All player pages use bookmarkable URLs like `/evanleongxinyu/games`, `/estellaleong/patterns`, etc. Switching players in the header navigates to the same section under the new player's URL.
 
 ### Legacy Dashboard
 
@@ -394,6 +399,8 @@ python main.py dashboard
 
 ### Dashboard Features
 
+- **Player-scoped URLs** — every player page is bookmarkable and shareable: `/<username>/games`, `/<username>/patterns`, `/<username>/reports` (e.g. `/evanleongxinyu/games`)
+- **Multi-player switching** — player selector in the header; switching players navigates to the same section under the new player's URL
 - **Player Hub** — default landing page with Chess.com, Lichess, and FIDE profiles, tier badge, game counts, and direct links to external profiles
 - **Games list** — filterable by result, time control, coaching status, month, platform (Chess.com / Lichess), and date range
 - **Platform icons** — ♜ Chess.com / ♞ Lichess shown per game
@@ -402,7 +409,8 @@ python main.py dashboard
 - **Opening analysis** — LLM-generated assessment with opening name, quality rating, counter-move correctness, and tips
 - **On-demand coaching** — Coach with Claude / Coach with ChatGPT buttons on each game, with auto-refresh
 - **Feedback to Player** — personal letter with 3 actionable tips and growth mindset framing
-- **Patterns page** — 10 visualization panels:
+- **Patterns page** — 13 visualization panels + AI coaching summary:
+  - **LLM Trend Summary** — AI-generated coaching narrative interpreting cross-game patterns (Generate with Claude or ChatGPT, with regenerate option)
   - Overview stat cards (games, win rate, accuracy %, ACPL, consistency, vs higher-rated)
   - ACPL Trend chart with clickable info modal
   - Move Quality Distribution donut with percentages
@@ -415,7 +423,19 @@ python main.py dashboard
   - Repertoire Consistency (white/black focus scores with top-3 openings)
   - Time Control Performance table (win%, ACPL, blunder% per format)
   - Opening Quality Analysis table (ACPL per opening with verdict badges)
-  - Opening Win Rate table (split by All / White / Black)
+  - Opening Win Rate table (split by All / White / Black) with **interactive Opening Explorer** — click any opening to expand a chessboard showing the opening position with step-through move controls, plus a linked list of all games using that opening; board orientation flips on the Black tab
+- **Reports page** — monthly/weekly coaching reports for coaches:
+  - Time class filter tabs: **Rapid** (default), **Daily**, **All** — stats recompute per filter
+  - Summary cards: games, W/L/D, win rate, rating change
+  - Results by time control table
+  - Game-by-game results with clickable links to game detail pages
+  - ACPL analysis with interpretation
+  - Move quality distribution
+  - Game phase analysis (opening/middlegame/endgame) with worst-phase highlighting
+  - Top improvement areas (auto-generated from blunder/mistake counts and phase weaknesses)
+  - Critical positions to review with game links (from LLM coaching data)
+  - Coaching recommendations (aggregated from individual game coaching)
+  - **PDF export** via `window.print()` with print-optimized CSS
 - **Tier badge** — color-coded skill tier displayed per game and on player profiles
 - **Light/dark mode** — toggle with theme button, persists across sessions
 - **Live data** — reads from SQLite directly, updates in real-time
@@ -431,29 +451,51 @@ ArrakisEngine/
 ├── requirements.txt       # Python dependencies
 ├── .env                   # API keys (gitignored)
 ├── .gitignore
+├── pyproject.toml         # pytest marker config (integration/live)
 ├── main.py                # CLI entry point — all commands
 ├── src/
 │   ├── models.py          # SQLite schema (5 tables) and data helpers
 │   ├── harvester.py       # Multi-platform game fetcher (Chess.com + Lichess)
 │   ├── analyzer.py        # Stockfish move-by-move analysis engine
-│   ├── coach.py           # LLM coaching layer (Claude / OpenAI via Responses API)
+│   ├── coach.py           # LLM coaching layer (Claude / OpenAI)
 │   ├── tiers.py           # Adaptive tier system (Beginner → Expert)
-│   ├── patterns.py        # Cross-game pattern detection (Phase 1 + 2)
+│   ├── patterns.py        # Cross-game pattern detection + LLM trend summaries
 │   ├── export.py          # JSON export for dashboard
-│   ├── dashboard_server.py # Live dashboard HTTP server with SQLite API
-│   └── report.py          # Markdown report generator
+│   ├── dashboard_server.py # REST API server (GET + POST endpoints)
+│   └── report.py          # Report generator (structured JSON + markdown export)
 ├── dashboard/
 │   ├── index.html         # Legacy web dashboard (served by dashboard_server.py)
 │   ├── img/pieces/        # Lichess cburnett SVG chess pieces
 │   └── data/              # Exported JSON (auto-generated, gitignored)
-├── frontend/              # Next.js + shadcn/ui dashboard (recommended)
-│   ├── app/               # Next.js app router pages (dashboard, games, patterns)
-│   ├── components/        # React components (patterns, games, UI)
-│   ├── lib/               # API client, types, utilities
-│   └── package.json       # Node dependencies
+├── frontend/              # Next.js 16 + React 19 + shadcn/ui dashboard
+│   ├── app/
+│   │   ├── layout.tsx         # Root layout (providers, header, nav)
+│   │   ├── page.tsx           # Home → redirect to /dashboard
+│   │   ├── providers.tsx      # ThemeProvider, PlayerProvider (syncs from URL)
+│   │   ├── globals.css        # Global styles + print CSS for PDF export
+│   │   ├── dashboard/page.tsx # All-players overview
+│   │   └── [player]/          # Player-scoped dynamic routes
+│   │       ├── games/page.tsx         # Games list with filters
+│   │       ├── games/[id]/page.tsx    # Game detail: board, eval, coaching
+│   │       ├── patterns/page.tsx      # Pattern analytics + AI trend summary
+│   │       └── reports/page.tsx       # Coaching reports (Rapid/Daily/All + PDF)
+│   ├── components/
+│   │   ├── app-header.tsx     # Title bar + player selector
+│   │   ├── nav-bar.tsx        # Navigation (player-scoped links)
+│   │   ├── player-selector.tsx# Player switching (navigates URLs)
+│   │   ├── player-card.tsx    # Player profile card for dashboard
+│   │   ├── report-view.tsx    # Report renderer (time class filter + game links)
+│   │   ├── games-table.tsx    # Clickable game rows
+│   │   ├── games-filters.tsx  # Result, time, coaching, month, platform filters
+│   │   ├── tier-badge.tsx     # Color-coded tier display
+│   │   ├── theme-toggle.tsx   # Dark/light mode toggle
+│   │   ├── game-detail/       # ChessBoard, EvalChart, MoveList, CoachingPanels
+│   │   ├── patterns/          # 13 visualization components + TrendSummary
+│   │   └── ui/                # shadcn/ui primitives (card, table, button, etc.)
+│   ├── hooks/                 # useChessNavigation
+│   └── lib/                   # API client (api.ts), types (types.ts), utils
 ├── docs/
 │   └── screenshots/       # Architecture diagram and screenshots
-├── pyproject.toml         # pytest marker config (integration/live)
 ├── tests/                 # Test suite (182 tests across 3 tiers)
 │   ├── conftest.py        # Shared fixtures (db, player, stockfish, llm)
 │   ├── test_models.py

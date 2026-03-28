@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { usePlayerContext } from "@/app/providers";
 import {
   Table,
   TableBody,
@@ -31,6 +32,7 @@ const STATUS_ICONS: Record<string, string> = {
 
 export function GamesTable({ games }: GamesTableProps) {
   const router = useRouter();
+  const { currentPlayer } = usePlayerContext();
 
   return (
     <Table>
@@ -53,7 +55,7 @@ export function GamesTable({ games }: GamesTableProps) {
           <TableRow
             key={g.id}
             className="cursor-pointer hover:bg-muted/50"
-            onClick={() => router.push(`/games/${g.id}`)}
+            onClick={() => router.push(`/${currentPlayer}/games/${g.id}`)}
           >
             <TableCell className="text-muted-foreground text-xs">
               {idx + 1}

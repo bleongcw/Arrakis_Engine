@@ -1,5 +1,7 @@
 "use client";
 
+import { useState } from "react";
+import { useParams } from "next/navigation";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Table,
@@ -9,33 +11,40 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-
-interface Opening {
-  name: string;
-  games: number;
-  wins: number;
-  losses: number;
-  draws: number;
-  win_rate: number;
-}
+import { OpeningExplorer } from "./opening-explorer";
+import type { OpeningEntry } from "@/lib/types";
 
 interface OpeningPerformanceProps {
   openings: {
-    all?: Opening[];
-    white?: Opening[];
-    black?: Opening[];
-  } | Opening[];
+    all?: OpeningEntry[];
+    white?: OpeningEntry[];
+    black?: OpeningEntry[];
+  } | OpeningEntry[];
 }
 
-function OpeningTable({ openings }: { openings: Opening[] }) {
+function OpeningTable({
+  openings,
+  boardOrientation,
+}: {
+  openings: OpeningEntry[];
+  boardOrientation: "white" | "black";
+}) {
+  const { player } = useParams<{ player: string }>();
+  const [expandedOpening, setExpandedOpening] = useState<string | null>(null);
+
   if (!openings || openings.length === 0) {
     return <p className="text-sm text-muted-foreground py-4">No data available.</p>;
   }
+
+  const toggleOpening = (name: string) => {
+    setExpandedOpening((prev) => (prev === name ? null : name));
+  };
 
   return (
     <Table>
       <TableHeader>
         <TableRow>
+          <TableHead className="w-[20px]"></TableHead>
           <TableHead>Opening</TableHead>
           <TableHead className="text-right">Games</TableHead>
           <TableHead className="text-right">Wins</TableHead>
@@ -44,17 +53,43 @@ function OpeningTable({ openings }: { openings: Opening[] }) {
         </TableRow>
       </TableHeader>
       <TableBody>
-        {openings.map((o, i) => (
-          <TableRow key={i}>
-            <TableCell className="font-medium">{o.name}</TableCell>
-            <TableCell className="text-right">{o.games}</TableCell>
-            <TableCell className="text-right text-green-500">{o.wins}</TableCell>
-            <TableCell className="text-right text-red-500">{o.losses}</TableCell>
-            <TableCell className="text-right font-semibold">
-              {o.win_rate.toFixed(0)}%
-            </TableCell>
-          </TableRow>
-        ))}
+        {openings.map((o, i) => {
+          const isExpanded = expandedOpening === o.name;
+          const hasExplorer = o.opening_moves && o.game_list && o.game_list.length > 0;
+          return (
+            <>
+              <TableRow
+                key={`row-${i}`}
+                className={hasExplorer ? "cursor-pointer hover:bg-muted/50" : ""}
+                onClick={() => hasExplorer && toggleOpening(o.name)}
+              >
+                <TableCell className="text-muted-foreground text-xs w-[20px] px-2">
+                  {hasExplorer ? (isExpanded ? "▼" : "▶") : ""}
+                </TableCell>
+                <TableCell className="font-medium">{o.name}</TableCell>
+                <TableCell className="text-right">{o.games}</TableCell>
+                <TableCell className="text-right text-green-500">{o.wins}</TableCell>
+                <TableCell className="text-right text-red-500">{o.losses}</TableCell>
+                <TableCell className="text-right font-semibold">
+                  {o.win_rate.toFixed(0)}%
+                </TableCell>
+              </TableRow>
+              {isExpanded && hasExplorer && player && (
+                <TableRow key={`explorer-${i}`}>
+                  <TableCell colSpan={6} className="p-2">
+                    <OpeningExplorer
+                      openingName={o.name}
+                      openingMoves={o.opening_moves!}
+                      gameList={o.game_list!}
+                      playerUsername={player}
+                      boardOrientation={boardOrientation}
+                    />
+                  </TableCell>
+                </TableRow>
+              )}
+            </>
+          );
+        })}
       </TableBody>
     </Table>
   );
@@ -62,9 +97,9 @@ function OpeningTable({ openings }: { openings: Opening[] }) {
 
 export function OpeningPerformance({ openings }: OpeningPerformanceProps) {
   // Handle both array and dict formats
-  let allOpenings: Opening[] = [];
-  let whiteOpenings: Opening[] = [];
-  let blackOpenings: Opening[] = [];
+  let allOpenings: OpeningEntry[] = [];
+  let whiteOpenings: OpeningEntry[] = [];
+  let blackOpenings: OpeningEntry[] = [];
 
   if (Array.isArray(openings)) {
     allOpenings = openings;
@@ -86,13 +121,13 @@ export function OpeningPerformance({ openings }: OpeningPerformanceProps) {
           <TabsTrigger value="black">{"\u265A"} Black</TabsTrigger>
         </TabsList>
         <TabsContent value="all">
-          <OpeningTable openings={allOpenings} />
+          <OpeningTable openings={allOpenings} boardOrientation="white" />
         </TabsContent>
         <TabsContent value="white">
-          <OpeningTable openings={whiteOpenings} />
+          <OpeningTable openings={whiteOpenings} boardOrientation="white" />
         </TabsContent>
         <TabsContent value="black">
-          <OpeningTable openings={blackOpenings} />
+          <OpeningTable openings={blackOpenings} boardOrientation="black" />
         </TabsContent>
       </Tabs>
     </div>

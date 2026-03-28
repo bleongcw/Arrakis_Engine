@@ -101,6 +101,24 @@ export interface GameDetail {
   coaching: GameCoaching | null;
 }
 
+export interface OpeningGameEntry {
+  game_id: number;
+  date: string | null;
+  opponent: string;
+  result: string;
+}
+
+export interface OpeningEntry {
+  name: string;
+  games: number;
+  wins: number;
+  losses: number;
+  draws: number;
+  win_rate: number;
+  opening_moves?: string;
+  game_list?: OpeningGameEntry[];
+}
+
 export interface PatternStats {
   total_games: number;
   results: {
@@ -115,9 +133,9 @@ export interface PatternStats {
     games: number;
   }>;
   openings: {
-    all?: Array<{ name: string; games: number; wins: number; losses: number; draws: number; win_rate: number }>;
-    white?: Array<{ name: string; games: number; wins: number; losses: number; draws: number; win_rate: number }>;
-    black?: Array<{ name: string; games: number; wins: number; losses: number; draws: number; win_rate: number }>;
+    all?: OpeningEntry[];
+    white?: OpeningEntry[];
+    black?: OpeningEntry[];
   };
   move_quality: {
     excellent: number;
@@ -175,6 +193,8 @@ export interface ReportData {
     win_rate: number;
   }>;
   game_list?: Array<{
+    game_id: number;
+    game_url: string | null;
     date: string | null;
     color: string;
     opponent_rating: number | null;
@@ -190,8 +210,11 @@ export interface ReportData {
   worst_phase?: string | null;
   improvement_areas?: Array<{ area: string; detail: string }>;
   critical_positions?: Array<{
+    game_id: number;
+    game_url: string | null;
     date: string | null;
     opponent_rating: number | null;
+    opponent_username: string | null;
     move_number: number | null;
     side: string | null;
     what_happened: string;

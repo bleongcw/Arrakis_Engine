@@ -1,7 +1,7 @@
 # Arrakis Engine — Chess Coach AI
 
 ## Project Overview
-Local Python app that pulls chess.com games, runs Stockfish analysis,
+Local Python app that pulls games from Chess.com and Lichess, runs Stockfish analysis,
 and uses LLMs to generate age-appropriate coaching insights with
 pattern tracking over time. Inspired by Eleanor, Evan, and Estella.
 
@@ -9,9 +9,11 @@ pattern tracking over time. Inspired by Eleanor, Evan, and Estella.
 - Python 3.11+, SQLite, local Stockfish on Apple Silicon
 - Two-step analysis: Stockfish engine eval → LLM coaching interpretation
 - Third layer: cross-game pattern aggregation over time
+- Fourth layer: LLM-powered trend summaries interpreting cross-game patterns
+- Frontend: Next.js 16 + React 19 + shadcn/ui + Tailwind CSS + Recharts
 
 ## Players
-- Configured in config.yaml (chess.com usernames, display names, ages, ratings)
+- Configured in config.yaml (chess.com usernames, lichess usernames, display names, ages, ratings, FIDE IDs)
 
 ## Key Configuration
 - Stockfish: depth 22, 6 threads, 512MB hash, path configured in config.yaml
@@ -25,6 +27,16 @@ pattern tracking over time. Inspired by Eleanor, Evan, and Estella.
 - Coaching output has two tones: child-facing (age-appropriate, concrete, encouraging) and coach-facing (technical, actionable)
 - Player age and rating are read dynamically from the database — coaching tone adapts per player
 
+## URL Structure (Player-Scoped Routes)
+```
+/                           → redirects to /dashboard
+/dashboard                  → all players overview
+/<player>/games             → game list for player (e.g. /evanleongxinyu/games)
+/<player>/games/<id>        → game detail with board, eval, coaching
+/<player>/patterns          → pattern analytics & trend summary
+/<player>/reports           → monthly/weekly coaching reports with PDF export
+```
+
 ## Project Structure
 ```
 ArrakisEngine/
@@ -36,33 +48,62 @@ ArrakisEngine/
 │   ├── harvester.py           # Chess.com + Lichess game fetcher
 │   ├── analyzer.py            # Stockfish analysis engine
 │   ├── coach.py               # LLM coaching layer (Anthropic + OpenAI)
-│   ├── patterns.py            # Cross-game pattern detection
-│   ├── models.py              # SQLite schema & data models
+│   ├── patterns.py            # Cross-game pattern detection + LLM trend summaries
+│   ├── models.py              # SQLite schema & data models (5 tables + migrations)
 │   ├── tiers.py               # Adaptive tier system (rating-based)
-│   ├── report.py              # Markdown report generator
+│   ├── report.py              # Report generator (structured JSON + markdown export)
 │   ├── export.py              # Data export utilities
-│   └── dashboard_server.py    # SQLite REST API for frontend
-├── frontend/                  # Next.js 16 + shadcn/ui dashboard
+│   └── dashboard_server.py    # SQLite REST API (GET + POST endpoints)
+├── frontend/                  # Next.js 16 + React 19 + shadcn/ui dashboard
 │   ├── app/
-│   │   ├── layout.tsx         # Root layout with theme provider
-│   │   ├── page.tsx           # Player dashboard landing page
-│   │   ├── dashboard/page.tsx # Legacy dashboard redirect
-│   │   ├── games/page.tsx     # Games list with filters
-│   │   ├── games/[id]/page.tsx# Game detail: board, eval, coaching
-│   │   └── patterns/page.tsx  # Pattern analytics & insights
+│   │   ├── layout.tsx         # Root layout (providers, header, nav)
+│   │   ├── page.tsx           # Home → redirect to /dashboard
+│   │   ├── providers.tsx      # ThemeProvider, PlayerProvider (syncs from URL)
+│   │   ├── dashboard/page.tsx # All-players overview
+│   │   └── [player]/          # Player-scoped dynamic routes
+│   │       ├── games/page.tsx         # Games list with filters
+│   │       ├── games/[id]/page.tsx    # Game detail: board, eval, coaching
+│   │       ├── patterns/page.tsx      # Pattern analytics & trend summary
+│   │       └── reports/page.tsx       # Coaching reports (Rapid/Daily/All)
 │   ├── components/
-│   │   ├── game-detail/       # Chessboard, eval chart, move list
-│   │   ├── patterns/          # ACPL trend, openings, phases, tactics
-│   │   └── ui/                # shadcn/ui primitives
-│   ├── hooks/                 # useChessNavigation, useCoaching
+│   │   ├── app-header.tsx     # Title + player selector
+│   │   ├── nav-bar.tsx        # Navigation (player-scoped links)
+│   │   ├── player-selector.tsx# Player switching (navigates to /<player>/...)
+│   │   ├── player-card.tsx    # Player profile card
+│   │   ├── report-view.tsx    # Report renderer with time class filter + game links
+│   │   ├── games-table.tsx    # Clickable game rows (→ /<player>/games/<id>)
+│   │   ├── games-filters.tsx  # Result, time, coaching, month, platform filters
+│   │   ├── tier-badge.tsx     # Color-coded tier display
+│   │   ├── theme-toggle.tsx   # Dark/light mode
+│   │   ├── game-detail/       # Chessboard, eval chart, move list, coaching
+│   │   ├── patterns/          # 13 visualization components + trend summary + opening explorer
+│   │   └── ui/                # shadcn/ui primitives (card, table, button, etc.)
+│   ├── hooks/                 # useChessNavigation
 │   └── lib/                   # API client, types, utilities
 ├── dashboard/                 # Legacy single-file HTML dashboard
 │   └── index.html
 ├── data/
 │   └── chess_coach.db         # SQLite database (auto-created, gitignored)
-├── tests/                     # pytest test suite
+├── tests/                     # pytest test suite (182 tests across 3 tiers)
+│   ├── conftest.py            # Shared fixtures (db, player, stockfish, llm)
+│   └── 11 test files          # Unit, integration, live, E2E
+├── docs/screenshots/          # Architecture diagram
 └── reports/                   # Generated coach reports (gitignored)
 ```
+
+## API Endpoints
+
+### GET endpoints (dashboard_server.py)
+- `GET /api/players` — all players with tier info, ratings, game counts
+- `GET /api/games?player=X&result=Y&time_class=Z&from=D&to=D` — filtered game list
+- `GET /api/games/<id>` — game detail with moves, coaching, opening analysis
+- `GET /api/patterns?player=X` — pattern stats + trend_summary for a player
+- `GET /api/report?player=X&period=monthly|weekly` — structured coaching report data
+- `GET /api/status` — analysis/coaching pipeline status counts
+
+### POST endpoints
+- `POST /api/coach` — trigger LLM coaching for a game (background thread)
+- `POST /api/trend-summary` — trigger LLM trend summary generation (background thread)
 
 ## Testing
 

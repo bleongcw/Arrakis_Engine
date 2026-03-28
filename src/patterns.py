@@ -141,13 +141,43 @@ def _compute_results(games: list[dict]) -> dict:
     }
 
 
+def _extract_opening_moves(pgn_text: str, max_moves: int = 15) -> str:
+    """Extract the first N moves from a PGN as a move text string."""
+    game = chess.pgn.read_game(io.StringIO(pgn_text))
+    if game is None:
+        return ""
+    moves = []
+    node = game
+    move_count = 0
+    while node.variations:
+        node = node.variations[0]
+        move_count += 1
+        if move_count > max_moves * 2:  # max_moves is full moves (2 half-moves each)
+            break
+        moves.append(node.san())
+
+    # Format as standard move text: 1.e4 e5 2.Nf3 Nc6 ...
+    parts = []
+    for i, san in enumerate(moves):
+        if i % 2 == 0:
+            parts.append(f"{i // 2 + 1}.{san}")
+        else:
+            parts.append(san)
+    return " ".join(parts)
+
+
 def _compute_opening_stats(games: list[dict]) -> dict:
     """Win rate by opening name, split by color.
 
     Returns {"all": [...], "white": [...], "black": [...]}.
+    Each opening entry includes opening_moves (PGN fragment) and
+    game_list (metadata for all games using that opening).
     """
     def _aggregate(game_list):
-        openings = defaultdict(lambda: {"games": 0, "wins": 0, "losses": 0, "draws": 0})
+        openings = defaultdict(lambda: {
+            "games": 0, "wins": 0, "losses": 0, "draws": 0,
+            "game_list": [], "representative_pgn": None,
+        })
         for g in game_list:
             name = _get_opening_name(g["pgn"])
             openings[name]["games"] += 1
@@ -157,13 +187,38 @@ def _compute_opening_stats(games: list[dict]) -> dict:
                 openings[name]["losses"] += 1
             else:
                 openings[name]["draws"] += 1
+            # Collect game metadata for the game list
+            openings[name]["game_list"].append({
+                "game_id": g["id"],
+                "date": g["date_played"],
+                "opponent": g.get("opponent_username") or str(g.get("opponent_rating", "?")),
+                "result": g["result"],
+            })
+            # Use earliest game as representative (games are sorted by date)
+            if openings[name]["representative_pgn"] is None:
+                openings[name]["representative_pgn"] = g["pgn"]
 
         result = []
         for name, data in sorted(openings.items(), key=lambda x: x[1]["games"], reverse=True):
             if data["games"] >= 2:
-                data["name"] = name
-                data["win_rate"] = round(data["wins"] / data["games"] * 100, 1)
-                result.append(data)
+                # Extract opening moves from representative game
+                opening_moves = ""
+                if data["representative_pgn"]:
+                    opening_moves = _extract_opening_moves(data["representative_pgn"])
+                # Sort game_list by date descending (most recent first)
+                data["game_list"].sort(
+                    key=lambda x: x["date"] or "", reverse=True
+                )
+                result.append({
+                    "name": name,
+                    "games": data["games"],
+                    "wins": data["wins"],
+                    "losses": data["losses"],
+                    "draws": data["draws"],
+                    "win_rate": round(data["wins"] / data["games"] * 100, 1),
+                    "opening_moves": opening_moves,
+                    "game_list": data["game_list"],
+                })
         return result[:20]
 
     white_games = [g for g in games if g["player_color"] == "white"]

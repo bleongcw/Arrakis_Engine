@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -20,7 +21,13 @@ const QUALITY_COLORS: Record<string, string> = {
   blunder: "text-red-600 dark:text-red-400",
 };
 
-export function ReportView({ data }: { data: ReportData }) {
+interface ReportViewProps {
+  data: ReportData;
+  timeClassFilter?: string;
+  playerUsername?: string;
+}
+
+export function ReportView({ data, timeClassFilter = "all", playerUsername }: ReportViewProps) {
   if (data.no_games) {
     return (
       <Card>
@@ -31,11 +38,59 @@ export function ReportView({ data }: { data: ReportData }) {
     );
   }
 
+  // Filter games by time class
+  const filteredGames = timeClassFilter === "all"
+    ? data.game_list || []
+    : (data.game_list || []).filter((g) => g.time_class === timeClassFilter);
+
+  const filteredGameIds = new Set(filteredGames.map((g) => g.game_id));
+
+  // Recompute stats for filtered games
+  const totalGames = filteredGames.length;
+  const wins = filteredGames.filter((g) => g.result === "win").length;
+  const losses = filteredGames.filter((g) => g.result === "loss").length;
+  const draws = filteredGames.filter((g) => g.result === "draw").length;
+  const winRate = totalGames > 0 ? Math.round((wins / totalGames) * 1000) / 10 : 0;
+
+  // Filter time class stats
+  const filteredTcStats = timeClassFilter === "all"
+    ? data.time_class_stats || []
+    : (data.time_class_stats || []).filter((tc) => tc.time_class === timeClassFilter);
+
+  // Filter critical positions
+  const filteredCritical = timeClassFilter === "all"
+    ? data.critical_positions || []
+    : (data.critical_positions || []).filter((cp) => filteredGameIds.has(cp.game_id));
+
+  // Rating from filtered games only
+  const filteredRatings = filteredGames
+    .map((g) => g.opponent_rating)
+    .filter((r): r is number => r !== null);
+  const avgOpp = filteredRatings.length > 0
+    ? Math.round(filteredRatings.reduce((a, b) => a + b, 0) / filteredRatings.length)
+    : null;
+
+  // No games after filter
+  if (totalGames === 0) {
+    const label = timeClassFilter === "all" ? "" : ` ${timeClassFilter}`;
+    return (
+      <Card>
+        <CardContent className="py-12 text-center text-muted-foreground">
+          No{label} games played in this period.
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const timeClassLabel = timeClassFilter === "all"
+    ? ""
+    : ` — ${timeClassFilter.charAt(0).toUpperCase() + timeClassFilter.slice(1)}`;
+
   return (
     <div className="space-y-6 report-content">
       {/* Header */}
       <div className="text-center space-y-1 print:mb-8">
-        <h2 className="text-2xl font-bold">Chess Coaching Report: {data.player_name}</h2>
+        <h2 className="text-2xl font-bold">Chess Coaching Report: {data.player_name}{timeClassLabel}</h2>
         <p className="text-muted-foreground">
           {data.period_start} to {data.period_end} &middot; Generated {data.generated_at}
         </p>
@@ -43,12 +98,12 @@ export function ReportView({ data }: { data: ReportData }) {
 
       {/* Summary Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatCard label="Games" value={data.total_games} />
+        <StatCard label="Games" value={totalGames} />
         <StatCard
           label="Results"
-          value={`${data.wins}W / ${data.losses}L / ${data.draws}D`}
+          value={`${wins}W / ${losses}L / ${draws}D`}
         />
-        <StatCard label="Win Rate" value={`${data.win_rate}%`} />
+        <StatCard label="Win Rate" value={`${winRate}%`} />
         <StatCard
           label="Rating Change"
           value={data.rating_change || "N/A"}
@@ -60,7 +115,7 @@ export function ReportView({ data }: { data: ReportData }) {
       </div>
 
       {/* Time Control Stats */}
-      {data.time_class_stats && data.time_class_stats.length > 0 && (
+      {filteredTcStats.length > 0 && (
         <Card>
           <CardHeader><CardTitle className="text-base">Results by Time Control</CardTitle></CardHeader>
           <CardContent>
@@ -76,7 +131,7 @@ export function ReportView({ data }: { data: ReportData }) {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {data.time_class_stats.map((tc) => (
+                {filteredTcStats.map((tc) => (
                   <TableRow key={tc.time_class}>
                     <TableCell className="font-medium capitalize">{tc.time_class}</TableCell>
                     <TableCell className="text-center">{tc.games}</TableCell>
@@ -93,7 +148,7 @@ export function ReportView({ data }: { data: ReportData }) {
       )}
 
       {/* Game-by-Game Results */}
-      {data.game_list && data.game_list.length > 0 && (
+      {filteredGames.length > 0 && (
         <Card>
           <CardHeader><CardTitle className="text-base">Game-by-Game Results</CardTitle></CardHeader>
           <CardContent>
@@ -106,14 +161,18 @@ export function ReportView({ data }: { data: ReportData }) {
                   <TableHead className="text-center">Result</TableHead>
                   <TableHead className="text-center">ACPL</TableHead>
                   <TableHead>Time</TableHead>
+                  <TableHead className="text-center">View</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {data.game_list.map((g, i) => (
+                {filteredGames.map((g, i) => (
                   <TableRow key={i}>
                     <TableCell className="text-sm">{g.date}</TableCell>
                     <TableCell className="capitalize">{g.color}</TableCell>
-                    <TableCell>{g.opponent_username || g.opponent_rating || "?"}</TableCell>
+                    <TableCell>
+                      {g.opponent_username || "?"}{" "}
+                      <span className="text-muted-foreground">({g.opponent_rating || "?"})</span>
+                    </TableCell>
                     <TableCell className="text-center">
                       <Badge variant={g.result === "win" ? "default" : g.result === "loss" ? "destructive" : "secondary"}>
                         {g.result.toUpperCase()}
@@ -121,6 +180,26 @@ export function ReportView({ data }: { data: ReportData }) {
                     </TableCell>
                     <TableCell className="text-center">{g.acpl ?? "N/A"}</TableCell>
                     <TableCell className="capitalize">{g.time_class}</TableCell>
+                    <TableCell className="text-center">
+                      {playerUsername && g.game_id ? (
+                        <Link
+                          href={`/${playerUsername}/games/${g.game_id}`}
+                          className="text-blue-600 dark:text-blue-400 hover:underline text-sm"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          View
+                        </Link>
+                      ) : g.game_url ? (
+                        <a
+                          href={g.game_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-600 dark:text-blue-400 hover:underline text-sm"
+                        >
+                          Link
+                        </a>
+                      ) : null}
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -207,15 +286,25 @@ export function ReportView({ data }: { data: ReportData }) {
       )}
 
       {/* Critical Positions */}
-      {data.critical_positions && data.critical_positions.length > 0 && (
+      {filteredCritical.length > 0 && (
         <Card>
           <CardHeader><CardTitle className="text-base">Critical Positions to Review</CardTitle></CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {data.critical_positions.map((cp, i) => (
+              {filteredCritical.map((cp, i) => (
                 <div key={i} className="border-l-2 border-primary/30 pl-4 space-y-1">
                   <p className="text-sm font-medium">
-                    Game on {cp.date} (vs {cp.opponent_rating || "?"}) — Move {cp.move_number} ({cp.side})
+                    {playerUsername && cp.game_id ? (
+                      <Link
+                        href={`/${playerUsername}/games/${cp.game_id}`}
+                        className="text-blue-600 dark:text-blue-400 hover:underline"
+                      >
+                        Game on {cp.date} vs {cp.opponent_username || cp.opponent_rating || "?"}
+                      </Link>
+                    ) : (
+                      <>Game on {cp.date} (vs {cp.opponent_rating || "?"})</>
+                    )}
+                    {" — "}Move {cp.move_number} ({cp.side})
                   </p>
                   <p className="text-sm text-muted-foreground">{cp.what_happened}</p>
                   <p className="text-sm text-emerald-600 dark:text-emerald-400">Better: {cp.what_was_better}</p>

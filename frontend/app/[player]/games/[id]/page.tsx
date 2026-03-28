@@ -17,9 +17,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { GameDetail } from "@/lib/types";
 
 export default function GameDetailPage() {
-  const params = useParams();
+  const params = useParams<{ player: string; id: string }>();
   const router = useRouter();
   const gameId = Number(params.id);
+  const playerUsername = params.player;
   const [detail, setDetail] = useState<GameDetail | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -34,15 +35,17 @@ export default function GameDetailPage() {
     return <div className="h-96 rounded-lg bg-muted animate-pulse" />;
   }
 
-  return <GameDetailView detail={detail} onUpdate={setDetail} />;
+  return <GameDetailView detail={detail} onUpdate={setDetail} playerUsername={playerUsername} />;
 }
 
 function GameDetailView({
   detail,
   onUpdate,
+  playerUsername,
 }: {
   detail: GameDetail;
   onUpdate: (d: GameDetail) => void;
+  playerUsername: string;
 }) {
   const router = useRouter();
   const { game, moves, coaching } = detail;
@@ -67,7 +70,7 @@ function GameDetailView({
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
-          <Button variant="outline" size="sm" onClick={() => router.push("/games")}>
+          <Button variant="outline" size="sm" onClick={() => router.push(`/${playerUsername}/games`)}>
             &larr; Back to Games
           </Button>
           {game.tier && (

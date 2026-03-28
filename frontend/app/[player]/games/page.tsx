@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
+import { useParams } from "next/navigation";
 import { usePlayerContext } from "@/app/providers";
 import { fetchGames } from "@/lib/api";
 import { GamesFilters } from "@/components/games-filters";
@@ -8,7 +9,8 @@ import { GamesTable } from "@/components/games-table";
 import type { GameListItem } from "@/lib/types";
 
 export default function GamesPage() {
-  const { currentPlayer, loading: playerLoading } = usePlayerContext();
+  const { player } = useParams<{ player: string }>();
+  const { loading: playerLoading } = usePlayerContext();
   const [allGames, setAllGames] = useState<GameListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState({
@@ -20,13 +22,13 @@ export default function GamesPage() {
   });
 
   useEffect(() => {
-    if (!currentPlayer) return;
+    if (!player) return;
     setLoading(true);
-    fetchGames(currentPlayer)
+    fetchGames(player)
       .then(setAllGames)
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, [currentPlayer]);
+  }, [player]);
 
   const filteredGames = useMemo(() => {
     let games = [...allGames];

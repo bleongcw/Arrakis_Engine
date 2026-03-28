@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useParams } from "next/navigation";
 import { usePlayerContext } from "@/app/providers";
 import { fetchPatterns } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
@@ -20,22 +21,23 @@ import { TrendSummary } from "@/components/patterns/trend-summary";
 import type { PatternStats } from "@/lib/types";
 
 export default function PatternsPage() {
-  const { currentPlayer, loading: playerLoading } = usePlayerContext();
+  const { player } = useParams<{ player: string }>();
+  const { loading: playerLoading } = usePlayerContext();
   const [stats, setStats] = useState<PatternStats | null>(null);
   const [trendSummary, setTrendSummary] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   const loadPatterns = useCallback(() => {
-    if (!currentPlayer) return;
+    if (!player) return;
     setLoading(true);
-    fetchPatterns(currentPlayer)
+    fetchPatterns(player)
       .then((data: any) => {
         setStats(data.stats);
         setTrendSummary(data.trend_summary || null);
       })
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, [currentPlayer]);
+  }, [player]);
 
   useEffect(() => {
     loadPatterns();
@@ -62,10 +64,10 @@ export default function PatternsPage() {
   return (
     <div className="space-y-6">
       {/* Coaching Trend Summary */}
-      {currentPlayer && (
+      {player && (
         <TrendSummary
           summary={trendSummary}
-          player={currentPlayer}
+          player={player}
           onSummaryGenerated={loadPatterns}
         />
       )}

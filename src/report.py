@@ -194,6 +194,8 @@ def build_report_data(player_username: str, period: str = "weekly",
         player_moves = [m for m in moves_by_game.get(g["id"], []) if m["side"] == g["player_color"]]
         game_acpl = round(sum(m["swing_cp"] or 0 for m in player_moves) / len(player_moves), 1) if player_moves else None
         game_list.append({
+            "game_id": g["id"],
+            "game_url": g.get("game_url"),
             "date": g["date_played"], "color": g["player_color"],
             "opponent_rating": g["opponent_rating"], "result": g["result"],
             "acpl": game_acpl, "time_class": g["time_class"],
@@ -289,8 +291,11 @@ def build_report_data(player_username: str, period: str = "weekly",
                 moments = json.loads(cd["critical_moments_json"])
                 for moment in moments[:2]:
                     critical_positions.append({
+                        "game_id": g["id"],
+                        "game_url": g.get("game_url"),
                         "date": g["date_played"],
                         "opponent_rating": g["opponent_rating"],
+                        "opponent_username": g.get("opponent_username"),
                         "move_number": moment.get("move_number"),
                         "side": moment.get("side"),
                         "what_happened": moment.get("what_happened", ""),
