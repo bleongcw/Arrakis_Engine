@@ -1,0 +1,6 @@
+[tool.pytest.ini_options]
+addopts = "-m 'not integration and not live'"
+markers = [
+    "integration: requires Stockfish binary (run with: pytest -m integration)",
+    "live: requires LLM API key (run with: pytest -m live)",
+]

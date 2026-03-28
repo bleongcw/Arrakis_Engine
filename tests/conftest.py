@@ -1,13 +1,67 @@
 """Shared pytest fixtures for ArrakisEngine test suite."""
 
+import os
+import shutil
 from datetime import datetime, timedelta
 
 import pytest
+import yaml
 
 from src.models import init_db, ensure_player
 
 
 SAMPLE_PGN = '[White "testplayer"]\n[Black "opponent"]\n\n1. e4 e5 2. Nf3 Nc6 *'
+
+# Scholar's Mate — short, deterministic, white wins with a blunder by black
+SCHOLARS_MATE_PGN = (
+    '[Event "Test"]\n[White "testplayer"]\n[Black "opponent"]\n'
+    '[Result "1-0"]\n\n1. e4 e5 2. Bc4 Nc6 3. Qh5 Nf6 4. Qxf7# 1-0'
+)
+
+
+# ---------------------------------------------------------------------------
+# Integration / Live test fixtures
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def stockfish_path():
+    """Resolve Stockfish binary path. Skips if not found.
+
+    Resolution order: config.yaml → STOCKFISH_PATH env → which stockfish
+    """
+    # Try config.yaml
+    config_path = os.path.join(os.path.dirname(__file__), "..", "config.yaml")
+    if os.path.exists(config_path):
+        with open(config_path) as f:
+            cfg = yaml.safe_load(f)
+        sf_path = cfg.get("stockfish", {}).get("path")
+        if sf_path and os.path.isfile(sf_path):
+            return sf_path
+
+    # Try env var
+    sf_path = os.getenv("STOCKFISH_PATH")
+    if sf_path and os.path.isfile(sf_path):
+        return sf_path
+
+    # Try PATH
+    sf_path = shutil.which("stockfish")
+    if sf_path:
+        return sf_path
+
+    pytest.skip("Stockfish binary not found (set STOCKFISH_PATH or install stockfish)")
+
+
+@pytest.fixture
+def llm_provider():
+    """Return (provider, model) for whichever LLM API key is available.
+
+    Prefers Claude, falls back to OpenAI. Skips if neither is set.
+    """
+    if os.getenv("ARRAKIS_ANTHROPIC_API_KEY"):
+        return ("claude", None)
+    if os.getenv("ARRAKIS_OPENAI_API_KEY"):
+        return ("openai", None)
+    pytest.skip("No LLM API key configured (set ARRAKIS_ANTHROPIC_API_KEY or ARRAKIS_OPENAI_API_KEY)")
 
 
 @pytest.fixture
