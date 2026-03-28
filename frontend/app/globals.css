@@ -128,3 +128,23 @@
     @apply font-sans;
   }
 }
+
+/* Print styles for PDF export */
+@media print {
+  body {
+    background: white !important;
+    color: black !important;
+  }
+  header, nav, .print\:hidden {
+    display: none !important;
+  }
+  .report-content {
+    max-width: 100% !important;
+    padding: 0 !important;
+  }
+  [data-slot="card"] {
+    break-inside: avoid;
+    border: 1px solid #e5e7eb !important;
+    box-shadow: none !important;
+  }
+}

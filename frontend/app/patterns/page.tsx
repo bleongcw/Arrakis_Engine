@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { usePlayerContext } from "@/app/providers";
 import { fetchPatterns } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
@@ -16,21 +16,30 @@ import { ComebackCollapse } from "@/components/patterns/comeback-collapse";
 import { OpeningACPL } from "@/components/patterns/opening-acpl";
 import { TacticalMisses } from "@/components/patterns/tactical-misses";
 import { RepertoireConsistency } from "@/components/patterns/repertoire-consistency";
+import { TrendSummary } from "@/components/patterns/trend-summary";
 import type { PatternStats } from "@/lib/types";
 
 export default function PatternsPage() {
   const { currentPlayer, loading: playerLoading } = usePlayerContext();
   const [stats, setStats] = useState<PatternStats | null>(null);
+  const [trendSummary, setTrendSummary] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  const loadPatterns = useCallback(() => {
     if (!currentPlayer) return;
     setLoading(true);
     fetchPatterns(currentPlayer)
-      .then((data) => setStats(data.stats))
+      .then((data: any) => {
+        setStats(data.stats);
+        setTrendSummary(data.trend_summary || null);
+      })
       .catch(console.error)
       .finally(() => setLoading(false));
   }, [currentPlayer]);
+
+  useEffect(() => {
+    loadPatterns();
+  }, [loadPatterns]);
 
   if (playerLoading || loading) {
     return <div className="h-96 rounded-lg bg-muted animate-pulse" />;
@@ -52,6 +61,15 @@ export default function PatternsPage() {
 
   return (
     <div className="space-y-6">
+      {/* Coaching Trend Summary */}
+      {currentPlayer && (
+        <TrendSummary
+          summary={trendSummary}
+          player={currentPlayer}
+          onSummaryGenerated={loadPatterns}
+        />
+      )}
+
       {/* Overview Stats Grid */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
         <StatCard label="Total Games" value={stats.total_games} />

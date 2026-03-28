@@ -80,18 +80,12 @@ WEEKLY_TEMPLATE = """# Chess Coaching Report: {display_name}
 """
 
 
-def generate_report(player_username: str, period: str = "weekly",
-                    output_dir: str = "reports", db_path: str | None = None) -> str:
-    """Generate a coaching report for a player.
+def build_report_data(player_username: str, period: str = "weekly",
+                      db_path: str | None = None) -> dict:
+    """Build structured report data for a player.
 
-    Args:
-        player_username: chess.com username
-        period: "weekly" or "monthly"
-        output_dir: directory to write the report
-        db_path: optional database path
-
-    Returns:
-        Path to the generated report file.
+    Returns a dict with all report sections as structured data,
+    suitable for JSON API responses or template rendering.
     """
     conn = init_db(db_path)
 
@@ -106,10 +100,8 @@ def generate_report(player_username: str, period: str = "weekly",
     now = datetime.now()
     if period == "weekly":
         period_start = (now - timedelta(days=7)).strftime("%Y-%m-%d")
-        days = 7
     else:
         period_start = (now - timedelta(days=30)).strftime("%Y-%m-%d")
-        days = 30
     period_end = now.strftime("%Y-%m-%d")
 
     # Fetch games in period
@@ -121,14 +113,19 @@ def generate_report(player_username: str, period: str = "weekly",
     ).fetchall()
     games = [dict(g) for g in games]
 
+    display_name = player["display_name"] or player_username
+
     if not games:
         conn.close()
-        logger.info("No games in period for %s", player_username)
-        # Generate minimal report
-        report = f"# Chess Coaching Report: {player['display_name'] or player_username}\n\n"
-        report += f"**Period:** {period_start} to {period_end}\n\n"
-        report += "No games played in this period.\n"
-        return _save_report(report, player_username, period, output_dir)
+        return {
+            "player_name": display_name,
+            "period": period,
+            "period_start": period_start,
+            "period_end": period_end,
+            "generated_at": now.strftime("%Y-%m-%d %H:%M"),
+            "total_games": 0,
+            "no_games": True,
+        }
 
     # Gather analysis data
     game_ids = [g["id"] for g in games]
@@ -163,18 +160,18 @@ def generate_report(player_username: str, period: str = "weekly",
     win_rate = round(wins / total * 100, 1) if total else 0
 
     opp_ratings = [g["opponent_rating"] for g in games if g["opponent_rating"]]
-    avg_opp = round(sum(opp_ratings) / len(opp_ratings)) if opp_ratings else "N/A"
+    avg_opp = round(sum(opp_ratings) / len(opp_ratings)) if opp_ratings else None
 
     player_ratings = [g["player_rating"] for g in games if g["player_rating"]]
-    start_rating = player_ratings[0] if player_ratings else "N/A"
-    end_rating = player_ratings[-1] if player_ratings else "N/A"
+    start_rating = player_ratings[0] if player_ratings else None
+    end_rating = player_ratings[-1] if player_ratings else None
     if isinstance(start_rating, int) and isinstance(end_rating, int):
         diff = end_rating - start_rating
         rating_change = f"+{diff}" if diff >= 0 else str(diff)
     else:
-        rating_change = "N/A"
+        rating_change = None
 
-    # Time class table
+    # Time class stats
     tc_stats = defaultdict(lambda: {"games": 0, "wins": 0, "losses": 0, "draws": 0})
     result_key = {"win": "wins", "loss": "losses", "draw": "draws"}
     for g in games:
@@ -182,29 +179,26 @@ def generate_report(player_username: str, period: str = "weekly",
         tc_stats[tc]["games"] += 1
         tc_stats[tc][result_key[g["result"]]] += 1
 
-    tc_lines = ["| Time Control | Games | W | L | D | Win% |", "|---|---|---|---|---|---|"]
+    time_class_list = []
     for tc, s in sorted(tc_stats.items()):
         wr = round(s["wins"] / s["games"] * 100) if s["games"] else 0
-        tc_lines.append(f"| {tc} | {s['games']} | {s['wins']} | {s['losses']} | {s['draws']} | {wr}% |")
-    time_class_table = "\n".join(tc_lines)
+        time_class_list.append({
+            "time_class": tc, "games": s["games"],
+            "wins": s["wins"], "losses": s["losses"], "draws": s["draws"],
+            "win_rate": wr,
+        })
 
     # Game list
-    game_lines = []
+    game_list = []
     for g in games:
-        emoji = {"win": "W", "loss": "L", "draw": "D"}[g["result"]]
-        color = g["player_color"]
-        opp_r = g["opponent_rating"] or "?"
         player_moves = [m for m in moves_by_game.get(g["id"], []) if m["side"] == g["player_color"]]
-        if player_moves:
-            acpl = round(sum(m["swing_cp"] or 0 for m in player_moves) / len(player_moves), 1)
-        else:
-            acpl = "N/A"
-        game_lines.append(
-            f"| {g['date_played']} | {color} | {opp_r} | **{emoji}** | {acpl} | {g['time_class']} |"
-        )
-
-    game_list = "| Date | Color | Opp Rating | Result | ACPL | Time |\n|---|---|---|---|---|---|\n"
-    game_list += "\n".join(game_lines)
+        game_acpl = round(sum(m["swing_cp"] or 0 for m in player_moves) / len(player_moves), 1) if player_moves else None
+        game_list.append({
+            "date": g["date_played"], "color": g["player_color"],
+            "opponent_rating": g["opponent_rating"], "result": g["result"],
+            "acpl": game_acpl, "time_class": g["time_class"],
+            "opponent_username": g.get("opponent_username"),
+        })
 
     # ACPL
     all_player_moves = [
@@ -212,21 +206,18 @@ def generate_report(player_username: str, period: str = "weekly",
         for m in moves_by_game.get(g["id"], [])
         if m["side"] == g["player_color"]
     ]
-    if all_player_moves:
-        period_acpl = round(
-            sum(m["swing_cp"] or 0 for m in all_player_moves) / len(all_player_moves), 1
-        )
-    else:
-        period_acpl = "N/A"
+    period_acpl = round(
+        sum(m["swing_cp"] or 0 for m in all_player_moves) / len(all_player_moves), 1
+    ) if all_player_moves else None
 
-    acpl_comparison = ""
-    if isinstance(period_acpl, float):
+    acpl_interpretation = None
+    if period_acpl is not None:
         if period_acpl < 40:
-            acpl_comparison = "- Excellent accuracy for this rating level!"
+            acpl_interpretation = "Excellent accuracy for this rating level!"
         elif period_acpl < 70:
-            acpl_comparison = "- Good accuracy — room for improvement in critical moments"
+            acpl_interpretation = "Good accuracy — room for improvement in critical moments"
         else:
-            acpl_comparison = "- Higher than ideal — focus on checking for threats before each move"
+            acpl_interpretation = "Higher than ideal — focus on checking for threats before each move"
 
     # Move quality
     quality = {"excellent": 0, "good": 0, "inaccuracy": 0, "mistake": 0, "blunder": 0}
@@ -235,12 +226,8 @@ def generate_report(player_username: str, period: str = "weekly",
         if cls in quality:
             quality[cls] += 1
     total_m = sum(quality.values()) or 1
-
-    mq_lines = ["| Classification | Count | % |", "|---|---|---|"]
-    for cls in ["excellent", "good", "inaccuracy", "mistake", "blunder"]:
-        pct = round(quality[cls] / total_m * 100, 1)
-        mq_lines.append(f"| {cls.title()} | {quality[cls]} | {pct}% |")
-    move_quality_table = "\n".join(mq_lines)
+    move_quality = {cls: {"count": quality[cls], "pct": round(quality[cls] / total_m * 100, 1)}
+                    for cls in quality}
 
     # Phase analysis
     phases = {"opening": [], "middlegame": [], "endgame": []}
@@ -253,106 +240,185 @@ def generate_report(player_username: str, period: str = "weekly",
         else:
             phases["endgame"].append(m["swing_cp"] or 0)
 
-    phase_lines = []
+    phase_data = {}
     worst_phase = None
     worst_acpl = 0
     for phase_name in ["opening", "middlegame", "endgame"]:
         moves_list = phases[phase_name]
         if moves_list:
             acpl = round(sum(moves_list) / len(moves_list), 1)
-            phase_lines.append(f"- **{phase_name.title()}:** ACPL {acpl} ({len(moves_list)} moves)")
+            phase_data[phase_name] = {"acpl": acpl, "moves": len(moves_list)}
             if acpl > worst_acpl:
                 worst_acpl = acpl
                 worst_phase = phase_name
-    phase_analysis = "\n".join(phase_lines)
-    if worst_phase:
-        phase_analysis += f"\n\n**Focus area:** {worst_phase.title()} — this is where the most accuracy is lost."
+        else:
+            phase_data[phase_name] = {"acpl": None, "moves": 0}
 
     # Improvement areas
-    improvement_lines = []
+    improvement_areas = []
     if quality["blunder"] > 0:
-        improvement_lines.append(
-            f"1. **Blunder reduction:** {quality['blunder']} blunders this period. "
-            f"Practice the \"Am I leaving anything hanging?\" check before every move."
-        )
+        improvement_areas.append({
+            "area": "Blunder reduction",
+            "detail": f"{quality['blunder']} blunders this period. "
+                      "Practice the \"Am I leaving anything hanging?\" check before every move.",
+        })
     if quality["mistake"] > 0:
-        improvement_lines.append(
-            f"2. **Reducing mistakes:** {quality['mistake']} mistakes. "
-            f"Many come from missing opponent threats — try counting attacker vs defenders."
-        )
+        improvement_areas.append({
+            "area": "Reducing mistakes",
+            "detail": f"{quality['mistake']} mistakes. "
+                      "Many come from missing opponent threats — try counting attackers vs defenders.",
+        })
     if worst_phase:
-        improvement_lines.append(
-            f"3. **{worst_phase.title()} play:** Highest ACPL ({worst_acpl}) in the {worst_phase}. "
-            f"Targeted practice in this phase will yield the biggest improvement."
-        )
-    if not improvement_lines:
-        improvement_lines.append("Great accuracy this period! Keep up the consistent play.")
-    improvement_areas = "\n".join(improvement_lines)
+        improvement_areas.append({
+            "area": f"{worst_phase.title()} play",
+            "detail": f"Highest ACPL ({worst_acpl}) in the {worst_phase}. "
+                      "Targeted practice in this phase will yield the biggest improvement.",
+        })
+    if not improvement_areas:
+        improvement_areas.append({
+            "area": "Keep it up",
+            "detail": "Great accuracy this period! Keep up the consistent play.",
+        })
 
     # Critical positions from coaching
-    crit_lines = []
+    critical_positions = []
     for g in games:
         cd = coaching_data.get(g["id"])
         if cd and cd.get("critical_moments_json"):
             try:
                 moments = json.loads(cd["critical_moments_json"])
-                for moment in moments[:2]:  # Top 2 per game
-                    crit_lines.append(
-                        f"### Game on {g['date_played']} (vs {g['opponent_rating'] or '?'})\n"
-                        f"- **Move {moment.get('move_number', '?')}** ({moment.get('side', '?')}): "
-                        f"{moment.get('what_happened', '')}\n"
-                        f"- **Better:** {moment.get('what_was_better', '')}\n"
-                    )
+                for moment in moments[:2]:
+                    critical_positions.append({
+                        "date": g["date_played"],
+                        "opponent_rating": g["opponent_rating"],
+                        "move_number": moment.get("move_number"),
+                        "side": moment.get("side"),
+                        "what_happened": moment.get("what_happened", ""),
+                        "what_was_better": moment.get("what_was_better", ""),
+                    })
             except (json.JSONDecodeError, TypeError):
                 pass
-
-    if crit_lines:
-        critical_positions = "\n".join(crit_lines[:6])  # Max 6 positions
-    else:
-        critical_positions = "No coaching data available yet. Run `python main.py coach` after analysis completes."
+    critical_positions = critical_positions[:6]
 
     # Recommendations
-    rec_lines = []
+    recommendations = []
+    seen = set()
     for g in games:
         cd = coaching_data.get(g["id"])
         if cd and cd.get("practical_focus"):
-            rec_lines.append(f"- {cd['practical_focus']}")
-    if rec_lines:
-        # Deduplicate similar recommendations
-        seen = set()
-        unique_recs = []
-        for r in rec_lines:
-            if r not in seen:
-                seen.add(r)
-                unique_recs.append(r)
-        recommendations = "\n".join(unique_recs[:5])
-    else:
-        recommendations = "- Complete game analysis and coaching to get personalized recommendations."
+            tip = cd["practical_focus"]
+            if tip not in seen:
+                seen.add(tip)
+                recommendations.append(tip)
+    recommendations = recommendations[:5]
 
-    # Fill template
+    return {
+        "player_name": display_name,
+        "period": period,
+        "period_start": period_start,
+        "period_end": period_end,
+        "generated_at": now.strftime("%Y-%m-%d %H:%M"),
+        "total_games": total,
+        "no_games": False,
+        "wins": wins,
+        "losses": losses,
+        "draws": draws,
+        "win_rate": win_rate,
+        "avg_opp_rating": avg_opp,
+        "start_rating": start_rating,
+        "end_rating": end_rating,
+        "rating_change": rating_change,
+        "time_class_stats": time_class_list,
+        "game_list": game_list,
+        "period_acpl": period_acpl,
+        "acpl_interpretation": acpl_interpretation,
+        "move_quality": move_quality,
+        "phase_analysis": phase_data,
+        "worst_phase": worst_phase,
+        "improvement_areas": improvement_areas,
+        "critical_positions": critical_positions,
+        "recommendations": recommendations,
+    }
+
+
+def generate_report(player_username: str, period: str = "weekly",
+                    output_dir: str = "reports", db_path: str | None = None) -> str:
+    """Generate a coaching report for a player and save to a markdown file.
+
+    Returns the path to the generated report file.
+    """
+    data = build_report_data(player_username, period, db_path)
+
+    if data.get("no_games"):
+        report = f"# Chess Coaching Report: {data['player_name']}\n\n"
+        report += f"**Period:** {data['period_start']} to {data['period_end']}\n\n"
+        report += "No games played in this period.\n"
+        return _save_report(report, player_username, period, output_dir)
+
+    # Build markdown tables from structured data
+    tc_lines = ["| Time Control | Games | W | L | D | Win% |", "|---|---|---|---|---|---|"]
+    for tc in data["time_class_stats"]:
+        tc_lines.append(f"| {tc['time_class']} | {tc['games']} | {tc['wins']} | {tc['losses']} | {tc['draws']} | {tc['win_rate']}% |")
+
+    gl_lines = ["| Date | Color | Opp Rating | Result | ACPL | Time |", "|---|---|---|---|---|---|"]
+    for g in data["game_list"]:
+        emoji = {"win": "W", "loss": "L", "draw": "D"}[g["result"]]
+        gl_lines.append(f"| {g['date']} | {g['color']} | {g['opponent_rating'] or '?'} | **{emoji}** | {g['acpl'] or 'N/A'} | {g['time_class']} |")
+
+    mq_lines = ["| Classification | Count | % |", "|---|---|---|"]
+    for cls in ["excellent", "good", "inaccuracy", "mistake", "blunder"]:
+        mq = data["move_quality"][cls]
+        mq_lines.append(f"| {cls.title()} | {mq['count']} | {mq['pct']}% |")
+
+    phase_lines = []
+    for pn in ["opening", "middlegame", "endgame"]:
+        pd = data["phase_analysis"][pn]
+        if pd["acpl"] is not None:
+            phase_lines.append(f"- **{pn.title()}:** ACPL {pd['acpl']} ({pd['moves']} moves)")
+    phase_text = "\n".join(phase_lines)
+    if data["worst_phase"]:
+        phase_text += f"\n\n**Focus area:** {data['worst_phase'].title()} — this is where the most accuracy is lost."
+
+    imp_lines = [f"{i+1}. **{a['area']}:** {a['detail']}" for i, a in enumerate(data["improvement_areas"])]
+
+    crit_lines = []
+    for cp in data["critical_positions"]:
+        crit_lines.append(
+            f"### Game on {cp['date']} (vs {cp['opponent_rating'] or '?'})\n"
+            f"- **Move {cp['move_number'] or '?'}** ({cp['side'] or '?'}): {cp['what_happened']}\n"
+            f"- **Better:** {cp['what_was_better']}\n"
+        )
+    crit_text = "\n".join(crit_lines) if crit_lines else "No coaching data available yet. Run `python main.py coach` after analysis completes."
+
+    rec_text = "\n".join(f"- {r}" for r in data["recommendations"]) if data["recommendations"] else "- Complete game analysis and coaching to get personalized recommendations."
+
+    acpl_comp = ""
+    if data["acpl_interpretation"]:
+        acpl_comp = f"- {data['acpl_interpretation']}"
+
     report = WEEKLY_TEMPLATE.format(
-        display_name=player["display_name"] or player_username,
-        period_start=period_start,
-        period_end=period_end,
-        generated_at=now.strftime("%Y-%m-%d %H:%M"),
-        total_games=total,
-        wins=wins,
-        losses=losses,
-        draws=draws,
-        win_rate=win_rate,
-        avg_opp_rating=avg_opp,
-        time_class_table=time_class_table,
-        start_rating=start_rating,
-        end_rating=end_rating,
-        rating_change=rating_change,
-        game_list=game_list,
-        period_acpl=period_acpl,
-        acpl_comparison=acpl_comparison,
-        move_quality_table=move_quality_table,
-        phase_analysis=phase_analysis,
-        improvement_areas=improvement_areas,
-        critical_positions=critical_positions,
-        recommendations=recommendations,
+        display_name=data["player_name"],
+        period_start=data["period_start"],
+        period_end=data["period_end"],
+        generated_at=data["generated_at"],
+        total_games=data["total_games"],
+        wins=data["wins"],
+        losses=data["losses"],
+        draws=data["draws"],
+        win_rate=data["win_rate"],
+        avg_opp_rating=data["avg_opp_rating"] or "N/A",
+        time_class_table="\n".join(tc_lines),
+        start_rating=data["start_rating"] or "N/A",
+        end_rating=data["end_rating"] or "N/A",
+        rating_change=data["rating_change"] or "N/A",
+        game_list="\n".join(gl_lines),
+        period_acpl=data["period_acpl"] or "N/A",
+        acpl_comparison=acpl_comp,
+        move_quality_table="\n".join(mq_lines),
+        phase_analysis=phase_text,
+        improvement_areas="\n".join(imp_lines),
+        critical_positions=crit_text,
+        recommendations=rec_text,
     )
 
     return _save_report(report, player_username, period, output_dir)

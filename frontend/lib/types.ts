@@ -136,6 +136,68 @@ export interface PatternStats {
     vs_lower: { games: number; wins: number; win_rate: number };
     vs_similar: { games: number; wins: number; win_rate: number };
   };
+  // Phase 1 advanced metrics
+  accuracy?: { overall_pct: number; best_moves: number; total_moves: number };
+  consistency?: { std_dev: number; mean_acpl: number; best_acpl: number; worst_acpl: number; total_games: number; rating: string };
+  danger_zones?: unknown;
+  endgame_conversion?: unknown;
+  time_control_performance?: unknown;
+  // Phase 2 deeper insights
+  critical_positions?: unknown;
+  comeback_collapse?: unknown;
+  opening_acpl?: unknown;
+  tactical_misses?: unknown;
+  repertoire_consistency?: unknown;
+}
+
+export interface ReportData {
+  player_name: string;
+  period: string;
+  period_start: string;
+  period_end: string;
+  generated_at: string;
+  total_games: number;
+  no_games: boolean;
+  wins?: number;
+  losses?: number;
+  draws?: number;
+  win_rate?: number;
+  avg_opp_rating?: number | null;
+  start_rating?: number | null;
+  end_rating?: number | null;
+  rating_change?: string | null;
+  time_class_stats?: Array<{
+    time_class: string;
+    games: number;
+    wins: number;
+    losses: number;
+    draws: number;
+    win_rate: number;
+  }>;
+  game_list?: Array<{
+    date: string | null;
+    color: string;
+    opponent_rating: number | null;
+    opponent_username: string | null;
+    result: string;
+    acpl: number | null;
+    time_class: string | null;
+  }>;
+  period_acpl?: number | null;
+  acpl_interpretation?: string | null;
+  move_quality?: Record<string, { count: number; pct: number }>;
+  phase_analysis?: Record<string, { acpl: number | null; moves: number }>;
+  worst_phase?: string | null;
+  improvement_areas?: Array<{ area: string; detail: string }>;
+  critical_positions?: Array<{
+    date: string | null;
+    opponent_rating: number | null;
+    move_number: number | null;
+    side: string | null;
+    what_happened: string;
+    what_was_better: string;
+  }>;
+  recommendations?: string[];
 }
 
 export interface StatusResponse {

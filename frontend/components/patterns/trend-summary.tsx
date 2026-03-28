@@ -1,0 +1,111 @@
+"use client";
+
+import { useState, useCallback } from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { triggerTrendSummary, fetchPatterns } from "@/lib/api";
+
+interface TrendSummaryProps {
+  summary: string | null | undefined;
+  player: string;
+  onSummaryGenerated: () => void;
+}
+
+export function TrendSummary({ summary, player, onSummaryGenerated }: TrendSummaryProps) {
+  const [generating, setGenerating] = useState(false);
+  const [provider, setProvider] = useState<"claude" | "openai">("claude");
+
+  const handleGenerate = useCallback(async (p: "claude" | "openai") => {
+    setProvider(p);
+    setGenerating(true);
+    try {
+      await triggerTrendSummary(player, p);
+      // Poll for completion
+      const poll = setInterval(async () => {
+        try {
+          const data = await fetchPatterns(player);
+          if (data.trend_summary) {
+            clearInterval(poll);
+            setGenerating(false);
+            onSummaryGenerated();
+          }
+        } catch {}
+      }, 5000);
+      // Stop polling after 5 minutes
+      setTimeout(() => {
+        clearInterval(poll);
+        setGenerating(false);
+      }, 300000);
+    } catch (err) {
+      console.error("Failed to trigger trend summary:", err);
+      setGenerating(false);
+    }
+  }, [player, onSummaryGenerated]);
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base flex items-center gap-2">
+          <span>Coaching Summary</span>
+          {summary && (
+            <span className="text-xs font-normal text-muted-foreground">AI-generated</span>
+          )}
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        {summary ? (
+          <div className="space-y-3">
+            {summary.split("\n\n").map((paragraph, i) => (
+              <p key={i} className="text-sm leading-relaxed">{paragraph}</p>
+            ))}
+            <div className="pt-2 flex gap-2">
+              <Button
+                variant="outline" size="sm"
+                disabled={generating}
+                onClick={() => handleGenerate("claude")}
+              >
+                {generating && provider === "claude" ? "Regenerating..." : "Regenerate with Claude"}
+              </Button>
+              <Button
+                variant="outline" size="sm"
+                disabled={generating}
+                onClick={() => handleGenerate("openai")}
+              >
+                {generating && provider === "openai" ? "Regenerating..." : "Regenerate with ChatGPT"}
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="text-center py-6 space-y-3">
+            <p className="text-sm text-muted-foreground">
+              Generate an AI coaching summary of your cross-game patterns and trends.
+            </p>
+            <div className="flex justify-center gap-2">
+              <Button
+                size="sm"
+                disabled={generating}
+                className="bg-purple-600 hover:bg-purple-700 text-white"
+                onClick={() => handleGenerate("claude")}
+              >
+                {generating && provider === "claude" ? "Generating..." : "Generate with Claude"}
+              </Button>
+              <Button
+                size="sm"
+                disabled={generating}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                onClick={() => handleGenerate("openai")}
+              >
+                {generating && provider === "openai" ? "Generating..." : "Generate with ChatGPT"}
+              </Button>
+            </div>
+            {generating && (
+              <p className="text-xs text-muted-foreground animate-pulse">
+                This may take 30-60 seconds...
+              </p>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}

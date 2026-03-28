@@ -1086,3 +1086,190 @@ def update_patterns(db_path: str | None = None) -> int:
             )
 
     return len(players)
+
+
+# ---------------------------------------------------------------------------
+# LLM-powered cross-game trend summary
+# ---------------------------------------------------------------------------
+
+TREND_PROMPT = """You are a professional chess coach reviewing a player's recent performance data.
+
+## Player Info
+- Name: {name}
+- Age: {age}
+- Rating: {rating}
+- Tier: {tier_label} {tier_icon}
+
+## Performance Summary (last {total_games} games)
+- Win rate: {win_rate}%
+- Results: {wins}W / {losses}L / {draws}D
+- Average ACPL: {avg_acpl}
+- Consistency: {consistency}
+- Best game ACPL: {best_acpl}  |  Worst game ACPL: {worst_acpl}
+
+## Phase Analysis
+- Opening ACPL: {opening_acpl} ({opening_moves} moves)
+- Middlegame ACPL: {middlegame_acpl} ({middlegame_moves} moves)
+- Endgame ACPL: {endgame_acpl} ({endgame_moves} moves)
+- Weakest phase: {worst_phase}
+
+## Move Quality
+- Excellent: {excellent_pct}%  |  Good: {good_pct}%
+- Inaccuracies: {inaccuracy_pct}%  |  Mistakes: {mistake_pct}%  |  Blunders: {blunder_pct}%
+
+## Additional Metrics
+- Accuracy (best moves played): {accuracy_pct}%
+- Endgame conversion rate: {endgame_conversion}%
+- Tactical miss rate: {tactical_miss_rate}%
+- Comeback rate: {comeback_rate}%  |  Collapse rate: {collapse_rate}%
+- Repertoire focus: {repertoire_rating}
+
+## ACPL Trend (weekly)
+{acpl_trend_text}
+
+## Instructions
+Write a 3-4 paragraph coaching summary for {name}. This is a progress review, not a single-game analysis.
+
+Requirements:
+- Address {name} by name. Use "you" throughout.
+- Paragraph 1: Overall progress and what's going well. Be specific with numbers.
+- Paragraph 2: Areas that need improvement. Reference the weakest phase, common mistakes, or tactical misses.
+- Paragraph 3: 3 specific, actionable practice recommendations appropriate for a {age}-year-old {tier_label}-level player.
+- Paragraph 4: Encouragement and growth mindset message.
+- Keep language age-appropriate for {age} years old.
+- Be warm but professional. Concrete, not vague.
+
+Respond with ONLY the text paragraphs, no JSON, no headers, no markdown formatting."""
+
+
+def generate_trend_summary(player_id: int, db_path: str | None = None,
+                           provider: str = "claude", model: str | None = None) -> str:
+    """Generate an LLM-powered trend summary from pattern stats.
+
+    Reads the latest pattern stats, builds a prompt, calls the LLM,
+    and stores the result in the player_patterns table.
+
+    Returns the summary text.
+    """
+    from src.coach import _call_claude, _call_openai
+    from src.tiers import get_tier
+
+    conn = init_db(db_path)
+
+    # Get player info
+    player = conn.execute("SELECT * FROM players WHERE id = ?", (player_id,)).fetchone()
+    if not player:
+        conn.close()
+        raise ValueError(f"Player {player_id} not found")
+
+    # Get latest pattern stats
+    row = conn.execute(
+        """SELECT * FROM player_patterns WHERE player_id = ?
+        ORDER BY updated_at DESC LIMIT 1""",
+        (player_id,),
+    ).fetchone()
+
+    if not row or not row["stats_json"]:
+        conn.close()
+        raise ValueError(f"No pattern stats for player {player_id}. Run patterns first.")
+
+    stats = json.loads(row["stats_json"])
+    pattern_id = row["id"]
+
+    name = player["display_name"] or player["username"]
+    age = player["age"] or 10
+    rating = player["rating"] or 1000
+    tier = get_tier(rating)
+
+    # Extract stats safely
+    results = stats.get("results", {})
+    phase = stats.get("phase_analysis", {})
+    mq = stats.get("move_quality", {})
+    consistency = stats.get("consistency", {})
+    accuracy = stats.get("accuracy", {})
+    endgame = stats.get("endgame_conversion", {})
+    tactical = stats.get("tactical_misses", {})
+    comeback = stats.get("comeback_collapse", {})
+    repertoire = stats.get("repertoire_consistency", {})
+
+    # Build ACPL trend text
+    trend = stats.get("acpl_trend", [])
+    if trend:
+        trend_lines = [f"  {t['week']}: ACPL {t['acpl']} ({t['games']} games)" for t in trend[-8:]]
+        acpl_trend_text = "\n".join(trend_lines)
+    else:
+        acpl_trend_text = "  No trend data available"
+
+    def _safe_get(d, *keys, default="N/A"):
+        for k in keys:
+            if isinstance(d, dict):
+                d = d.get(k)
+            else:
+                return default
+        return d if d is not None else default
+
+    prompt = TREND_PROMPT.format(
+        name=name, age=age, rating=rating,
+        tier_label=tier.label, tier_icon=tier.icon,
+        total_games=stats.get("total_games", 0),
+        win_rate=results.get("win_rate", 0),
+        wins=results.get("wins", 0),
+        losses=results.get("losses", 0),
+        draws=results.get("draws", 0),
+        avg_acpl=_safe_get(consistency, "mean_acpl"),
+        consistency=_safe_get(consistency, "rating"),
+        best_acpl=_safe_get(consistency, "best_acpl"),
+        worst_acpl=_safe_get(consistency, "worst_acpl"),
+        opening_acpl=_safe_get(phase, "opening", "acpl"),
+        opening_moves=_safe_get(phase, "opening", "moves", default=0),
+        middlegame_acpl=_safe_get(phase, "middlegame", "acpl"),
+        middlegame_moves=_safe_get(phase, "middlegame", "moves", default=0),
+        endgame_acpl=_safe_get(phase, "endgame", "acpl"),
+        endgame_moves=_safe_get(phase, "endgame", "moves", default=0),
+        worst_phase=stats.get("worst_phase", "N/A") if "worst_phase" in stats
+                    else _find_worst_phase(phase),
+        excellent_pct=_safe_get(mq, "excellent", "pct", default=0),
+        good_pct=_safe_get(mq, "good", "pct", default=0),
+        inaccuracy_pct=_safe_get(mq, "inaccuracy", "pct", default=0),
+        mistake_pct=_safe_get(mq, "mistake", "pct", default=0),
+        blunder_pct=_safe_get(mq, "blunder", "pct", default=0),
+        accuracy_pct=_safe_get(accuracy, "overall_pct", default=0),
+        endgame_conversion=_safe_get(endgame, "winning_endgames", "conversion_rate", default=0),
+        tactical_miss_rate=_safe_get(tactical, "miss_rate", default=0),
+        comeback_rate=_safe_get(comeback, "comebacks", "comeback_rate", default=0),
+        collapse_rate=_safe_get(comeback, "collapses", "collapse_rate", default=0),
+        repertoire_rating=_safe_get(repertoire, "white", "rating", default="N/A"),
+        acpl_trend_text=acpl_trend_text,
+    )
+
+    # Call LLM
+    logger.info("Generating trend summary for player %d with %s...", player_id, provider)
+    if provider == "claude":
+        summary = _call_claude(prompt, model or "claude-opus-4-6")
+    elif provider == "openai":
+        summary = _call_openai(prompt, model or "gpt-5.4")
+    else:
+        raise ValueError(f"Unknown provider: {provider}")
+
+    # Store in DB
+    conn.execute(
+        "UPDATE player_patterns SET trend_summary = ? WHERE id = ?",
+        (summary, pattern_id),
+    )
+    conn.commit()
+    conn.close()
+
+    logger.info("Trend summary generated for player %d (%d chars)", player_id, len(summary))
+    return summary
+
+
+def _find_worst_phase(phase_analysis: dict) -> str:
+    """Find the phase with the highest ACPL."""
+    worst = None
+    worst_acpl = 0
+    for name in ["opening", "middlegame", "endgame"]:
+        acpl = (phase_analysis.get(name) or {}).get("acpl")
+        if acpl is not None and acpl > worst_acpl:
+            worst_acpl = acpl
+            worst = name
+    return worst or "N/A"

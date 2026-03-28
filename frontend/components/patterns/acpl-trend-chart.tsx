@@ -145,8 +145,8 @@ export function ACPLTrendChart({ data }: ACPLTrendChartProps) {
               borderRadius: "6px",
               color: "hsl(var(--card-foreground))",
             }}
-            formatter={(value: number) => [`${value} ACPL`, "Average"]}
-            labelFormatter={(label: string) => `Week of ${label}`}
+            formatter={(value: any) => [`${value} ACPL`, "Average"]}
+            labelFormatter={(label: any) => `Week of ${label}`}
           />
           <Line
             type="monotone"

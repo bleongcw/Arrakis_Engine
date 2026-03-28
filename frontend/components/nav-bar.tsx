@@ -8,6 +8,7 @@ const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/games", label: "Games" },
   { href: "/patterns", label: "Patterns" },
+  { href: "/reports", label: "Reports" },
 ];
 
 export function NavBar() {

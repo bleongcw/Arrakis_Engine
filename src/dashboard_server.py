@@ -44,10 +44,13 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path
 
+        content_length = int(self.headers.get("Content-Length", 0))
+        body = json.loads(self.rfile.read(content_length)) if content_length else {}
+
         if path == "/api/coach":
-            content_length = int(self.headers.get("Content-Length", 0))
-            body = json.loads(self.rfile.read(content_length)) if content_length else {}
             self._handle_coach(body)
+        elif path == "/api/trend-summary":
+            self._handle_trend_summary(body)
         else:
             self._send_json({"error": "Not found"}, 404)
 
@@ -110,6 +113,50 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             "message": f"Coaching started for game {game_id} with {provider}. Refresh in ~30s to see results."
         })
 
+    def _handle_trend_summary(self, body):
+        """Trigger LLM trend summary generation for a player."""
+        import threading
+        from src.patterns import generate_trend_summary
+
+        player_username = body.get("player")
+        provider = body.get("provider", "claude")
+
+        if not player_username:
+            self._send_json({"error": "player required"}, 400)
+            return
+
+        # Look up player_id
+        conn = self._get_conn()
+        try:
+            row = conn.execute(
+                "SELECT id FROM players WHERE username = ?",
+                (player_username,),
+            ).fetchone()
+            if not row:
+                self._send_json({"error": f"Player {player_username} not found"}, 404)
+                return
+            player_id = row["id"]
+        finally:
+            conn.close()
+
+        # Run in background thread
+        def run_summary():
+            try:
+                generate_trend_summary(player_id, db_path=self.db_path, provider=provider)
+                logger.info("Trend summary complete for %s (%s)", player_username, provider)
+            except Exception as e:
+                logger.error("Trend summary failed for %s: %s", player_username, e)
+
+        thread = threading.Thread(target=run_summary, daemon=True)
+        thread.start()
+
+        self._send_json({
+            "status": "started",
+            "player": player_username,
+            "provider": provider,
+            "message": f"Trend summary generation started for {player_username}. Refresh patterns to see results."
+        })
+
     def _handle_api(self, path, params):
         """Route API requests to handler functions."""
         try:
@@ -129,6 +176,10 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             # GET /api/patterns?player=X
             elif path == "/api/patterns":
                 data = self._api_patterns(params)
+
+            # GET /api/report?player=X&period=monthly
+            elif path == "/api/report":
+                data = self._api_report(params)
 
             # GET /api/status
             elif path == "/api/status":
@@ -357,6 +408,23 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             return data
         finally:
             conn.close()
+
+    def _api_report(self, params):
+        from src.report import build_report_data
+
+        player = params.get("player", [None])[0]
+        if not player:
+            return {"error": "player parameter required"}
+
+        period = params.get("period", ["monthly"])[0]
+        if period not in ("weekly", "monthly"):
+            period = "monthly"
+
+        try:
+            data = build_report_data(player, period=period, db_path=self.db_path)
+            return data
+        except ValueError as e:
+            return {"error": str(e)}
 
     def _api_status(self):
         conn = self._get_conn()
