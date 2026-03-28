@@ -15,7 +15,7 @@ pattern tracking over time. Inspired by Eleanor, Evan, and Estella.
 
 ## Key Configuration
 - Stockfish: depth 22, 6 threads, 512MB hash, path configured in config.yaml
-- LLM: abstracted provider supporting both Anthropic (Claude Opus 4.6) and OpenAI (ChatGPT 5.4 Pro)
+- LLM: abstracted provider supporting both Anthropic (Claude Opus 4.6) and OpenAI (GPT-5.4)
 - Config via config.yaml, secrets via .env (ARRAKIS_ANTHROPIC_API_KEY, ARRAKIS_OPENAI_API_KEY)
 - Initial scope: last 6 months of games
 
@@ -29,29 +29,57 @@ pattern tracking over time. Inspired by Eleanor, Evan, and Estella.
 ```
 ArrakisEngine/
 ├── CLAUDE.md
-├── config.yaml
+├── config.yaml                # Config template (copy to config.yaml)
 ├── requirements.txt
 ├── main.py                    # CLI entry point
 ├── src/
-│   ├── harvester.py           # Chess.com API game fetcher
+│   ├── harvester.py           # Chess.com + Lichess game fetcher
 │   ├── analyzer.py            # Stockfish analysis engine
-│   ├── coach.py               # LLM coaching layer (abstracted)
+│   ├── coach.py               # LLM coaching layer (Anthropic + OpenAI)
 │   ├── patterns.py            # Cross-game pattern detection
 │   ├── models.py              # SQLite schema & data models
-│   └── report.py              # Markdown report generator
-├── dashboard/
-│   └── index.html             # Single-file local web dashboard
+│   ├── tiers.py               # Adaptive tier system (rating-based)
+│   ├── report.py              # Markdown report generator
+│   ├── export.py              # Data export utilities
+│   └── dashboard_server.py    # SQLite REST API for frontend
+├── frontend/                  # Next.js 16 + shadcn/ui dashboard
+│   ├── app/
+│   │   ├── layout.tsx         # Root layout with theme provider
+│   │   ├── page.tsx           # Player dashboard landing page
+│   │   ├── dashboard/page.tsx # Legacy dashboard redirect
+│   │   ├── games/page.tsx     # Games list with filters
+│   │   ├── games/[id]/page.tsx# Game detail: board, eval, coaching
+│   │   └── patterns/page.tsx  # Pattern analytics & insights
+│   ├── components/
+│   │   ├── game-detail/       # Chessboard, eval chart, move list
+│   │   ├── patterns/          # ACPL trend, openings, phases, tactics
+│   │   └── ui/                # shadcn/ui primitives
+│   ├── hooks/                 # useChessNavigation, useCoaching
+│   └── lib/                   # API client, types, utilities
+├── dashboard/                 # Legacy single-file HTML dashboard
+│   └── index.html
 ├── data/
 │   └── chess_coach.db         # SQLite database (auto-created, gitignored)
-├── tests/                     # Test suite
+├── tests/                     # pytest test suite
 └── reports/                   # Generated coach reports (gitignored)
 ```
 
 ## Testing
-- pytest for test runner
-- Tests live in tests/ directory
-- Use real chess.com data for integration tests
-- Test Stockfish integration with known PGN
+
+Three test tiers configured via pytest markers in `pyproject.toml`:
+
+| Command | Tests | Time | Requirements |
+|---------|-------|------|-------------|
+| `pytest` | 169 unit tests | ~14s | None (all mocked) |
+| `pytest -m integration` | 7 Stockfish tests | ~25s | Stockfish binary |
+| `pytest -m live` | 5 LLM API tests | ~3min | API key (Anthropic or OpenAI) |
+| `pytest -m ""` | All 182 tests | ~5min | Stockfish + API key |
+
+- Unit tests mock all external dependencies (Stockfish, LLM APIs, chess.com/Lichess)
+- Integration/live tests are excluded by default via `pyproject.toml` addopts
+- `stockfish_path` fixture auto-resolves from config.yaml → STOCKFISH_PATH env → PATH
+- `llm_provider` fixture picks whichever API key is available (prefers Claude)
+- Shared fixtures in `tests/conftest.py` (db_path, player_id, insert_game, insert_moves)
 
 ## Git Workflow
 - Commit after each working component

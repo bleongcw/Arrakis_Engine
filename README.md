@@ -453,16 +453,21 @@ ArrakisEngine/
 │   └── package.json       # Node dependencies
 ├── docs/
 │   └── screenshots/       # Architecture diagram and screenshots
-├── tests/                 # Test suite (113+ tests)
+├── pyproject.toml         # pytest marker config (integration/live)
+├── tests/                 # Test suite (182 tests across 3 tiers)
+│   ├── conftest.py        # Shared fixtures (db, player, stockfish, llm)
 │   ├── test_models.py
 │   ├── test_harvester.py
 │   ├── test_analyzer.py
 │   ├── test_coach.py
-│   ├── test_patterns.py   # 32 tests (Phase 1 + 2 metrics)
-│   ├── test_tiers.py      # 21 tests (tier system)
+│   ├── test_patterns.py
+│   ├── test_tiers.py
 │   ├── test_export.py
 │   ├── test_report.py
-│   └── test_dashboard_server.py
+│   ├── test_dashboard_server.py
+│   ├── test_analyzer_integration.py  # Stockfish integration (pytest -m integration)
+│   ├── test_coach_live.py            # LLM API live tests (pytest -m live)
+│   └── test_pipeline_e2e.py          # Full pipeline E2E (requires both)
 ├── data/
 │   └── chess_coach.db     # SQLite database (auto-created, gitignored)
 └── reports/               # Generated coach reports (gitignored)
@@ -480,11 +485,31 @@ ArrakisEngine/
 
 ## Running Tests
 
+Tests are organized into three tiers using pytest markers:
+
 ```bash
+# Unit tests only (default — fast, no external dependencies)
 python -m pytest tests/ -v
+# → 169 tests in ~14s, all mocked
+
+# Stockfish integration tests (requires Stockfish binary)
+python -m pytest tests/ -m integration -v
+# → 7 tests: real Stockfish analysis on Scholar's Mate
+
+# LLM API live tests (requires ARRAKIS_ANTHROPIC_API_KEY or ARRAKIS_OPENAI_API_KEY)
+python -m pytest tests/ -m live -v
+# → 5 tests: real coaching API calls (~$0.05 per run)
+
+# Full pipeline E2E (requires both Stockfish + API key)
+python -m pytest tests/ -m "integration and live" -v
+# → 1 test: harvest → analyze → coach end-to-end
+
+# Everything
+python -m pytest tests/ -m "" -v
+# → All 182 tests
 ```
 
-All tests run against in-memory SQLite databases with mocked external APIs — no Stockfish binary or API keys needed.
+Unit tests run against in-memory SQLite databases with mocked external APIs. Integration and live tests are excluded by default — opt in explicitly with `-m integration` or `-m live`.
 
 ## Troubleshooting
 
