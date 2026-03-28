@@ -142,3 +142,42 @@ class TestPatternsAPI:
     def test_missing_player_param(self, live_server):
         data = api_get(live_server, "/api/patterns")
         assert "error" in data
+
+
+class TestCorsHeaders:
+    def test_response_has_cors(self, live_server):
+        """API responses should include CORS headers."""
+        url = live_server + "/api/players"
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req) as resp:
+            cors = resp.getheader("Access-Control-Allow-Origin")
+        assert cors == "*"
+
+
+class TestDateRangeFilter:
+    def test_filter_by_date_from(self, live_server):
+        """Games before 'from' date should be excluded."""
+        data = api_get(live_server, "/api/games?player=testplayer&from=2026-01-16")
+        assert len(data) == 1
+        assert all(g["date_played"] >= "2026-01-16" for g in data)
+
+    def test_filter_by_date_to(self, live_server):
+        """Games after 'to' date should be excluded."""
+        data = api_get(live_server, "/api/games?player=testplayer&to=2026-01-15")
+        assert len(data) == 1
+        assert all(g["date_played"] <= "2026-01-15" for g in data)
+
+
+class TestStatusCounts:
+    def test_status_has_correct_counts(self, live_server):
+        data = api_get(live_server, "/api/status")
+        assert data["total_games"] == 2
+        assert data["analysis_complete"] == 1
+        assert data["analysis_pending"] == 1
+
+
+class TestPlayerFilter:
+    def test_games_filtered_by_player(self, live_server):
+        """Requesting an unknown player should return empty list."""
+        data = api_get(live_server, "/api/games?player=nonexistent")
+        assert data == []

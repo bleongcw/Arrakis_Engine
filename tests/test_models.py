@@ -6,12 +6,10 @@ import os
 
 import pytest
 
-from src.models import init_db, get_connection, ensure_player
-
-
-@pytest.fixture
-def db_path(tmp_path):
-    return str(tmp_path / "test.db")
+from src.models import (
+    init_db, get_connection, ensure_player,
+    extract_opponent_from_pgn, get_db_path, _migrate,
+)
 
 
 class TestInitDb:
@@ -116,4 +114,57 @@ class TestGameSchema:
                 VALUES (?, 'http://example.com/3', '1. e4', 'white', 'stalemate')""",
                 (pid,),
             )
+        conn.close()
+
+
+class TestExtractOpponentFromPgn:
+    def test_player_is_white_returns_black(self):
+        pgn = '[White "me"]\n[Black "opponent"]\n\n1. e4 e5 *'
+        assert extract_opponent_from_pgn(pgn, "white") == "opponent"
+
+    def test_player_is_black_returns_white(self):
+        pgn = '[White "opponent"]\n[Black "me"]\n\n1. e4 e5 *'
+        assert extract_opponent_from_pgn(pgn, "black") == "opponent"
+
+    def test_missing_header_returns_none(self):
+        pgn = "1. e4 e5 *"
+        assert extract_opponent_from_pgn(pgn, "white") is None
+
+    def test_malformed_pgn(self):
+        pgn = '[White "broken'
+        assert extract_opponent_from_pgn(pgn, "white") is None
+
+
+class TestGetDbPath:
+    def test_creates_directory(self, tmp_path):
+        nested = str(tmp_path / "a" / "b" / "test.db")
+        result = get_db_path(nested)
+        assert os.path.isdir(os.path.dirname(result))
+
+    def test_returns_string_path(self, tmp_path):
+        result = get_db_path(str(tmp_path / "test.db"))
+        assert isinstance(result, str)
+        assert result.endswith("test.db")
+
+
+class TestMigrations:
+    def test_adds_expected_columns(self, db_path):
+        """Verify migration adds columns to a freshly-init'd DB."""
+        conn = init_db(db_path)
+        # Check that migrated columns exist on games
+        game_cols = {r[1] for r in conn.execute("PRAGMA table_info(games)").fetchall()}
+        assert "opponent_username" in game_cols
+        assert "platform" in game_cols
+        assert "acpl" in game_cols
+
+        # Check migrated columns on game_coaching
+        coaching_cols = {r[1] for r in conn.execute("PRAGMA table_info(game_coaching)").fetchall()}
+        assert "opening_analysis_json" in coaching_cols
+        assert "player_feedback" in coaching_cols
+
+        # Check migrated columns on players
+        player_cols = {r[1] for r in conn.execute("PRAGMA table_info(players)").fetchall()}
+        assert "fide_id" in player_cols
+        assert "fide_rating" in player_cols
+        assert "lichess_username" in player_cols
         conn.close()

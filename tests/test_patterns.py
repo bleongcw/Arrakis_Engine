@@ -5,6 +5,7 @@ import json
 import pytest
 
 from src.patterns import (
+    _get_opening_name,
     _classify_game_phase,
     _compute_results,
     _compute_rating_performance,
@@ -439,3 +440,72 @@ class TestUpdatePatterns:
     def test_updates_all_players(self, db_path, populated_db):
         count = update_patterns(db_path=db_path)
         assert count == 1
+
+
+class TestGetOpeningName:
+    def test_opening_header(self):
+        pgn = '[Opening "Italian Game"]\n\n1. e4 e5 *'
+        assert _get_opening_name(pgn) == "Italian Game"
+
+    def test_eco_url_fallback(self):
+        pgn = '[ECOUrl "https://www.chess.com/openings/Kings-Pawn-Opening"]\n\n1. e4 e5 *'
+        assert _get_opening_name(pgn) == "Kings Pawn Opening"
+
+    def test_missing_opening_returns_unknown(self):
+        pgn = "1. e4 e5 *"
+        assert _get_opening_name(pgn) == "Unknown"
+
+
+class TestSingleGameDataset:
+    def test_patterns_with_one_game(self, db_path):
+        """Pattern computation should not crash with only 1 game."""
+        conn = init_db(db_path)
+        pid = ensure_player(conn, "testplayer", display_name="T", age=9, rating=1050)
+        conn.execute(
+            """INSERT INTO games
+            (player_id, game_url, pgn, player_color, player_rating,
+             opponent_rating, result, time_control, time_class, date_played,
+             analysis_status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (pid, "https://chess.com/g/1",
+             '[Opening "Italian"]\n1. e4 e5 *',
+             "white", 1050, 980, "win", "600", "rapid", "2026-03-01", "complete"),
+        )
+        gid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        conn.execute(
+            """INSERT INTO move_analysis
+            (game_id, move_number, side, move_played, best_move,
+             eval_before_cp, eval_after_cp, swing_cp,
+             win_prob_before, win_prob_after, classification)
+            VALUES (?, 1, 'white', 'e4', 'e4', 0, 20, 0, 50, 51, 'excellent')""",
+            (gid,),
+        )
+        conn.commit()
+        conn.close()
+
+        stats = compute_player_patterns(pid, db_path=db_path)
+        assert stats["total_games"] == 1
+        assert stats["results"]["wins"] == 1
+
+
+class TestEmptyMovesHandling:
+    def test_game_with_no_moves(self, db_path):
+        """Patterns should handle a game that has 0 move_analysis rows."""
+        conn = init_db(db_path)
+        pid = ensure_player(conn, "testplayer", display_name="T", age=9, rating=1050)
+        conn.execute(
+            """INSERT INTO games
+            (player_id, game_url, pgn, player_color, player_rating,
+             opponent_rating, result, time_control, time_class, date_played,
+             analysis_status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (pid, "https://chess.com/g/1", "1. *",
+             "white", 1050, 980, "draw", "600", "rapid", "2026-03-01", "complete"),
+        )
+        conn.commit()
+        conn.close()
+
+        # Should not crash
+        stats = compute_player_patterns(pid, db_path=db_path)
+        assert stats["total_games"] == 1
+        assert stats["results"]["draws"] == 1

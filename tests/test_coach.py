@@ -8,8 +8,10 @@ import pytest
 from src.coach import (
     _build_analysis_text,
     _build_critical_moments,
+    _format_single_move,
     _parse_llm_response,
     coach_game,
+    coach_pending,
 )
 from src.models import init_db, ensure_player
 
@@ -163,3 +165,119 @@ class TestCoachGame:
         ).fetchone()
         assert game["coaching_status"] == "complete"
         conn.close()
+
+
+class TestBuildAnalysisTextTruncation:
+    """Test smart truncation for long games."""
+
+    def _make_moves(self, n, *, blunder_at=None):
+        """Generate n half-moves of test data."""
+        moves = []
+        for i in range(n):
+            move_num = (i // 2) + 1
+            side = "white" if i % 2 == 0 else "black"
+            cls = "excellent"
+            swing = 2
+            if blunder_at and i in blunder_at:
+                cls = "blunder"
+                swing = 400
+            moves.append({
+                "move_number": move_num, "side": side,
+                "move_played": "e4", "best_move": "d4" if cls == "blunder" else "e4",
+                "eval_before_cp": 20, "eval_after_cp": 20 - swing,
+                "swing_cp": swing,
+                "win_prob_before": 51.0, "win_prob_after": 51.0,
+                "classification": cls,
+            })
+        return moves
+
+    def test_short_game_returns_all(self):
+        moves = self._make_moves(20)
+        text = _build_analysis_text(moves)
+        # Short game — no gap markers
+        assert "omitted" not in text
+
+    def test_long_game_includes_opening_and_blunders(self):
+        moves = self._make_moves(100, blunder_at={70, 90})
+        text = _build_analysis_text(moves)
+        # Should have gap markers for omitted sections
+        assert "omitted" in text
+        # Blunders should still appear
+        assert "??" in text
+
+    def test_long_game_shows_gap_markers(self):
+        moves = self._make_moves(100)
+        text = _build_analysis_text(moves)
+        assert "omitted" in text
+        assert "Game summary" in text
+
+
+class TestFormatSingleMove:
+    def test_different_best_move_shown(self):
+        move = {
+            "move_number": 5, "side": "white", "move_played": "Bb5",
+            "best_move": "d4", "eval_before_cp": 30, "eval_after_cp": -120,
+            "swing_cp": 150, "win_prob_before": 53.2, "win_prob_after": 37.1,
+            "classification": "mistake",
+        }
+        text = _format_single_move(move)
+        assert "[best: d4]" in text
+        assert "Bb5?" in text
+
+    def test_same_best_move_not_shown(self):
+        move = {
+            "move_number": 1, "side": "white", "move_played": "e4",
+            "best_move": "e4", "eval_before_cp": 20, "eval_after_cp": 15,
+            "swing_cp": 5, "win_prob_before": 51.8, "win_prob_after": 51.4,
+            "classification": "excellent",
+        }
+        text = _format_single_move(move)
+        assert "[best:" not in text
+        assert "e4!" in text
+
+
+class TestCoachGameProviderSwitch:
+    @patch("src.coach._call_claude")
+    def test_claude_provider(self, mock_claude, db_path, game_with_analysis):
+        mock_claude.return_value = json.dumps({
+            "narrative": "n", "key_lesson": "k", "practical_focus": "p",
+            "critical_moments": [], "coach_notes": "c",
+        })
+        coach_game(game_with_analysis, provider="claude", db_path=db_path)
+        mock_claude.assert_called_once()
+
+    @patch("src.coach._call_openai")
+    def test_openai_provider(self, mock_openai, db_path, game_with_analysis):
+        mock_openai.return_value = json.dumps({
+            "narrative": "n", "key_lesson": "k", "practical_focus": "p",
+            "critical_moments": [], "coach_notes": "c",
+        })
+        coach_game(game_with_analysis, provider="openai", db_path=db_path)
+        mock_openai.assert_called_once()
+
+    def test_unknown_provider_raises(self, db_path, game_with_analysis):
+        with pytest.raises(ValueError, match="Unknown provider"):
+            coach_game(game_with_analysis, provider="gemini", db_path=db_path)
+
+
+class TestCoachPendingLimit:
+    @patch("src.coach.coach_game")
+    def test_limit_respected(self, mock_coach, db_path):
+        """coach_pending with limit=1 should only coach 1 game."""
+        conn = init_db(db_path)
+        pid = ensure_player(conn, "testplayer", display_name="T", age=9, rating=1000)
+        for i in range(3):
+            conn.execute(
+                """INSERT INTO games
+                (player_id, game_url, pgn, player_color, result,
+                 analysis_status, coaching_status)
+                VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (pid, f"https://chess.com/game/{i+100}", "1. e4 *", "white",
+                 "win", "complete", "pending"),
+            )
+        conn.commit()
+        conn.close()
+
+        mock_coach.return_value = {"narrative": "ok"}
+        coach_pending(provider="claude", db_path=db_path, limit=1)
+        assert mock_coach.call_count == 1
