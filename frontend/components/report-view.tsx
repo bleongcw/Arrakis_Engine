@@ -13,6 +13,12 @@ import {
 } from "@/components/ui/table";
 import type { ReportData } from "@/lib/types";
 
+const RESULT_BADGE_COLORS: Record<string, string> = {
+  win: "bg-emerald-500 text-white hover:bg-emerald-600",
+  loss: "bg-red-500 text-white hover:bg-red-600",
+  draw: "bg-amber-500 text-white hover:bg-amber-600",
+};
+
 const QUALITY_COLORS: Record<string, string> = {
   excellent: "text-emerald-600 dark:text-emerald-400",
   good: "text-blue-600 dark:text-blue-400",
@@ -38,10 +44,16 @@ export function ReportView({ data, timeClassFilter = "all", playerUsername }: Re
     );
   }
 
-  // Filter games by time class
-  const filteredGames = timeClassFilter === "all"
+  // Filter games by time class and sort by date (most recent first)
+  const filteredGames = (timeClassFilter === "all"
     ? data.game_list || []
-    : (data.game_list || []).filter((g) => g.time_class === timeClassFilter);
+    : (data.game_list || []).filter((g) => g.time_class === timeClassFilter)
+  ).slice().sort((a, b) => {
+    if (!a.date && !b.date) return 0;
+    if (!a.date) return 1;
+    if (!b.date) return -1;
+    return b.date.localeCompare(a.date);
+  });
 
   const filteredGameIds = new Set(filteredGames.map((g) => g.game_id));
 
@@ -174,7 +186,7 @@ export function ReportView({ data, timeClassFilter = "all", playerUsername }: Re
                       <span className="text-muted-foreground">({g.opponent_rating || "?"})</span>
                     </TableCell>
                     <TableCell className="text-center">
-                      <Badge variant={g.result === "win" ? "default" : g.result === "loss" ? "destructive" : "secondary"}>
+                      <Badge className={RESULT_BADGE_COLORS[g.result] || ""}>
                         {g.result.toUpperCase()}
                       </Badge>
                     </TableCell>

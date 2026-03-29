@@ -432,13 +432,17 @@ python main.py dashboard
   - Time Control Performance table (win%, ACPL, blunder% per format)
   - Opening Quality Analysis table (ACPL per opening with verdict badges)
   - Time Pressure Analysis: time management score, time trouble rate, avg time per move by phase (bar chart), blunder rate comparison under pressure vs comfortable
+  - **Rating Progression Chart** — interactive line chart showing rating over time with result-colored dots (green win / red loss / amber draw), time class filter (all/rapid/blitz/bullet/daily), 10-game moving average trend line, and info modal
+  - **Opening Repertoire Tracker** — ECO distribution bar chart, sortable opening table with win rate and trend indicators (improving/declining/stable), All/White/Black filter tabs, and focus areas panel highlighting openings that need work
   - Opening Win Rate table (split by All / White / Black) with **interactive Opening Explorer** — click any opening to expand a chessboard showing the opening position with step-through move controls, plus a linked list of all games using that opening; board orientation flips on the Black tab
-  - **Opening Book Integration** — ECO code and opening name badge, moves annotated with green checkmarks (matches book theory) and orange markers (deviations), with "Book move: X" vs "Player played: Y" callouts
+  - **Opening Book Integration** — ECO code and opening name badge, moves annotated with green checkmarks (matches book theory) and orange markers (deviations), with "Book move: X" vs "Player played: Y" callouts; expanded to 438 ECO entries (A00-E99) with deeper variations
+- **Games page** enhancements:
+  - **Game Comparison View** — select two games and compare side-by-side with independent chessboards, eval charts, move quality summaries, and a comparison table highlighting differences in ACPL, excellent moves, blunders, and more
 - **Reports page** — monthly/weekly coaching reports for coaches:
   - Time class filter tabs: **Rapid** (default), **Daily**, **All** — stats recompute per filter
   - Summary cards: games, W/L/D, win rate, rating change
   - Results by time control table
-  - Game-by-game results with clickable links to game detail pages
+  - Game-by-game results with clickable links to game detail pages, sorted most-recent-first, color-coded result badges (green win / red loss / amber draw)
   - ACPL analysis with interpretation
   - Move quality distribution
   - Game phase analysis (opening/middlegame/endgame) with worst-phase highlighting
@@ -446,6 +450,12 @@ python main.py dashboard
   - Critical positions to review with game links (from LLM coaching data)
   - Coaching recommendations (aggregated from individual game coaching)
   - **PDF export** via `window.print()` with print-optimized CSS
+- **Data Updates panel** — one-click buttons on the dashboard to run the pipeline without CLI:
+  - **Fetch New Games** → **Run Analysis** → **Update Insights** shown as a visual flow with arrows
+  - **Run All Steps** option to chain all three in one click
+  - Player selector to run for a specific player or all players
+  - Real-time progress bar, step indicators, and friendly result summaries
+  - Tooltips explaining what each step does
 - **Tier badge** — color-coded skill tier displayed per game and on player profiles
 - **Mobile responsive** — all pages adapt to mobile (320px+), tablet, and desktop; ChessBoard auto-sizes via ResizeObserver; tables progressively hide low-priority columns; nav bar scrolls horizontally; player selector shows first names on mobile
 - **Light/dark mode** — toggle with theme button, persists across sessions
@@ -473,6 +483,7 @@ ArrakisEngine/
 │   ├── patterns.py        # Cross-game pattern detection + LLM trend summaries
 │   ├── export.py          # JSON export for dashboard
 │   ├── dashboard_server.py # REST API server (GET + POST endpoints)
+│   ├── pipeline_state.py  # In-memory pipeline task state (thread-safe)
 │   └── report.py          # Report generator (structured JSON + markdown export)
 ├── dashboard/
 │   ├── index.html         # Legacy web dashboard (served by dashboard_server.py)
@@ -486,8 +497,9 @@ ArrakisEngine/
 │   │   ├── globals.css        # Global styles + print CSS for PDF export
 │   │   ├── dashboard/page.tsx # All-players overview
 │   │   └── [player]/          # Player-scoped dynamic routes
-│   │       ├── games/page.tsx         # Games list with filters
+│   │       ├── games/page.tsx         # Games list with filters + compare mode
 │   │       ├── games/[id]/page.tsx    # Game detail: board, eval, coaching
+│   │       ├── games/compare/page.tsx # Side-by-side game comparison
 │   │       ├── patterns/page.tsx      # Pattern analytics + AI trend summary
 │   │       └── reports/page.tsx       # Coaching reports (Rapid/Daily/All + PDF)
 │   ├── components/
@@ -500,10 +512,11 @@ ArrakisEngine/
 │   │   ├── games-filters.tsx  # Result, time, coaching, month, platform filters
 │   │   ├── tier-badge.tsx     # Color-coded tier display
 │   │   ├── theme-toggle.tsx   # Dark/light mode toggle
-│   │   ├── game-detail/       # ChessBoard, EvalChart, MoveList, CoachingPanels
-│   │   ├── patterns/          # 14 visualization components + TrendSummary + TimePressure + OpeningExplorer
+│   │   ├── pipeline-control-panel.tsx # Data Updates panel (harvest/analyze/patterns)
+│   │   ├── game-detail/       # ChessBoard, EvalChart, MoveList, CoachingPanels, ComparisonSummary
+│   │   ├── patterns/          # 14 visualization components + TrendSummary + TimePressure + OpeningExplorer + RatingProgression + OpeningRepertoire
 │   │   └── ui/                # shadcn/ui primitives (card, table, button, etc.)
-│   ├── hooks/                 # useChessNavigation
+│   ├── hooks/                 # useChessNavigation, usePipeline
 │   └── lib/                   # API client (api.ts), types (types.ts), utils
 ├── docs/
 │   └── screenshots/       # Architecture diagram and screenshots

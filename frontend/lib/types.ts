@@ -141,6 +141,35 @@ export interface OpeningBookEntry {
   moves: string;
 }
 
+export interface OpeningRepertoireEntry {
+  name: string;
+  eco: string;
+  games: number;
+  wins: number;
+  losses: number;
+  draws: number;
+  win_rate: number;
+  trend: "improving" | "declining" | "stable";
+  acpl: number;
+  color: "white" | "black" | "both";
+}
+
+export interface OpeningRepertoireFocus {
+  name: string;
+  eco: string;
+  games: number;
+  win_rate: number;
+  acpl: number;
+  reason: string;
+  suggestion: string;
+}
+
+export interface OpeningRepertoireData {
+  openings: OpeningRepertoireEntry[];
+  eco_distribution: Record<string, number>;
+  focus_areas: OpeningRepertoireFocus[];
+}
+
 export interface PatternStats {
   total_games: number;
   results: {
@@ -186,6 +215,7 @@ export interface PatternStats {
   critical_positions?: unknown;
   comeback_collapse?: unknown;
   opening_acpl?: unknown;
+  opening_repertoire?: OpeningRepertoireData;
   tactical_misses?: unknown;
   repertoire_consistency?: unknown;
   // Time pressure
@@ -245,6 +275,22 @@ export interface ReportData {
     what_was_better: string;
   }>;
   recommendations?: string[];
+}
+
+export interface PipelineState {
+  task: "harvest" | "analyze" | "patterns" | "run_all" | null;
+  status: "running" | "complete" | "error" | "idle";
+  progress: string;
+  detail: {
+    current_step?: number;
+    total_steps?: number;
+    games_processed?: number;
+    games_total?: number;
+  } | null;
+  result: Record<string, number> | null;
+  error: string | null;
+  started_at: string | null;
+  finished_at: string | null;
 }
 
 export interface StatusResponse {

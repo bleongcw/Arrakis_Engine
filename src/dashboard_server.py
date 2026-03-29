@@ -9,6 +9,9 @@ import http.server
 import json
 import logging
 import re
+import shutil
+import threading
+import time
 from functools import partial
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
@@ -27,8 +30,9 @@ def dict_from_row(row):
 class DashboardHandler(http.server.SimpleHTTPRequestHandler):
     """HTTP handler that routes /api/* to SQLite queries."""
 
-    def __init__(self, *args, db_path=None, **kwargs):
+    def __init__(self, *args, db_path=None, config=None, **kwargs):
         self.db_path = db_path
+        self.config = config or {}
         super().__init__(*args, **kwargs)
 
     def do_GET(self):
@@ -51,12 +55,30 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             self._handle_coach(body)
         elif path == "/api/trend-summary":
             self._handle_trend_summary(body)
+        elif path == "/api/pipeline/harvest":
+            self._handle_pipeline_harvest(body)
+        elif path == "/api/pipeline/analyze":
+            self._handle_pipeline_analyze(body)
+        elif path == "/api/pipeline/patterns":
+            self._handle_pipeline_patterns(body)
+        elif path == "/api/pipeline/run-all":
+            self._handle_pipeline_run_all(body)
         else:
             self._send_json({"error": "Not found"}, 404)
 
+    def do_OPTIONS(self):
+        """Handle CORS preflight requests."""
+        self.send_response(200)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    # ── Coaching handlers (existing) ─────────────────────────────
+
     def _handle_coach(self, body):
         """Trigger coaching for a single game via the dashboard."""
-        import threading
         from src.coach import coach_game
 
         game_id = body.get("game_id")
@@ -84,7 +106,6 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             conn.close()
 
         # Mark as 'pending' so the dashboard poll can detect the transition
-        # back to 'complete' when coaching finishes
         conn2 = self._get_conn()
         try:
             conn2.execute(
@@ -95,7 +116,6 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         finally:
             conn2.close()
 
-        # Run coaching in a background thread so the request doesn't block
         def run_coach():
             try:
                 coach_game(game_id, provider=provider, model=model, db_path=self.db_path)
@@ -115,7 +135,6 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
 
     def _handle_trend_summary(self, body):
         """Trigger LLM trend summary generation for a player."""
-        import threading
         from src.patterns import generate_trend_summary
 
         player_username = body.get("player")
@@ -125,7 +144,6 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             self._send_json({"error": "player required"}, 400)
             return
 
-        # Look up player_id
         conn = self._get_conn()
         try:
             row = conn.execute(
@@ -139,7 +157,6 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         finally:
             conn.close()
 
-        # Run in background thread
         def run_summary():
             try:
                 generate_trend_summary(player_id, db_path=self.db_path, provider=provider)
@@ -154,37 +171,396 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             "status": "started",
             "player": player_username,
             "provider": provider,
-            "message": f"Trend summary generation started for {player_username}. Refresh patterns to see results."
+            "message": f"Trend summary generation started for {player_username}."
         })
+
+    # ── Pipeline handlers ────────────────────────────────────────
+
+    def _handle_pipeline_harvest(self, body):
+        """Trigger game harvesting from Chess.com/Lichess."""
+        from src import pipeline_state
+        from src.harvester import harvest_player
+        from src.models import init_db, ensure_player
+
+        if not pipeline_state.start_task("harvest"):
+            current = pipeline_state.current_task()
+            self._send_json(
+                {"error": f"Another task is running: {current}"},
+                409,
+            )
+            return
+
+        config = self.config
+        db_path = self.db_path
+        player_filter = body.get("player")
+        players = config.get("players", [])
+        months = config.get("analysis", {}).get("months_lookback", 6)
+
+        if player_filter:
+            players = [p for p in players if p["username"] == player_filter]
+
+        def run():
+            try:
+                total_new = 0
+                total_errors = 0
+                for i, player in enumerate(players):
+                    username = player["username"]
+                    display_name = player.get("display_name", username)
+                    pipeline_state.update_progress(
+                        f"Fetching games for {display_name}...",
+                        {"current_step": i + 1, "total_steps": len(players)},
+                    )
+
+                    conn = init_db(db_path)
+                    ensure_player(
+                        conn, username,
+                        display_name=player.get("display_name"),
+                        age=player.get("age"),
+                        rating=player.get("rating"),
+                        fide_id=player.get("fide_id"),
+                        fide_rating=player.get("fide_rating"),
+                        lichess_username=player.get("lichess_username"),
+                    )
+                    conn.close()
+
+                    stats = harvest_player(
+                        username, db_path=db_path, months=months,
+                        lichess_username=player.get("lichess_username"),
+                    )
+                    total_new += stats.get("new", 0)
+                    total_errors += stats.get("errors", 0)
+
+                pipeline_state.complete_task({
+                    "players": len(players),
+                    "new_games": total_new,
+                    "errors": total_errors,
+                })
+            except Exception as e:
+                logger.exception("Pipeline harvest failed: %s", e)
+                pipeline_state.fail_task(str(e))
+
+        threading.Thread(target=run, daemon=True).start()
+        self._send_json({"status": "started", "message": "Harvesting games..."})
+
+    def _handle_pipeline_analyze(self, body):
+        """Trigger Stockfish analysis on pending games."""
+        from src import pipeline_state
+        from src.analyzer import analyze_pending
+
+        if not pipeline_state.start_task("analyze"):
+            current = pipeline_state.current_task()
+            self._send_json(
+                {"error": f"Another task is running: {current}"},
+                409,
+            )
+            return
+
+        config = self.config
+        db_path = self.db_path
+        sf_config = config.get("stockfish", {})
+        sf_path = sf_config.get("path", "/usr/local/bin/stockfish")
+
+        # Validate Stockfish binary
+        if not Path(sf_path).is_file():
+            found = shutil.which("stockfish")
+            if found:
+                sf_path = found
+            else:
+                pipeline_state.fail_task(
+                    "Stockfish not found. Install it with: brew install stockfish"
+                )
+                self._send_json({"status": "started", "message": "Starting analysis..."})
+                return
+
+        def run():
+            try:
+                # Count pending games for progress tracking
+                conn = get_connection(db_path)
+                total_pending = conn.execute(
+                    "SELECT COUNT(*) as c FROM games WHERE analysis_status = 'pending'"
+                ).fetchone()["c"]
+                conn.close()
+
+                if total_pending == 0:
+                    pipeline_state.complete_task({"games_analyzed": 0})
+                    return
+
+                pipeline_state.update_progress(
+                    f"Analyzing {total_pending} games with Stockfish...",
+                    {"games_total": total_pending, "games_processed": 0},
+                )
+
+                # Start a progress-polling sub-thread
+                stop_polling = threading.Event()
+
+                def poll_progress():
+                    while not stop_polling.is_set():
+                        try:
+                            c = get_connection(db_path)
+                            remaining = c.execute(
+                                "SELECT COUNT(*) as c FROM games WHERE analysis_status = 'pending'"
+                            ).fetchone()["c"]
+                            c.close()
+                            done = total_pending - remaining
+                            pipeline_state.update_progress(
+                                f"Analyzing game {done} of {total_pending}...",
+                                {"games_total": total_pending, "games_processed": done},
+                            )
+                        except Exception:
+                            pass
+                        stop_polling.wait(3)
+
+                poller = threading.Thread(target=poll_progress, daemon=True)
+                poller.start()
+
+                count = analyze_pending(
+                    stockfish_path=sf_path,
+                    depth=sf_config.get("depth", 22),
+                    threads=sf_config.get("threads", 6),
+                    hash_mb=sf_config.get("hash_mb", 512),
+                    move_time_limit=sf_config.get("move_time_limit", 10.0),
+                    db_path=db_path,
+                )
+
+                stop_polling.set()
+                poller.join(timeout=5)
+                pipeline_state.complete_task({"games_analyzed": count})
+
+            except Exception as e:
+                logger.exception("Pipeline analyze failed: %s", e)
+                pipeline_state.fail_task(str(e))
+
+        threading.Thread(target=run, daemon=True).start()
+        self._send_json({"status": "started", "message": "Starting analysis..."})
+
+    def _handle_pipeline_patterns(self, body):
+        """Trigger pattern computation."""
+        from src import pipeline_state
+        from src.patterns import compute_player_patterns
+
+        if not pipeline_state.start_task("patterns"):
+            current = pipeline_state.current_task()
+            self._send_json(
+                {"error": f"Another task is running: {current}"},
+                409,
+            )
+            return
+
+        db_path = self.db_path
+        player_filter = body.get("player")
+
+        def run():
+            try:
+                conn = get_connection(db_path)
+                if player_filter:
+                    rows = conn.execute(
+                        "SELECT id, username, display_name FROM players WHERE username = ?",
+                        (player_filter,),
+                    ).fetchall()
+                else:
+                    rows = conn.execute(
+                        "SELECT id, username, display_name FROM players"
+                    ).fetchall()
+                conn.close()
+
+                players_updated = 0
+                for i, row in enumerate(rows):
+                    display = row["display_name"] or row["username"]
+                    pipeline_state.update_progress(
+                        f"Computing insights for {display}...",
+                        {"current_step": i + 1, "total_steps": len(rows)},
+                    )
+                    compute_player_patterns(row["id"], db_path=db_path)
+                    players_updated += 1
+
+                pipeline_state.complete_task({"players_updated": players_updated})
+
+            except Exception as e:
+                logger.exception("Pipeline patterns failed: %s", e)
+                pipeline_state.fail_task(str(e))
+
+        threading.Thread(target=run, daemon=True).start()
+        self._send_json({"status": "started", "message": "Updating insights..."})
+
+    def _handle_pipeline_run_all(self, body):
+        """Chain harvest -> analyze -> patterns."""
+        from src import pipeline_state
+        from src.harvester import harvest_player
+        from src.analyzer import analyze_pending
+        from src.patterns import compute_player_patterns
+        from src.models import init_db, ensure_player
+
+        if not pipeline_state.start_task("run_all"):
+            current = pipeline_state.current_task()
+            self._send_json(
+                {"error": f"Another task is running: {current}"},
+                409,
+            )
+            return
+
+        config = self.config
+        db_path = self.db_path
+        player_filter = body.get("player")
+        players = config.get("players", [])
+        months = config.get("analysis", {}).get("months_lookback", 6)
+        sf_config = config.get("stockfish", {})
+        sf_path = sf_config.get("path", "/usr/local/bin/stockfish")
+
+        if player_filter:
+            players = [p for p in players if p["username"] == player_filter]
+
+        # Validate stockfish
+        if not Path(sf_path).is_file():
+            found = shutil.which("stockfish")
+            if found:
+                sf_path = found
+            else:
+                pipeline_state.fail_task(
+                    "Stockfish not found. Install it with: brew install stockfish"
+                )
+                self._send_json({"status": "started", "message": "Starting pipeline..."})
+                return
+
+        def run():
+            try:
+                # Step 1: Harvest
+                pipeline_state.update_progress(
+                    "Step 1/3: Fetching new games...",
+                    {"current_step": 1, "total_steps": 3},
+                )
+                total_new = 0
+                total_errors = 0
+                for player in players:
+                    username = player["username"]
+                    display = player.get("display_name", username)
+                    pipeline_state.update_progress(
+                        f"Step 1/3: Fetching games for {display}...",
+                        {"current_step": 1, "total_steps": 3},
+                    )
+
+                    conn = init_db(db_path)
+                    ensure_player(
+                        conn, username,
+                        display_name=player.get("display_name"),
+                        age=player.get("age"),
+                        rating=player.get("rating"),
+                        fide_id=player.get("fide_id"),
+                        fide_rating=player.get("fide_rating"),
+                        lichess_username=player.get("lichess_username"),
+                    )
+                    conn.close()
+
+                    stats = harvest_player(
+                        username, db_path=db_path, months=months,
+                        lichess_username=player.get("lichess_username"),
+                    )
+                    total_new += stats.get("new", 0)
+                    total_errors += stats.get("errors", 0)
+
+                # Step 2: Analyze
+                conn = get_connection(db_path)
+                total_pending = conn.execute(
+                    "SELECT COUNT(*) as c FROM games WHERE analysis_status = 'pending'"
+                ).fetchone()["c"]
+                conn.close()
+
+                pipeline_state.update_progress(
+                    f"Step 2/3: Analyzing {total_pending} games...",
+                    {"current_step": 2, "total_steps": 3, "games_total": total_pending, "games_processed": 0},
+                )
+
+                # Progress polling for analyze
+                stop_polling = threading.Event()
+
+                def poll_progress():
+                    while not stop_polling.is_set():
+                        try:
+                            c = get_connection(db_path)
+                            remaining = c.execute(
+                                "SELECT COUNT(*) as c FROM games WHERE analysis_status = 'pending'"
+                            ).fetchone()["c"]
+                            c.close()
+                            done = total_pending - remaining
+                            pipeline_state.update_progress(
+                                f"Step 2/3: Analyzing game {done} of {total_pending}...",
+                                {"current_step": 2, "total_steps": 3, "games_total": total_pending, "games_processed": done},
+                            )
+                        except Exception:
+                            pass
+                        stop_polling.wait(3)
+
+                if total_pending > 0:
+                    poller = threading.Thread(target=poll_progress, daemon=True)
+                    poller.start()
+
+                games_analyzed = analyze_pending(
+                    stockfish_path=sf_path,
+                    depth=sf_config.get("depth", 22),
+                    threads=sf_config.get("threads", 6),
+                    hash_mb=sf_config.get("hash_mb", 512),
+                    move_time_limit=sf_config.get("move_time_limit", 10.0),
+                    db_path=db_path,
+                )
+
+                if total_pending > 0:
+                    stop_polling.set()
+                    poller.join(timeout=5)
+
+                # Step 3: Patterns
+                pipeline_state.update_progress(
+                    "Step 3/3: Updating insights...",
+                    {"current_step": 3, "total_steps": 3},
+                )
+                conn = get_connection(db_path)
+                player_rows = conn.execute(
+                    "SELECT id, username, display_name FROM players"
+                ).fetchall()
+                conn.close()
+
+                players_updated = 0
+                for row in player_rows:
+                    display = row["display_name"] or row["username"]
+                    pipeline_state.update_progress(
+                        f"Step 3/3: Computing insights for {display}...",
+                        {"current_step": 3, "total_steps": 3},
+                    )
+                    compute_player_patterns(row["id"], db_path=db_path)
+                    players_updated += 1
+
+                pipeline_state.complete_task({
+                    "new_games": total_new,
+                    "games_analyzed": games_analyzed,
+                    "players_updated": players_updated,
+                    "errors": total_errors,
+                })
+
+            except Exception as e:
+                logger.exception("Pipeline run-all failed: %s", e)
+                pipeline_state.fail_task(str(e))
+
+        threading.Thread(target=run, daemon=True).start()
+        self._send_json({"status": "started", "message": "Starting full pipeline..."})
+
+    # ── API routing ──────────────────────────────────────────────
 
     def _handle_api(self, path, params):
         """Route API requests to handler functions."""
         try:
-            # GET /api/players
             if path == "/api/players":
                 data = self._api_players()
-
-            # GET /api/games?player=X&result=Y&time_class=Z&from=D&to=D
             elif path == "/api/games":
                 data = self._api_games_list(params)
-
-            # GET /api/games/123
             elif re.match(r"^/api/games/(\d+)$", path):
                 game_id = int(re.match(r"^/api/games/(\d+)$", path).group(1))
                 data = self._api_game_detail(game_id)
-
-            # GET /api/patterns?player=X
             elif path == "/api/patterns":
                 data = self._api_patterns(params)
-
-            # GET /api/report?player=X&period=monthly
             elif path == "/api/report":
                 data = self._api_report(params)
-
-            # GET /api/status
             elif path == "/api/status":
                 data = self._api_status()
-
+            elif path == "/api/pipeline/status":
+                data = self._api_pipeline_status()
             else:
                 self._send_json({"error": "Not found"}, 404)
                 return
@@ -218,7 +594,6 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             players = []
             for r in rows:
                 p = dict_from_row(r)
-                # Add tier info — use FIDE rating if available, else latest game rating
                 fide_rating = r["fide_rating"] if "fide_rating" in r.keys() else None
                 if fide_rating:
                     rating = fide_rating
@@ -237,22 +612,18 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 p["tier_description"] = tier.description
                 p["latest_rating"] = rating
 
-                # Profile URLs
                 p["chesscom_url"] = f"https://www.chess.com/member/{r['username']}"
 
-                # Lichess URL — from stored lichess_username
                 if r["lichess_username"]:
                     p["lichess_url"] = f"https://lichess.org/@/{r['lichess_username']}"
                 else:
                     p["lichess_url"] = None
 
-                # FIDE URL
                 if r["fide_id"]:
                     p["fide_url"] = f"https://ratings.fide.com/profile/{r['fide_id']}"
                 else:
                     p["fide_url"] = None
 
-                # Game counts by platform
                 p["chesscom_games"] = conn.execute(
                     "SELECT COUNT(*) as c FROM games WHERE player_id = ? AND platform = 'chess.com'",
                     (r["id"],),
@@ -456,18 +827,24 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         finally:
             conn.close()
 
+    def _api_pipeline_status(self):
+        from src import pipeline_state
+        return pipeline_state.get_state()
+
     def log_message(self, format, *args):
         """Suppress default access logs for cleaner output."""
         if "/api/" in str(args[0]) if args else False:
             logger.debug(format, *args)
 
 
-def run_dashboard(db_path: str, port: int = 8000, static_dir: str = "dashboard"):
+def run_dashboard(db_path: str, port: int = 8000, config: dict | None = None,
+                  static_dir: str = "dashboard"):
     """Start the live dashboard server."""
-    handler = partial(DashboardHandler, directory=static_dir, db_path=db_path)
+    handler = partial(DashboardHandler, directory=static_dir, db_path=db_path,
+                      config=config or {})
     with http.server.HTTPServer(("", port), handler) as httpd:
-        print(f"🏰 ArrakisEngine Dashboard running at http://localhost:{port}")
-        print(f"📊 Live data from: {db_path}")
+        print(f"\U0001f3f0 ArrakisEngine Dashboard running at http://localhost:{port}")
+        print(f"\U0001f4ca Live data from: {db_path}")
         print("Press Ctrl+C to stop.\n")
         try:
             httpd.serve_forever()

@@ -3,8 +3,9 @@
 import { useEffect, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
 import { usePlayerContext } from "@/app/providers";
-import { fetchPatterns } from "@/lib/api";
+import { fetchPatterns, fetchGames } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
+import { RatingProgressionChart } from "@/components/patterns/rating-progression-chart";
 import { ACPLTrendChart } from "@/components/patterns/acpl-trend-chart";
 import { MoveQualityDonut } from "@/components/patterns/move-quality-donut";
 import { PhasePerformance } from "@/components/patterns/phase-performance";
@@ -17,24 +18,30 @@ import { ComebackCollapse } from "@/components/patterns/comeback-collapse";
 import { OpeningACPL } from "@/components/patterns/opening-acpl";
 import { TacticalMisses } from "@/components/patterns/tactical-misses";
 import { RepertoireConsistency } from "@/components/patterns/repertoire-consistency";
+import { OpeningRepertoireTracker } from "@/components/patterns/opening-repertoire-tracker";
 import { TimePressure } from "@/components/patterns/time-pressure";
 import { TrendSummary } from "@/components/patterns/trend-summary";
-import type { PatternStats } from "@/lib/types";
+import type { PatternStats, GameListItem } from "@/lib/types";
 
 export default function PatternsPage() {
   const { player } = useParams<{ player: string }>();
   const { loading: playerLoading } = usePlayerContext();
   const [stats, setStats] = useState<PatternStats | null>(null);
+  const [games, setGames] = useState<GameListItem[]>([]);
   const [trendSummary, setTrendSummary] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   const loadPatterns = useCallback(() => {
     if (!player) return;
     setLoading(true);
-    fetchPatterns(player)
-      .then((data: any) => {
-        setStats(data.stats);
-        setTrendSummary(data.trend_summary || null);
+    Promise.all([
+      fetchPatterns(player),
+      fetchGames(player),
+    ])
+      .then(([patternData, gamesData]: [any, GameListItem[]]) => {
+        setStats(patternData.stats);
+        setTrendSummary(patternData.trend_summary || null);
+        setGames(gamesData);
       })
       .catch(console.error)
       .finally(() => setLoading(false));
@@ -113,6 +120,15 @@ export default function PatternsPage() {
         />
       </div>
 
+      {/* Rating Progression - full width */}
+      {games.length > 0 && (
+        <Card>
+          <CardContent className="pt-6">
+            <RatingProgressionChart games={games} />
+          </CardContent>
+        </Card>
+      )}
+
       {/* ACPL Trend - full width */}
       <Card>
         <CardContent className="pt-6">
@@ -175,6 +191,15 @@ export default function PatternsPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Opening Repertoire Tracker - full width */}
+      {stats.opening_repertoire && (
+        <Card>
+          <CardContent className="pt-6">
+            <OpeningRepertoireTracker data={stats.opening_repertoire} />
+          </CardContent>
+        </Card>
+      )}
 
       {/* Time Control Performance - full width */}
       <Card>

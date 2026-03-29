@@ -105,6 +105,7 @@ def compute_player_patterns(player_id: int, db_path: str | None = None,
         "critical_positions": _compute_critical_positions(games, moves_by_game),
         "comeback_collapse": _compute_comeback_collapse(games, moves_by_game),
         "opening_acpl": _compute_opening_acpl(games, moves_by_game),
+        "opening_repertoire": _compute_opening_repertoire(games, moves_by_game),
         "tactical_misses": _compute_tactical_misses(games, moves_by_game),
         "repertoire_consistency": _compute_repertoire_consistency(games),
         # Time pressure analysis
@@ -907,6 +908,162 @@ def _compute_comeback_collapse(games: list[dict],
     ) if cl["total_winning_games"] else 0
 
     return stats
+
+
+def _compute_opening_repertoire(games: list[dict],
+                                moves_by_game: dict[int, list[dict]]) -> dict:
+    """Opening repertoire tracker: trends, ECO distribution, focus areas.
+
+    For each opening, computes win-rate trend (improving/declining/stable),
+    ECO code, ACPL, and generates focus-area recommendations.
+    """
+    EVAL_CAP = 1000
+
+    # Group games by opening name
+    opening_games: dict[str, list[dict]] = defaultdict(list)
+    for g in games:
+        name = _get_opening_name(g["pgn"])
+        opening_games[name].append(g)
+
+    # Extract ECO code from PGN
+    def _get_eco(pgn_text: str) -> str:
+        game = chess.pgn.read_game(io.StringIO(pgn_text))
+        if game is None:
+            return ""
+        return game.headers.get("ECO", "")
+
+    openings_result = []
+
+    for name, og in opening_games.items():
+        if len(og) < 2:
+            continue
+
+        wins = sum(1 for g in og if g["result"] == "win")
+        losses = sum(1 for g in og if g["result"] == "loss")
+        draws = sum(1 for g in og if g["result"] == "draw")
+        total = len(og)
+        win_rate = round(wins / total * 100, 1)
+
+        # ECO code — use first game that has one
+        eco = ""
+        for g in og:
+            eco = _get_eco(g["pgn"])
+            if eco:
+                break
+
+        # Color — determine if mainly white, black, or both
+        white_count = sum(1 for g in og if g["player_color"] == "white")
+        black_count = total - white_count
+        if white_count > 0 and black_count == 0:
+            color = "white"
+        elif black_count > 0 and white_count == 0:
+            color = "black"
+        else:
+            color = "both"
+
+        # Trend — split into older and newer halves by date
+        sorted_games = sorted(og, key=lambda g: g["date_played"] or "")
+        mid = len(sorted_games) // 2
+        if mid >= 1:
+            older = sorted_games[:mid]
+            newer = sorted_games[mid:]
+            older_wr = sum(1 for g in older if g["result"] == "win") / len(older) * 100
+            newer_wr = sum(1 for g in newer if g["result"] == "win") / len(newer) * 100
+            delta = newer_wr - older_wr
+            if delta > 10:
+                trend = "improving"
+            elif delta < -10:
+                trend = "declining"
+            else:
+                trend = "stable"
+        else:
+            trend = "stable"
+
+        # ACPL for opening phase (moves 1-15)
+        acpl_sum = 0.0
+        acpl_games = 0
+        for g in og:
+            player_moves = [
+                m for m in moves_by_game.get(g["id"], [])
+                if m["side"] == g["player_color"] and m["move_number"] <= 15
+            ]
+            if player_moves:
+                move_losses = []
+                for m in player_moves:
+                    before = max(-EVAL_CAP, min(EVAL_CAP, m.get("eval_before_cp") or 0))
+                    after = max(-EVAL_CAP, min(EVAL_CAP, m.get("eval_after_cp") or 0))
+                    if m["side"] == "white":
+                        move_losses.append(max(0, before - after))
+                    else:
+                        move_losses.append(max(0, after - before))
+                if move_losses:
+                    acpl_sum += sum(move_losses) / len(move_losses)
+                    acpl_games += 1
+
+        acpl = round(acpl_sum / acpl_games, 1) if acpl_games else 0.0
+
+        openings_result.append({
+            "name": name,
+            "eco": eco,
+            "games": total,
+            "wins": wins,
+            "losses": losses,
+            "draws": draws,
+            "win_rate": win_rate,
+            "trend": trend,
+            "acpl": acpl,
+            "color": color,
+        })
+
+    # Sort by number of games descending
+    openings_result.sort(key=lambda x: -x["games"])
+
+    # ECO distribution — group by first letter
+    eco_distribution: dict[str, int] = defaultdict(int)
+    for entry in openings_result:
+        if entry["eco"]:
+            letter = entry["eco"][0].upper()
+            eco_distribution[letter] += entry["games"]
+
+    # Focus areas — openings with >= 3 games and poor performance
+    focus_areas = []
+    for entry in openings_result:
+        if entry["games"] < 3:
+            continue
+        reasons = []
+        if entry["win_rate"] < 40:
+            reasons.append(f"Low win rate ({entry['win_rate']}%)")
+        if entry["acpl"] > 80:
+            reasons.append(f"High ACPL ({entry['acpl']})")
+        if not reasons:
+            continue
+
+        # Generate suggestion based on the issue
+        if entry["acpl"] > 80 and entry["win_rate"] < 40:
+            suggestion = f"Study the key plans and typical tactics in the {entry['name']}. Consider simplifying your opening play."
+        elif entry["acpl"] > 80:
+            suggestion = f"Practice the critical positions in the {entry['name']} to reduce mistakes in the opening phase."
+        else:
+            suggestion = f"Review your {entry['name']} games to understand where you're going wrong. Consider trying a different line."
+
+        focus_areas.append({
+            "name": entry["name"],
+            "eco": entry["eco"],
+            "games": entry["games"],
+            "win_rate": entry["win_rate"],
+            "acpl": entry["acpl"],
+            "reason": " | ".join(reasons),
+            "suggestion": suggestion,
+        })
+
+    # Sort focus areas by most games first (higher priority = more played)
+    focus_areas.sort(key=lambda x: -x["games"])
+
+    return {
+        "openings": openings_result[:30],
+        "eco_distribution": dict(eco_distribution),
+        "focus_areas": focus_areas[:10],
+    }
 
 
 def _compute_opening_acpl(games: list[dict],

@@ -2,6 +2,7 @@
 
 import { usePlayerContext } from "@/app/providers";
 import { PlayerCard } from "@/components/player-card";
+import { PipelineControlPanel } from "@/components/pipeline-control-panel";
 
 export default function DashboardPage() {
   const { players, loading } = usePlayerContext();
@@ -21,21 +22,27 @@ export default function DashboardPage() {
 
   if (players.length === 0) {
     return (
-      <div className="text-center py-20 text-muted-foreground">
-        <p className="text-lg">No players configured.</p>
-        <p className="text-sm mt-2">
-          Add players to <code>config.yaml</code> and run{" "}
-          <code>python main.py harvest</code>.
-        </p>
+      <div className="space-y-6">
+        <PipelineControlPanel />
+        <div className="text-center py-20 text-muted-foreground">
+          <p className="text-lg">No players configured.</p>
+          <p className="text-sm mt-2">
+            Add players to <code>config.yaml</code> and run{" "}
+            <code>python main.py harvest</code>.
+          </p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-      {players.map((player) => (
-        <PlayerCard key={player.id} player={player} />
-      ))}
+    <div className="space-y-6">
+      <PipelineControlPanel />
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+        {players.map((player) => (
+          <PlayerCard key={player.id} player={player} />
+        ))}
+      </div>
     </div>
   );
 }

@@ -174,7 +174,7 @@ def cmd_dashboard(args, config):
     port = args.port or 8000
 
     from src.dashboard_server import run_dashboard
-    run_dashboard(db_path=db_path, port=port, static_dir="dashboard")
+    run_dashboard(db_path=db_path, port=port, config=config, static_dir="dashboard")
 
 
 def cmd_fide_update(args, config):
