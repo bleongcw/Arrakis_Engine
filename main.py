@@ -3,7 +3,7 @@
 # Copyright (C) 2026 Bernard Leong
 # Licensed under AGPL-3.0. See LICENSE file.
 
-"""ArrakisEngine CLI — Chess coaching AI for Evan & Estella."""
+"""ArrakisEngine CLI — Chess coaching AI."""
 
 import argparse
 import logging

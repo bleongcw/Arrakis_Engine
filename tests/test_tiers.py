@@ -25,13 +25,13 @@ class TestGetTier:
         assert tier.name == "elementary"
 
     def test_1050_is_elementary(self):
-        """Evan's approximate rating."""
+        """Typical elementary-level rating."""
         tier = get_tier(1050)
         assert tier.name == "elementary"
         assert tier.depth == 22
 
     def test_1189_is_elementary(self):
-        """Evan's latest game rating."""
+        """Upper elementary-level rating."""
         tier = get_tier(1189)
         assert tier.name == "elementary"
 

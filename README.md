@@ -215,10 +215,10 @@ python main.py coach --provider openai --limit 5
 
 ```bash
 # Update FIDE rating for a player
-python main.py fide-update --player evanleongxinyu --rating 1544
+python main.py fide-update --player your_username --rating 1544
 
 # Set FIDE ID and rating together
-python main.py fide-update --player evanleongxinyu --fide-id 5871042 --rating 1544
+python main.py fide-update --player your_username --fide-id 12345678 --rating 1544
 ```
 
 > FIDE ratings are updated manually via the CLI. You can also set `fide_id` in `config.yaml` to have it linked on first harvest. The dashboard links directly to the player's FIDE profile at `ratings.fide.com/profile/{fide_id}`.
@@ -394,7 +394,7 @@ cd frontend && pnpm install && pnpm dev
 # Open http://localhost:3000
 ```
 
-**Player-scoped URLs:** All player pages use bookmarkable URLs like `/evanleongxinyu/games`, `/estellaleong/patterns`, etc. Switching players in the header navigates to the same section under the new player's URL.
+**Player-scoped URLs:** All player pages use bookmarkable URLs like `/<username>/games`, `/<username>/patterns`, etc. Switching players in the header navigates to the same section under the new player's URL.
 
 ### Legacy Dashboard
 
@@ -407,7 +407,7 @@ python main.py dashboard
 
 ### Dashboard Features
 
-- **Player-scoped URLs** — every player page is bookmarkable and shareable: `/<username>/games`, `/<username>/patterns`, `/<username>/reports` (e.g. `/evanleongxinyu/games`)
+- **Player-scoped URLs** — every player page is bookmarkable and shareable: `/<username>/games`, `/<username>/patterns`, `/<username>/reports`
 - **Multi-player switching** — player selector in the header; switching players navigates to the same section under the new player's URL
 - **Player Hub** — default landing page with Chess.com, Lichess, and FIDE profiles, tier badge, game counts, and direct links to external profiles
 - **Games list** — filterable by result, time control, coaching status, month, platform (Chess.com / Lichess), and date range

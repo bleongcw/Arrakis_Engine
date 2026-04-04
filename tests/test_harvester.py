@@ -28,12 +28,12 @@ def db_path(tmp_path):
 
 SAMPLE_CHESSCOM_GAME = {
     "url": "https://www.chess.com/game/live/12345",
-    "pgn": '[Event "Live"]\n[White "evanleongxinyu"]\n[Black "opponent1"]\n\n1. e4 e5 2. Nf3 Nc6 *',
+    "pgn": '[Event "Live"]\n[White "testplayer1"]\n[Black "opponent1"]\n\n1. e4 e5 2. Nf3 Nc6 *',
     "time_control": "600",
     "time_class": "rapid",
     "end_time": 1700000000,
     "white": {
-        "username": "evanleongxinyu",
+        "username": "testplayer1",
         "rating": 1050,
         "result": "win",
     },
@@ -92,10 +92,10 @@ SAMPLE_LICHESS_PGN_DRAW = """[Event "Rated Classical game"]
 class TestChessComFilterRecent:
     def test_filters_old_archives(self):
         urls = [
-            "https://api.chess.com/pub/player/evan/games/2020/01",
-            "https://api.chess.com/pub/player/evan/games/2026/01",
-            "https://api.chess.com/pub/player/evan/games/2026/02",
-            "https://api.chess.com/pub/player/evan/games/2026/03",
+            "https://api.chess.com/pub/player/testplayer1/games/2020/01",
+            "https://api.chess.com/pub/player/testplayer1/games/2026/01",
+            "https://api.chess.com/pub/player/testplayer1/games/2026/02",
+            "https://api.chess.com/pub/player/testplayer1/games/2026/03",
         ]
         recent = _chesscom_filter_recent(urls, months=6)
         assert len(recent) >= 2
@@ -107,7 +107,7 @@ class TestChessComFilterRecent:
 
 class TestChessComDeterminePlayerSide:
     def test_white_player(self):
-        color, pr, opp, opp_name = _chesscom_determine_side(SAMPLE_CHESSCOM_GAME, "evanleongxinyu")
+        color, pr, opp, opp_name = _chesscom_determine_side(SAMPLE_CHESSCOM_GAME, "testplayer1")
         assert color == "white"
         assert pr == 1050
         assert opp == 980
@@ -118,10 +118,10 @@ class TestChessComDeterminePlayerSide:
         assert color == "black"
         assert pr == 980
         assert opp == 1050
-        assert opp_name == "evanleongxinyu"
+        assert opp_name == "testplayer1"
 
     def test_case_insensitive(self):
-        color, _, _, _ = _chesscom_determine_side(SAMPLE_CHESSCOM_GAME, "EvanLeongXinYu")
+        color, _, _, _ = _chesscom_determine_side(SAMPLE_CHESSCOM_GAME, "TestPlayer1")
         assert color == "white"
 
     def test_unknown_player_raises(self):
@@ -131,7 +131,7 @@ class TestChessComDeterminePlayerSide:
 
 class TestChessComDetermineResult:
     def test_win(self):
-        assert _chesscom_determine_result(SAMPLE_CHESSCOM_GAME, "evanleongxinyu") == "win"
+        assert _chesscom_determine_result(SAMPLE_CHESSCOM_GAME, "testplayer1") == "win"
 
     def test_loss(self):
         assert _chesscom_determine_result(SAMPLE_CHESSCOM_GAME, "opponent1") == "loss"
@@ -226,11 +226,11 @@ class TestHarvestPlayer:
     @patch("src.harvester._chesscom_fetch_archive")
     def test_stores_chesscom_games(self, mock_fetch, mock_archives, db_path):
         mock_archives.return_value = [
-            "https://api.chess.com/pub/player/evan/games/2026/03"
+            "https://api.chess.com/pub/player/testplayer1/games/2026/03"
         ]
         mock_fetch.return_value = [SAMPLE_CHESSCOM_GAME]
 
-        stats = harvest_player("evanleongxinyu", db_path=db_path, months=6)
+        stats = harvest_player("testplayer1", db_path=db_path, months=6)
         assert stats["new"] == 1
         assert stats["skipped"] == 0
 
@@ -245,12 +245,12 @@ class TestHarvestPlayer:
     @patch("src.harvester._chesscom_fetch_archive")
     def test_deduplicates(self, mock_fetch, mock_archives, db_path):
         mock_archives.return_value = [
-            "https://api.chess.com/pub/player/evan/games/2026/03"
+            "https://api.chess.com/pub/player/testplayer1/games/2026/03"
         ]
         mock_fetch.return_value = [SAMPLE_CHESSCOM_GAME]
 
-        harvest_player("evanleongxinyu", db_path=db_path, months=6)
-        stats = harvest_player("evanleongxinyu", db_path=db_path, months=6)
+        harvest_player("testplayer1", db_path=db_path, months=6)
+        stats = harvest_player("testplayer1", db_path=db_path, months=6)
         assert stats["new"] == 0
         assert stats["skipped"] == 1
 
@@ -258,12 +258,12 @@ class TestHarvestPlayer:
     @patch("src.harvester._chesscom_fetch_archive")
     def test_platform_filter_chesscom_only(self, mock_fetch, mock_archives, db_path):
         mock_archives.return_value = [
-            "https://api.chess.com/pub/player/evan/games/2026/03"
+            "https://api.chess.com/pub/player/testplayer1/games/2026/03"
         ]
         mock_fetch.return_value = [SAMPLE_CHESSCOM_GAME]
 
         stats = harvest_player(
-            "evanleongxinyu", db_path=db_path, months=6,
+            "testplayer1", db_path=db_path, months=6,
             lichess_username="evleong", platform="chess.com",
         )
         assert stats["new"] == 1
@@ -277,7 +277,7 @@ class TestHarvestPlayer:
         with patch("src.harvester.harvest_lichess") as mock_lichess:
             mock_lichess.return_value = {"total": 0, "new": 0, "skipped": 0, "errors": 0}
             stats = harvest_player(
-                "evanleongxinyu", db_path=db_path, months=6,
+                "testplayer1", db_path=db_path, months=6,
                 lichess_username="evleong", platform="lichess",
             )
             mock_archives.assert_not_called()

@@ -32,7 +32,7 @@ pattern tracking over time. Inspired by Eleanor, Evan, and Estella.
 ```
 /                           → redirects to /dashboard
 /dashboard                  → all players overview
-/<player>/games             → game list for player (e.g. /evanleongxinyu/games)
+/<player>/games             → game list for player (e.g. /your_username/games)
 /<player>/games/<id>        → game detail with board, eval, coaching
 /<player>/patterns          → pattern analytics & trend summary
 /<player>/reports           → monthly/weekly coaching reports with PDF export

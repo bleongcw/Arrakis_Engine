@@ -112,7 +112,7 @@ export function PlayerFormDialog({
               value={form.username}
               onChange={(e) => setForm({ ...form, username: e.target.value })}
               disabled={isEdit}
-              placeholder="e.g. evanleongxinyu"
+              placeholder="e.g. your_chess_com_username"
             />
           </div>
 
@@ -122,7 +122,7 @@ export function PlayerFormDialog({
               id="display_name"
               value={form.display_name}
               onChange={(e) => setForm({ ...form, display_name: e.target.value })}
-              placeholder="e.g. Evan Leong"
+              placeholder="e.g. Player 1"
             />
           </div>
 
