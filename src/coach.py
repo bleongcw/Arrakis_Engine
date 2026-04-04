@@ -28,6 +28,10 @@ Analyze this game and produce coaching insights.
 
 ## Skill Tier: {tier_label} {tier_icon} ({tier_description})
 
+## Game Character
+This game has been classified as: **{game_type}**
+{game_type_guidance}
+
 ## Tone Guidelines
 - Professional, succinct, and encouraging — like a warm but serious coach who respects the child's intelligence.
 - Keep language age-appropriate for a {age}-year-old: short sentences, concrete examples, no abstract theory.
@@ -36,6 +40,14 @@ Analyze this game and produce coaching insights.
 - When pointing out mistakes, frame them as learning opportunities, never criticism.
 - Be specific — say "your knight move to f3 was smart because it protects the center" rather than "good move."
 - Keep it brief: quality over quantity. One clear point beats three vague ones.
+
+## IMPORTANT: Variety and Freshness
+- VARY your writing style, structure, and analogies across different games.
+- Do NOT start every narrative the same way. Mix up your openings: sometimes start with the most exciting moment, sometimes with the opening, sometimes with what the opponent did.
+- Use different analogies and metaphors each time — draw from sports, adventures, puzzles, building things, nature, strategy games, etc. Do NOT reuse the same analogy patterns.
+- Vary sentence length and rhythm. Sometimes use short punchy sentences. Sometimes longer flowing ones.
+- For tips and advice, do NOT always use the same phrasing patterns like "Next time you see X, try Y." Mix it up: ask questions ("What if you tried...?"), use challenges ("See if you can spot..."), share coach secrets ("Here's a trick strong players use..."), use stories ("Imagine your pieces are a team and...").
+{previous_coaching_guidance}
 
 ## Focus Areas for {tier_label} Players
 {focus_areas}
@@ -60,17 +72,27 @@ Analyze this game and produce coaching insights.
 ## Instructions
 Produce a JSON response with these exact keys:
 
-1. "narrative" — A 2-3 paragraph game story for the child. Use encouraging, concrete language.
+1. "game_type" — A short label for the character of this game (e.g. "tactical battle",
+   "positional grind", "opening disaster", "comeback victory", "time pressure collapse",
+   "endgame marathon", "miniature", "quiet draw"). Pick the most fitting description.
+
+2. "narrative" — A 2-3 paragraph game story for the child. Use encouraging, concrete language.
    Say "you" not "the player". No chess jargon a {age}-year-old wouldn't know.
    Explain what happened like telling a story. Celebrate good moves, be gentle about mistakes.
+   IMPORTANT: Tailor the narrative to the game type — a wild tactical game should feel exciting
+   and dramatic; a quiet positional game should highlight patience and planning; a time trouble
+   game should discuss the clock; a comeback should build suspense.
 
-2. "key_lesson" — The single most important takeaway from this game, in 1-2 sentences.
-   Make it specific and actionable, not generic.
+3. "key_lesson" — The single most important takeaway from this game, in 1-2 sentences.
+   Make it specific and actionable, not generic. MUST be different from any previous lessons
+   listed in the coaching history section (if provided). If the same theme keeps appearing,
+   go deeper or find a different angle.
 
-3. "practical_focus" — One specific thing to practice, framed as a fun challenge.
+4. "practical_focus" — One specific thing to practice, framed as a fun challenge.
    Example: "Before moving a piece, count how many enemy pieces are looking at that square."
+   MUST be different from previous practical_focus items in the coaching history (if provided).
 
-4. "critical_moments" — A JSON array of the {critical_moments_count} most important moments. Each object has:
+5. "critical_moments" — A JSON array of the {critical_moments_count} most important moments. Each object has:
    - "move_number": int
    - "side": "white" or "black"
    - "what_happened": 1-2 sentences a child can understand
@@ -78,7 +100,7 @@ Produce a JSON response with these exact keys:
    - "move_played": the move in notation
    - "best_move": the engine's recommended move
 
-5. "opening_analysis" — A JSON object analyzing the opening choice:
+6. "opening_analysis" — A JSON object analyzing the opening choice:
    - "opening_name": the name of the opening played (e.g. "Italian Game", "Sicilian Defense")
    - "player_role": "white" if the player chose the opening, or "black" if responding to it
    - "opening_quality": "good", "acceptable", or "poor" — was this a sound opening choice for their level?
@@ -86,25 +108,28 @@ Produce a JSON response with these exact keys:
    - "opening_summary": 2-3 sentences explaining the opening choice. For white: was the system appropriate? Did they develop pieces logically? For black: did they play the correct response to white's opening? Where did they first deviate from good play?
    - "opening_tip": One specific, actionable tip about this opening for a {age}-year-old.
 
-6. "player_feedback" — A personal letter to the child (2-3 paragraphs) written directly to them.
+7. "player_feedback" — A personal letter to the child (2-3 paragraphs) written directly to them.
    This is the most important section — it should feel like a kind, encouraging coach talking
    to a {age}-year-old {tier_label}-level player after their game.
 
    REQUIREMENTS:
    - Address {name} by name. Use "you" throughout.
    - Start by celebrating what they did well — find at least 2 specific good decisions.
-   - Frame every mistake as a growth opportunity: "Next time you see X, try Y" not "You made a mistake."
-   - Include exactly 3 practical, actionable tips they can use in their very next game:
-     * Tip 1: Something they already did well — reinforce it ("Keep doing X, it's working!")
-     * Tip 2: One specific chess habit to build (appropriate for {tier_label} level)
-     * Tip 3: One pattern or idea to look for in future games
-   - End with a growth mindset message — emphasize that every game teaches something,
-     wins and losses both help them improve, and they're making real progress.
+   - Frame every mistake as a growth opportunity, but VARY how you do this. Do not always use
+     "Next time you see X, try Y." Mix approaches: questions, challenges, stories, analogies.
+   - Include 2-4 practical, actionable tips (vary the number — not always exactly 3).
+     Pick tips that are DIFFERENT from any listed in the coaching history below.
+     If the player has been working on something from a previous game, acknowledge progress
+     or gently remind them if the same issue appeared again.
+   - End with encouragement, but vary the style — sometimes a challenge for next game,
+     sometimes a compliment about their growth, sometimes a fun chess fact or quote.
    - Match language to a {age}-year-old at {tier_label} level: {language_level}
    - Be warm but not patronizing. Respect their intelligence while keeping it accessible.
    - Reference specific moves from THIS game to make it personal, not generic.
+   - CRITICALLY: If coaching history is provided, DO NOT repeat the same praise patterns,
+     the same tips, or the same closing encouragements. Be creative and fresh each time.
 
-7. "coach_notes" — Technical summary for the chess coach. Use precise chess terminology.
+8. "coach_notes" — Technical summary for the chess coach. Use precise chess terminology.
    Include: opening assessment, critical tactical moments, endgame technique (if applicable),
    specific weaknesses to address in lessons, and recommended training exercises.
    2-3 paragraphs, professional tone.
@@ -195,6 +220,142 @@ def _build_critical_moments(moves: list[dict], top_n: int = 5) -> str:
             f"— lost {m['swing_cp']}cp (win%: {m['win_prob_before']:.1f}% → "
             f"{m['win_prob_after']:.1f}%). Best was {m['best_move'] or '?'}"
         )
+    return "\n".join(lines)
+
+
+def _detect_game_type(moves: list[dict], game: dict) -> tuple[str, str]:
+    """Detect the character of the game and return (type_label, coaching_guidance).
+
+    Analyzes move patterns, eval swings, game length, and result to classify
+    the game and provide type-specific coaching guidance.
+    """
+    total_moves = len(moves)
+    player_color = game["player_color"]
+    result = game["result"]
+
+    # Count classifications
+    blunders = sum(1 for m in moves if m.get("classification") == "blunder"
+                   and m.get("side") == player_color)
+    mistakes = sum(1 for m in moves if m.get("classification") == "mistake"
+                   and m.get("side") == player_color)
+    excellent = sum(1 for m in moves if m.get("classification") == "excellent"
+                    and m.get("side") == player_color)
+
+    # Eval swings (large shifts in advantage)
+    big_swings = sum(1 for m in moves if abs(m.get("swing_cp", 0) or 0) > 200)
+
+    # Check for comeback or collapse
+    player_was_losing = False
+    player_was_winning = False
+    for m in moves:
+        wp = m.get("win_prob_after", 50) or 50
+        if player_color == "black":
+            wp = 100 - wp
+        if wp < 25:
+            player_was_losing = True
+        if wp > 75:
+            player_was_winning = True
+
+    # Time pressure: check if late moves exist (proxy — games with many moves)
+    is_long = total_moves > 80
+    is_short = total_moves < 30
+
+    # Classify
+    if is_short and (blunders >= 2 or mistakes >= 3):
+        game_type = "opening disaster"
+        guidance = ("Focus on what went wrong early. Be extra gentle — short losses feel bad. "
+                    "Find something positive even if it's small. Emphasize that everyone has "
+                    "these games, even grandmasters. Focus the lesson on the opening phase.")
+    elif is_short and result == "win":
+        game_type = "miniature victory"
+        guidance = ("This was a quick win! Celebrate the tactical sharpness. "
+                    "But also gently note that the opponent made it easy — "
+                    "focus on what to do when opponents play better moves.")
+    elif player_was_losing and result == "win":
+        game_type = "comeback victory"
+        guidance = ("This is a dramatic comeback story! Build suspense in the narrative. "
+                    "Praise the fighting spirit and resilience. Highlight the turning point. "
+                    "But also address how they got into trouble in the first place.")
+    elif player_was_winning and result == "loss":
+        game_type = "collapse from winning position"
+        guidance = ("Handle this sensitively — losing a won game is painful. "
+                    "Acknowledge how well they played in the first part. "
+                    "Focus the lesson on technique: converting advantages, not rushing, "
+                    "and staying focused when ahead. Be extra encouraging.")
+    elif big_swings >= 4:
+        game_type = "wild tactical battle"
+        guidance = ("This was a rollercoaster! Make the narrative exciting and dramatic. "
+                    "Focus on calculation and pattern recognition. "
+                    "Highlight both the thrilling attacks and the defensive moments.")
+    elif is_long and big_swings < 2:
+        game_type = "positional grind"
+        guidance = ("This was a patient, strategic game. Praise the stamina and focus. "
+                    "Highlight positional concepts: piece placement, pawn structure, "
+                    "controlling key squares. Use analogies about planning and patience.")
+    elif is_long:
+        game_type = "endgame marathon"
+        guidance = ("This game went deep into the endgame. Focus on endgame technique: "
+                    "king activity, passed pawns, piece coordination. "
+                    "Praise the patience required for long games.")
+    elif excellent >= 5 and blunders == 0:
+        game_type = "excellent performance"
+        guidance = ("This was a strong game! Be genuinely impressed. "
+                    "Point out the specific excellent moves and why they were strong. "
+                    "Challenge them to maintain this level. Set a higher bar for next time.")
+    elif result == "draw":
+        game_type = "hard-fought draw"
+        guidance = ("Draws can be just as instructive as wins. Highlight what went well. "
+                    "Discuss whether the draw was a good result or a missed opportunity. "
+                    "Focus on the moments where the game could have gone either way.")
+    else:
+        game_type = "standard game"
+        guidance = ("Analyze the game on its own merits. Look for the most interesting "
+                    "moments and patterns. Find the unique story of this particular game.")
+
+    return game_type, guidance
+
+
+def _fetch_coaching_history(conn, player_id: int, current_game_id: int,
+                           limit: int = 5) -> str:
+    """Fetch recent coaching history for this player to avoid repetition.
+
+    Returns a formatted string for inclusion in the prompt, or empty string
+    if no history exists.
+    """
+    rows = conn.execute(
+        """SELECT gc.key_lesson, gc.practical_focus, gc.narrative, g.result,
+                  g.player_color, g.date_played
+           FROM game_coaching gc
+           JOIN games g ON gc.game_id = g.id
+           WHERE g.player_id = ? AND gc.game_id != ?
+           ORDER BY g.date_played DESC
+           LIMIT ?""",
+        (player_id, current_game_id, limit),
+    ).fetchall()
+
+    if not rows:
+        return ""
+
+    lines = [
+        "",
+        "## Coaching History (recent games — DO NOT repeat these)",
+        "Below are the lessons and practice focuses from the player's recent games.",
+        "You MUST provide DIFFERENT advice this time. Build on previous coaching,",
+        "acknowledge progress on past tips if relevant, but give fresh insights.",
+        "",
+    ]
+    for i, row in enumerate(rows, 1):
+        result_str = f"{row['player_color']}, {row['result']}"
+        date_str = row["date_played"] or "unknown date"
+        lines.append(f"### Game {i} ({date_str}, {result_str})")
+        lines.append(f"- **Key lesson:** {row['key_lesson'] or 'N/A'}")
+        lines.append(f"- **Practice focus:** {row['practical_focus'] or 'N/A'}")
+        # Include first 100 chars of narrative to show tone used
+        narrative = row["narrative"] or ""
+        if narrative:
+            lines.append(f"- **Narrative opening:** {narrative[:150]}...")
+        lines.append("")
+
     return "\n".join(lines)
 
 
@@ -300,6 +461,18 @@ def coach_game(game_id: int, provider: str = "claude",
     tier = get_tier(rating)
     focus_areas_text = "\n".join(f"- {area}" for area in tier.focus_areas)
 
+    # Detect game type for tailored coaching angle
+    game_type, game_type_guidance = _detect_game_type(moves, dict(game))
+
+    # Fetch coaching history to avoid repetition
+    coaching_history = _fetch_coaching_history(conn, game["player_id"], game_id)
+    if coaching_history:
+        previous_coaching_guidance = coaching_history
+    else:
+        previous_coaching_guidance = ("\n## Coaching History\n"
+                                      "No previous coaching history — this is the first coached game. "
+                                      "Set a strong, encouraging foundation.\n")
+
     prompt = GAME_COACHING_PROMPT.format(
         name=name,
         age=age,
@@ -310,6 +483,9 @@ def coach_game(game_id: int, provider: str = "claude",
         language_level=tier.language_level,
         focus_areas=focus_areas_text,
         critical_moments_count=tier.critical_moments_count,
+        game_type=game_type,
+        game_type_guidance=game_type_guidance,
+        previous_coaching_guidance=previous_coaching_guidance,
         player_color=game["player_color"],
         result=game["result"],
         pgn=game["pgn"][:2000],  # Truncate long PGNs to save tokens
