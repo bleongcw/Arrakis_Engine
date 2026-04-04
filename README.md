@@ -663,4 +663,8 @@ SQLite only allows one writer at a time. Stop the analyzer before running harves
 
 ## License
 
-Private repository. All rights reserved.
+ArrakisEngine is licensed under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0).
+
+You are free to use, modify, and distribute this software under the terms of the AGPL-3.0. If you modify ArrakisEngine and provide it as a service over a network, you must make your modified source code available under the same license.
+
+For commercial licensing inquiries (e.g. proprietary use without AGPL obligations), contact bleongcw@gmail.com.
