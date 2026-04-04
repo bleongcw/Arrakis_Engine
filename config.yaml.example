@@ -38,6 +38,15 @@ coaching:
   default_provider: claude
   anthropic_model: claude-opus-4-6
   openai_model: gpt-5.4
+  tone: balanced                     # encouraging | balanced | technical
+  detail_level: standard             # concise | standard | detailed
+  focus_areas:                       # areas to emphasize in coaching feedback
+    - openings
+    - tactics
+    - endgames
+    - time_management
+    - positional_play
+  custom_instructions: ""            # free-form instructions injected into coaching prompt
 
 database:
   path: data/chess_coach.db

@@ -40,6 +40,10 @@ This game has been classified as: **{game_type}**
 - When pointing out mistakes, frame them as learning opportunities, never criticism.
 - Be specific — say "your knight move to f3 was smart because it protects the center" rather than "good move."
 - Keep it brief: quality over quantity. One clear point beats three vague ones.
+{tone_modifier}
+{custom_instructions_section}
+{detail_modifier}
+{focus_modifier}
 
 ## IMPORTANT: Variety and Freshness
 - VARY your writing style, structure, and analogies across different games.
@@ -416,9 +420,15 @@ def _parse_llm_response(text: str) -> dict:
     return json.loads(text)
 
 
-def coach_game(game_id: int, provider: str = "claude",
-               model: str | None = None, db_path: str | None = None) -> dict:
+def coach_game(game_id: int, provider: str | None = "claude",
+               model: str | None = None, db_path: str | None = None,
+               config: dict | None = None) -> dict:
     """Generate coaching insights for a single analyzed game.
+
+    Args:
+        config: Full config dict (from config.yaml). If provided, coaching
+                settings (tone, detail_level, focus_areas, custom_instructions)
+                are read from config["coaching"].
 
     Returns the parsed coaching data dict.
     """
@@ -473,6 +483,68 @@ def coach_game(game_id: int, provider: str = "claude",
                                       "No previous coaching history — this is the first coached game. "
                                       "Set a strong, encouraging foundation.\n")
 
+    # Load coaching config for customization
+    coaching_config = config.get("coaching", {}) if config else {}
+
+    # Build tone modifier from config
+    tone = coaching_config.get("tone", "balanced")
+    tone_modifiers = {
+        "encouraging": ("\n- Lean heavily toward praise and positive reinforcement. "
+                        "Frame every mistake gently. Use enthusiastic, warm language. "
+                        "Celebrate even small victories."),
+        "balanced": "",
+        "technical": ("\n- Use more precise chess terminology. Be direct about errors. "
+                      "Focus on concrete analysis over emotional encouragement. "
+                      "Treat the player as a serious student of the game."),
+    }
+    tone_modifier = tone_modifiers.get(tone, "")
+
+    # Build detail level modifier
+    detail_level = coaching_config.get("detail_level", "standard")
+    detail_modifiers = {
+        "concise": ("\n## Response Length: CONCISE\n"
+                    "Keep all sections SHORT. Narrative: 1-2 paragraphs max. "
+                    "Player feedback: 1 paragraph. Max 2 tips. "
+                    "Critical moments: top 3 only. Coach notes: 1 paragraph."),
+        "standard": "",
+        "detailed": ("\n## Response Length: DETAILED\n"
+                     "Provide THOROUGH analysis. Narrative: 3-4 paragraphs. "
+                     "Player feedback: 3-4 paragraphs with 4+ tips. "
+                     "Include more context for each critical moment. "
+                     "Explain the 'why' behind each suggestion. "
+                     "Coach notes: 2-3 detailed paragraphs."),
+    }
+    detail_modifier = detail_modifiers.get(detail_level, "")
+
+    # Build focus areas modifier
+    all_focus = {"openings", "tactics", "endgames", "time_management", "positional_play"}
+    selected_focus = set(coaching_config.get("focus_areas", list(all_focus)))
+    if selected_focus and selected_focus != all_focus:
+        focus_labels = {
+            "openings": "opening theory and preparation",
+            "tactics": "tactical patterns and calculations",
+            "endgames": "endgame technique",
+            "time_management": "time management and clock usage",
+            "positional_play": "positional understanding and strategy",
+        }
+        areas_text = ", ".join(focus_labels.get(a, a) for a in selected_focus if a in focus_labels)
+        focus_modifier = (f"\n## Coach's Priority Focus\n"
+                          f"The coach wants EXTRA emphasis on: {areas_text}. "
+                          f"When relevant to this game, prioritize analysis of these areas. "
+                          f"However, do not force-fit these if the game does not feature them.")
+    else:
+        focus_modifier = ""
+
+    # Build custom instructions section
+    custom_instructions = coaching_config.get("custom_instructions", "").strip()
+    if custom_instructions:
+        custom_instructions_section = (
+            f"\n## Coach's Custom Instructions\n"
+            f"The following are special instructions from the coach. Follow these carefully:\n"
+            f"{custom_instructions}")
+    else:
+        custom_instructions_section = ""
+
     prompt = GAME_COACHING_PROMPT.format(
         name=name,
         age=age,
@@ -486,6 +558,10 @@ def coach_game(game_id: int, provider: str = "claude",
         game_type=game_type,
         game_type_guidance=game_type_guidance,
         previous_coaching_guidance=previous_coaching_guidance,
+        tone_modifier=tone_modifier,
+        detail_modifier=detail_modifier,
+        focus_modifier=focus_modifier,
+        custom_instructions_section=custom_instructions_section,
         player_color=game["player_color"],
         result=game["result"],
         pgn=game["pgn"][:2000],  # Truncate long PGNs to save tokens
@@ -493,14 +569,16 @@ def coach_game(game_id: int, provider: str = "claude",
         critical_moments=_build_critical_moments(moves),
     )
 
-    # Call LLM
+    # Call LLM — use config defaults for provider/model if not explicitly specified
+    if not provider:
+        provider = coaching_config.get("default_provider", "claude")
     logger.info("Coaching game %d with %s...", game_id, provider)
 
     if provider == "claude":
-        default_model = "claude-opus-4-6"
+        default_model = coaching_config.get("anthropic_model", "claude-opus-4-6")
         raw = _call_claude(prompt, model or default_model)
     elif provider == "openai":
-        default_model = "gpt-5.4"
+        default_model = coaching_config.get("openai_model", "gpt-5.4")
         raw = _call_openai(prompt, model or default_model)
     else:
         raise ValueError(f"Unknown provider: {provider}")
@@ -548,11 +626,13 @@ def coach_game(game_id: int, provider: str = "claude",
 
 
 def coach_pending(provider: str = "claude", model: str | None = None,
-                  db_path: str | None = None, limit: int = 0) -> int:
+                  db_path: str | None = None, limit: int = 0,
+                  config: dict | None = None) -> int:
     """Generate coaching for analyzed but uncoached games.
 
     Args:
         limit: Max games to coach (0 = all pending).
+        config: Full config dict (from config.yaml) for coaching customization.
 
     Returns the number of games coached.
     """
@@ -584,7 +664,7 @@ def coach_pending(provider: str = "claude", model: str | None = None,
     for i, row in enumerate(pending):
         logger.info("Coaching game %d/%d (id=%d)", i + 1, len(pending), row["id"])
         try:
-            coach_game(row["id"], provider=provider, model=model, db_path=db_path)
+            coach_game(row["id"], provider=provider, model=model, db_path=db_path, config=config)
             coached += 1
             # Rate limit: wait 10s between API calls to avoid 429s
             if i < len(pending) - 1:
@@ -597,7 +677,7 @@ def coach_pending(provider: str = "claude", model: str | None = None,
                 time.sleep(60)
                 # Retry once after cooldown
                 try:
-                    coach_game(row["id"], provider=provider, model=model, db_path=db_path)
+                    coach_game(row["id"], provider=provider, model=model, db_path=db_path, config=config)
                     coached += 1
                     continue
                 except Exception as retry_e:

@@ -135,7 +135,7 @@ def cmd_coach(args, config):
         model = config["coaching"]["openai_model"]
 
     limit = getattr(args, 'limit', 0) or 0
-    count = coach_pending(provider=provider, model=model, db_path=db_path, limit=limit)
+    count = coach_pending(provider=provider, model=model, db_path=db_path, limit=limit, config=config)
     print(f"Coached {count} games with {provider} ({model}).")
 
 

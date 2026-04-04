@@ -9,6 +9,7 @@ import type {
   ScheduleState,
   SettingsData,
   AnalysisSettings,
+  CoachingSettings,
 } from "./types";
 
 const BASE = "/api";
@@ -199,6 +200,21 @@ export async function updateAnalysisSettings(
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.error || `Settings update failed: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function updateCoachingSettings(
+  data: Partial<CoachingSettings>
+): Promise<{ status: string }> {
+  const res = await fetch(`${BASE}/settings/coaching`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `Coaching settings update failed: ${res.status}`);
   }
   return res.json();
 }

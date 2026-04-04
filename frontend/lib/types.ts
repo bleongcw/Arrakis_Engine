@@ -319,9 +319,20 @@ export interface ApiKeyStatus {
   openai_key_hint: string | null;
 }
 
+export interface CoachingSettings {
+  default_provider: "claude" | "openai";
+  anthropic_model: string;
+  openai_model: string;
+  tone: "encouraging" | "balanced" | "technical";
+  detail_level: "concise" | "standard" | "detailed";
+  focus_areas: string[];
+  custom_instructions: string;
+}
+
 export interface SettingsData {
   analysis: AnalysisSettings;
   api_keys: ApiKeyStatus;
+  coaching: CoachingSettings;
 }
 
 export interface StatusResponse {

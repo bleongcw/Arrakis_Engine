@@ -96,6 +96,8 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             self._handle_update_analysis_settings(body)
         elif path == "/api/settings/api-keys":
             self._handle_update_api_keys(body)
+        elif path == "/api/settings/coaching":
+            self._handle_update_coaching_settings(body)
         else:
             self._send_json({"error": "Not found"}, 404)
 
@@ -159,9 +161,11 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         finally:
             conn2.close()
 
+        config = self.config
+
         def run_coach():
             try:
-                coach_game(game_id, provider=provider, model=model, db_path=self.db_path)
+                coach_game(game_id, provider=provider, model=model, db_path=self.db_path, config=config)
                 logger.info("Dashboard coaching complete for game %d (%s)", game_id, provider)
             except Exception as e:
                 logger.error("Dashboard coaching failed for game %d: %s", game_id, e)
@@ -336,6 +340,8 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 return None
             return key[:6] + "\u2022" * 6 + key[-4:]
 
+        coaching = self.config.get("coaching", {})
+
         return {
             "analysis": {
                 "stockfish_path": sf.get("path", shutil.which("stockfish") or "stockfish"),
@@ -350,6 +356,17 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 "anthropic_key_hint": mask_key(anthropic_key),
                 "openai_configured": bool(openai_key),
                 "openai_key_hint": mask_key(openai_key),
+            },
+            "coaching": {
+                "default_provider": coaching.get("default_provider", "claude"),
+                "anthropic_model": coaching.get("anthropic_model", "claude-opus-4-6"),
+                "openai_model": coaching.get("openai_model", "gpt-5.4"),
+                "tone": coaching.get("tone", "balanced"),
+                "detail_level": coaching.get("detail_level", "standard"),
+                "focus_areas": coaching.get("focus_areas", [
+                    "openings", "tactics", "endgames", "time_management", "positional_play"
+                ]),
+                "custom_instructions": coaching.get("custom_instructions", ""),
             },
         }
 
@@ -441,6 +458,76 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             self._send_json({"status": "saved", "updated": updated})
         except Exception as e:
             logger.exception("Failed to write .env: %s", e)
+            self._send_json({"error": str(e)}, 500)
+
+    def _handle_update_coaching_settings(self, body):
+        """Update coaching settings in config.yaml and in-memory config."""
+        config_path = Path("config.yaml")
+        if not config_path.exists():
+            self._send_json({"error": "config.yaml not found"}, 500)
+            return
+
+        VALID_TONES = {"encouraging", "balanced", "technical"}
+        VALID_DETAIL = {"concise", "standard", "detailed"}
+        VALID_FOCUS = {"openings", "tactics", "endgames", "time_management", "positional_play"}
+        VALID_PROVIDERS = {"claude", "openai"}
+
+        try:
+            with open(config_path, "r") as f:
+                file_config = yaml.safe_load(f) or {}
+
+            coaching = file_config.setdefault("coaching", {})
+
+            if "default_provider" in body:
+                val = str(body["default_provider"]).lower()
+                if val not in VALID_PROVIDERS:
+                    self._send_json({"error": f"Invalid provider: {val}"}, 400)
+                    return
+                coaching["default_provider"] = val
+
+            if "anthropic_model" in body:
+                coaching["anthropic_model"] = str(body["anthropic_model"]).strip()
+
+            if "openai_model" in body:
+                coaching["openai_model"] = str(body["openai_model"]).strip()
+
+            if "tone" in body:
+                val = str(body["tone"]).lower()
+                if val not in VALID_TONES:
+                    self._send_json({"error": f"Invalid tone: {val}"}, 400)
+                    return
+                coaching["tone"] = val
+
+            if "detail_level" in body:
+                val = str(body["detail_level"]).lower()
+                if val not in VALID_DETAIL:
+                    self._send_json({"error": f"Invalid detail level: {val}"}, 400)
+                    return
+                coaching["detail_level"] = val
+
+            if "focus_areas" in body:
+                areas = body["focus_areas"]
+                if not isinstance(areas, list):
+                    self._send_json({"error": "focus_areas must be a list"}, 400)
+                    return
+                invalid = set(areas) - VALID_FOCUS
+                if invalid:
+                    self._send_json({"error": f"Invalid focus areas: {invalid}"}, 400)
+                    return
+                coaching["focus_areas"] = areas
+
+            if "custom_instructions" in body:
+                text = str(body["custom_instructions"])[:2000]
+                coaching["custom_instructions"] = text
+
+            with open(config_path, "w") as f:
+                yaml.safe_dump(file_config, f, default_flow_style=False, sort_keys=False)
+
+            self.config["coaching"] = coaching
+            self._send_json({"status": "saved"})
+
+        except Exception as e:
+            logger.exception("Failed to update coaching settings: %s", e)
             self._send_json({"error": str(e)}, 500)
 
     # ── Pipeline handlers ────────────────────────────────────────
