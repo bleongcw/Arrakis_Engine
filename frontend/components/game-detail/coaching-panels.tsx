@@ -7,6 +7,27 @@ interface CoachingPanelsProps {
   coaching: GameCoaching | null;
 }
 
+/** Extract readable text from a value that may be plain text or JSON. */
+function toText(value: string | null | undefined, fallback = "\u2014"): string {
+  if (!value) return fallback;
+  const trimmed = value.trim();
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return trimmed;
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (typeof parsed === "string") return parsed;
+    if (Array.isArray(parsed)) return parsed.filter((v) => typeof v === "string").join("\n\n");
+    if (parsed.paragraphs && Array.isArray(parsed.paragraphs)) return parsed.paragraphs.join("\n\n");
+    if (parsed.text) return String(parsed.text);
+    // Flatten all string values from the object
+    const strings = Object.values(parsed).flatMap((v) =>
+      Array.isArray(v) ? v.filter((s) => typeof s === "string") : typeof v === "string" ? [v] : []
+    );
+    return strings.length > 0 ? strings.join("\n\n") : trimmed;
+  } catch {
+    return trimmed;
+  }
+}
+
 export function CoachingPanels({ coaching }: CoachingPanelsProps) {
   if (!coaching) {
     return (
@@ -44,7 +65,7 @@ export function CoachingPanels({ coaching }: CoachingPanelsProps) {
         </CardHeader>
         <CardContent>
           <div className="text-sm leading-relaxed whitespace-pre-wrap">
-            {coaching.narrative || "Not available"}
+            {toText(coaching.narrative, "Not available")}
           </div>
         </CardContent>
       </Card>
@@ -55,7 +76,7 @@ export function CoachingPanels({ coaching }: CoachingPanelsProps) {
           <CardTitle className="text-sm">Key Lesson</CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-sm">{coaching.key_lesson || "\u2014"}</p>
+          <p className="text-sm">{toText(coaching.key_lesson)}</p>
         </CardContent>
       </Card>
 
@@ -65,7 +86,7 @@ export function CoachingPanels({ coaching }: CoachingPanelsProps) {
           <CardTitle className="text-sm">Practice Focus</CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-sm">{coaching.practical_focus || "\u2014"}</p>
+          <p className="text-sm">{toText(coaching.practical_focus)}</p>
         </CardContent>
       </Card>
 
@@ -79,7 +100,7 @@ export function CoachingPanels({ coaching }: CoachingPanelsProps) {
           </CardHeader>
           <CardContent>
             <div className="text-sm leading-relaxed whitespace-pre-wrap">
-              {coaching.player_feedback}
+              {toText(coaching.player_feedback)}
             </div>
           </CardContent>
         </Card>
@@ -117,11 +138,11 @@ export function CoachingPanels({ coaching }: CoachingPanelsProps) {
               </div>
             </div>
             {coaching.opening_analysis.opening_summary && (
-              <p className="text-sm mb-2">{coaching.opening_analysis.opening_summary}</p>
+              <p className="text-sm mb-2">{toText(coaching.opening_analysis.opening_summary)}</p>
             )}
             {coaching.opening_analysis.opening_tip && (
               <p className="text-sm text-muted-foreground italic">
-                Tip: {coaching.opening_analysis.opening_tip}
+                Tip: {toText(coaching.opening_analysis.opening_tip)}
               </p>
             )}
           </CardContent>
@@ -155,7 +176,7 @@ export function CoachingPanels({ coaching }: CoachingPanelsProps) {
         </CardHeader>
         <CardContent>
           <div className="text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap">
-            {coaching.coach_notes || "\u2014"}
+            {toText(coaching.coach_notes)}
           </div>
         </CardContent>
       </Card>

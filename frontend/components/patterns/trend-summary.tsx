@@ -46,6 +46,20 @@ export function TrendSummary({ summary, player, onSummaryGenerated }: TrendSumma
     }
   }, [player, onSummaryGenerated]);
 
+  // Parse summary: handle both plain text and JSON {"paragraphs": [...]} format
+  const paragraphs: string[] = (() => {
+    if (!summary) return [];
+    const trimmed = summary.trim();
+    if (trimmed.startsWith("{")) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed.paragraphs)) return parsed.paragraphs;
+        if (typeof parsed === "object") return Object.values(parsed).flat().filter((v): v is string => typeof v === "string");
+      } catch {}
+    }
+    return trimmed.split("\n\n").filter(Boolean);
+  })();
+
   return (
     <Card>
       <CardHeader className="pb-3">
@@ -54,12 +68,16 @@ export function TrendSummary({ summary, player, onSummaryGenerated }: TrendSumma
           {summary && (
             <span className="text-xs font-normal text-muted-foreground">AI-generated</span>
           )}
+          <span
+            title="An AI coach analyzes all your pattern data (accuracy, openings, time management, blunders) and writes a personalized summary of strengths, weaknesses, and what to work on next."
+            className="text-sm font-normal text-muted-foreground hover:text-foreground cursor-help select-none transition-colors"
+          >&#9432;</span>
         </CardTitle>
       </CardHeader>
       <CardContent>
         {summary ? (
           <div className="space-y-3">
-            {summary.split("\n\n").map((paragraph, i) => (
+            {paragraphs.map((paragraph, i) => (
               <p key={i} className="text-sm leading-relaxed">{paragraph}</p>
             ))}
             <div className="pt-2 flex gap-2">

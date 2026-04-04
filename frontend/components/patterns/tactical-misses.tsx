@@ -1,5 +1,8 @@
 "use client";
 
+import { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
+
 interface TacticalMissData {
   total_opportunities: number;
   missed: number;
@@ -58,7 +61,45 @@ function PhaseBar({
   );
 }
 
+function TacticalInfoModal({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  return createPortal(
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/30" />
+      <div className="relative bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl shadow-2xl w-[340px] p-5 text-sm" onClick={(e) => e.stopPropagation()}>
+        <div className="flex justify-between items-start mb-3">
+          <h4 className="font-bold text-base text-zinc-900 dark:text-zinc-100">Tactical Awareness</h4>
+          <button onClick={onClose} className="text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 text-xl leading-none -mt-1">×</button>
+        </div>
+        <p className="text-zinc-600 dark:text-zinc-400 text-xs mb-3">
+          Tracks how often you spot tactical opportunities (positions where the best move gains significant material or advantage):
+        </p>
+        <ul className="text-xs space-y-1.5 text-zinc-600 dark:text-zinc-400">
+          <li><span className="inline-block w-2 h-2 rounded-full bg-[#22c55e] mr-1.5" />
+            <strong>Found</strong> — You played the winning tactical move</li>
+          <li><span className="inline-block w-2 h-2 rounded-full bg-[#ef4444] mr-1.5" />
+            <strong>Missed</strong> — A tactic existed but you played a weaker move</li>
+        </ul>
+        <p className="text-zinc-600 dark:text-zinc-400 text-xs mt-3">
+          Bars show the breakdown by game phase — identify where your tactical vision is weakest.
+        </p>
+        <p className="text-zinc-500 dark:text-zinc-500 text-[10px] mt-2">
+          A miss rate below 30% is solid. Below 20% is very sharp tactical play.
+        </p>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 export function TacticalMisses({ data }: { data: TacticalMissData }) {
+  const [showInfo, setShowInfo] = useState(false);
+
   if (!data || data.total_opportunities === 0) {
     return <p className="text-sm text-muted-foreground">No data available.</p>;
   }
@@ -84,9 +125,13 @@ export function TacticalMisses({ data }: { data: TacticalMissData }) {
   return (
     <div>
       <div className="flex items-center justify-between mb-1">
-        <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-          Tactical Awareness
-        </h3>
+        <div className="flex items-center gap-2">
+          <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+            Tactical Awareness
+          </h3>
+          <button onClick={() => setShowInfo(true)} className="text-sm text-muted-foreground hover:text-foreground cursor-help select-none transition-colors" title="What is tactical awareness?">&#9432;</button>
+        </div>
+        {showInfo && <TacticalInfoModal onClose={() => setShowInfo(false)} />}
         <div className="text-right">
           <span className="text-2xl font-bold text-red-500">{data.miss_rate}%</span>
           <span className="text-xs text-muted-foreground ml-1">miss rate</span>

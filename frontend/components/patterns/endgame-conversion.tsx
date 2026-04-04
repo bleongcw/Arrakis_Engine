@@ -1,5 +1,8 @@
 "use client";
 
+import { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
+
 interface EndgameConversionData {
   winning_endgames: {
     total: number;
@@ -77,7 +80,44 @@ function StatRow({
   );
 }
 
+function EndgameInfoModal({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  return createPortal(
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/30" />
+      <div className="relative bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl shadow-2xl w-[340px] p-5 text-sm" onClick={(e) => e.stopPropagation()}>
+        <div className="flex justify-between items-start mb-3">
+          <h4 className="font-bold text-base text-zinc-900 dark:text-zinc-100">Endgame Conversion</h4>
+          <button onClick={onClose} className="text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 text-xl leading-none -mt-1">×</button>
+        </div>
+        <p className="text-zinc-600 dark:text-zinc-400 text-xs mb-3">
+          Measures how well you finish games based on your position at move 30:
+        </p>
+        <ul className="text-xs space-y-1.5 text-zinc-600 dark:text-zinc-400">
+          <li><span className="inline-block w-2 h-2 rounded-full bg-[#22c55e] mr-1.5" />
+            <strong>Winning</strong> — Had &gt;200cp advantage. Did you convert to a win?</li>
+          <li><span className="inline-block w-2 h-2 rounded-full bg-[#3b82f6] mr-1.5" />
+            <strong>Losing</strong> — Had &gt;200cp disadvantage. Did you save/draw?</li>
+          <li><span className="inline-block w-2 h-2 rounded-full bg-[#eab308] mr-1.5" />
+            <strong>Equal</strong> — Within ±200cp. Did you outplay your opponent?</li>
+        </ul>
+        <p className="text-zinc-500 dark:text-zinc-500 text-[10px] mt-3">
+          High conversion rate = strong technique. High save rate = great fighting spirit.
+        </p>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 export function EndgameConversion({ data }: { data: EndgameConversionData }) {
+  const [showInfo, setShowInfo] = useState(false);
+
   if (!data || data.total_analyzed === 0) {
     return <p className="text-sm text-muted-foreground">No data available.</p>;
   }
@@ -88,9 +128,13 @@ export function EndgameConversion({ data }: { data: EndgameConversionData }) {
 
   return (
     <div>
-      <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-1">
-        Endgame Conversion
-      </h3>
+      <div className="flex items-center gap-2 mb-1">
+        <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+          Endgame Conversion
+        </h3>
+        <button onClick={() => setShowInfo(true)} className="text-sm text-muted-foreground hover:text-foreground cursor-help select-none transition-colors" title="What is endgame conversion?">&#9432;</button>
+      </div>
+      {showInfo && <EndgameInfoModal onClose={() => setShowInfo(false)} />}
       <p className="text-xs text-muted-foreground mb-4">
         {data.games_reaching_endgame} of {data.total_analyzed} games reach the
         endgame ({data.endgame_reach_pct}%)

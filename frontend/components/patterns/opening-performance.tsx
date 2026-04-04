@@ -1,6 +1,7 @@
 "use client";
 
-import { Fragment, useState } from "react";
+import { Fragment, useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { useParams } from "next/navigation";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -94,6 +95,40 @@ function OpeningTable({
   );
 }
 
+function InfoModal({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  return createPortal(
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/30" />
+      <div
+        className="relative bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl shadow-2xl w-[340px] p-5 text-sm"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex justify-between items-start mb-3">
+          <h4 className="font-bold text-base text-zinc-900 dark:text-zinc-100">Opening Performance</h4>
+          <button onClick={onClose} className="text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 text-xl leading-none -mt-1">×</button>
+        </div>
+        <p className="text-zinc-600 dark:text-zinc-400 text-xs mb-3">
+          Shows win rate for each opening you&apos;ve played, split by White and Black. Click any opening with a ▶ arrow to expand the Opening Explorer.
+        </p>
+        <ul className="text-xs space-y-1.5 text-zinc-600 dark:text-zinc-400">
+          <li><strong>Opening Explorer</strong> — Shows the opening moves on a board with your game history for that opening.</li>
+          <li><strong>Win%</strong> — Your win percentage with that specific opening.</li>
+        </ul>
+        <p className="text-zinc-500 dark:text-zinc-500 text-[10px] mt-3">
+          Focus on openings with many games but low win rates — those may need study or replacement.
+        </p>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 export function OpeningPerformance({ openings }: OpeningPerformanceProps) {
   // Handle both array and dict formats
   let allOpenings: OpeningEntry[] = [];
@@ -108,11 +143,21 @@ export function OpeningPerformance({ openings }: OpeningPerformanceProps) {
     blackOpenings = openings.black || [];
   }
 
+  const [showInfo, setShowInfo] = useState(false);
+
   return (
     <div>
-      <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-3">
-        Opening Performance
-      </h3>
+      <div className="flex items-center gap-2 mb-3">
+        <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+          Opening Performance
+        </h3>
+        <button
+          onClick={() => setShowInfo(true)}
+          className="text-sm text-muted-foreground hover:text-foreground cursor-help select-none transition-colors"
+          title="What does this table show?"
+        >&#9432;</button>
+      </div>
+      {showInfo && <InfoModal onClose={() => setShowInfo(false)} />}
       <Tabs defaultValue="all">
         <TabsList>
           <TabsTrigger value="all">All</TabsTrigger>

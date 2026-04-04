@@ -1,5 +1,7 @@
 "use client";
 
+import { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import {
   BarChart,
   Bar,
@@ -27,8 +29,44 @@ interface PhasePerformanceProps {
   };
 }
 
+function InfoModal({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  return createPortal(
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/30" />
+      <div
+        className="relative bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl shadow-2xl w-[340px] p-5 text-sm"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex justify-between items-start mb-3">
+          <h4 className="font-bold text-base text-zinc-900 dark:text-zinc-100">Phase Performance</h4>
+          <button onClick={onClose} className="text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 text-xl leading-none -mt-1">×</button>
+        </div>
+        <p className="text-zinc-600 dark:text-zinc-400 text-xs mb-3">
+          Compares your play quality across the three phases of a chess game:
+        </p>
+        <ul className="text-xs space-y-1.5 text-zinc-600 dark:text-zinc-400">
+          <li><strong>Opening</strong> — First ~10 moves. Theory and preparation.</li>
+          <li><strong>Middlegame</strong> — Moves ~10-30. Tactics and strategy.</li>
+          <li><strong>Endgame</strong> — Final phase. Technique and precision.</li>
+        </ul>
+        <p className="text-zinc-600 dark:text-zinc-400 text-xs mt-3">
+          Lower ACPL = better play. Compare phases to find where you lose the most centipawns — that&apos;s where to focus training.
+        </p>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 export function PhasePerformance({ data }: PhasePerformanceProps) {
-  console.log("PhasePerformance data:", JSON.stringify(data));
+  const [showInfo, setShowInfo] = useState(false);
+
   if (!data || !data.opening) {
     return (
       <div>
@@ -62,9 +100,17 @@ export function PhasePerformance({ data }: PhasePerformanceProps) {
 
   return (
     <div>
-      <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-3">
-        Performance by Phase
-      </h3>
+      <div className="flex items-center gap-2 mb-3">
+        <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+          Performance by Phase
+        </h3>
+        <button
+          onClick={() => setShowInfo(true)}
+          className="text-sm text-muted-foreground hover:text-foreground cursor-help select-none transition-colors"
+          title="What does this chart show?"
+        >&#9432;</button>
+      </div>
+      {showInfo && <InfoModal onClose={() => setShowInfo(false)} />}
       <ResponsiveContainer width="100%" height={250}>
         <BarChart
           data={chartData}

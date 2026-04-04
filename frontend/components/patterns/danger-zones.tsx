@@ -1,5 +1,7 @@
 "use client";
 
+import { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import {
   BarChart,
   Bar,
@@ -56,7 +58,41 @@ function CustomTooltip({ active, payload, label }: any) {
   );
 }
 
+function DangerZonesInfoModal({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  return createPortal(
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/30" />
+      <div className="relative bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl shadow-2xl w-[340px] p-5 text-sm" onClick={(e) => e.stopPropagation()}>
+        <div className="flex justify-between items-start mb-3">
+          <h4 className="font-bold text-base text-zinc-900 dark:text-zinc-100">Danger Zones</h4>
+          <button onClick={onClose} className="text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 text-xl leading-none -mt-1">×</button>
+        </div>
+        <p className="text-zinc-600 dark:text-zinc-400 text-xs mb-3">
+          Shows where in the game (by move number) your blunders and mistakes cluster.
+        </p>
+        <ul className="text-xs space-y-1.5 text-zinc-600 dark:text-zinc-400">
+          <li><strong>Early spikes</strong> — Opening preparation gaps</li>
+          <li><strong>Middle spikes</strong> — Tactical weakness in complex positions</li>
+          <li><strong>Late spikes</strong> — Fatigue or time pressure in endgames</li>
+        </ul>
+        <p className="text-zinc-500 dark:text-zinc-500 text-[10px] mt-3">
+          The &quot;worst zone&quot; badge highlights the move range with the highest blunder rate.
+        </p>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 export function DangerZones({ data }: { data: DangerZoneData }) {
+  const [showInfo, setShowInfo] = useState(false);
+
   if (!data?.histogram?.length) {
     return <p className="text-sm text-muted-foreground">No data available.</p>;
   }
@@ -64,9 +100,12 @@ export function DangerZones({ data }: { data: DangerZoneData }) {
   return (
     <div>
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-          Danger Zones
-        </h3>
+        <div className="flex items-center gap-2">
+          <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+            Danger Zones
+          </h3>
+          <button onClick={() => setShowInfo(true)} className="text-sm text-muted-foreground hover:text-foreground cursor-help select-none transition-colors" title="What are danger zones?">&#9432;</button>
+        </div>
         {data.worst_zone && (
           <span className="text-xs text-red-500 font-medium">
             Worst: moves {data.worst_zone.range} ({data.worst_zone.blunder_rate}%
@@ -74,6 +113,7 @@ export function DangerZones({ data }: { data: DangerZoneData }) {
           </span>
         )}
       </div>
+      {showInfo && <DangerZonesInfoModal onClose={() => setShowInfo(false)} />}
       <p className="text-xs text-muted-foreground mb-4">
         Where blunders and mistakes cluster by move number — reveals opening
         gaps, middlegame tactical weakness, or endgame fatigue.

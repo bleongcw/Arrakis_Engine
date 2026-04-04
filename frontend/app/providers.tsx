@@ -14,6 +14,7 @@ interface PlayerContextType {
   setCurrentPlayer: (username: string) => void;
   selectedPlayer: Player | null;
   loading: boolean;
+  refreshPlayers: () => Promise<void>;
 }
 
 const PlayerContext = createContext<PlayerContextType>({
@@ -22,6 +23,7 @@ const PlayerContext = createContext<PlayerContextType>({
   setCurrentPlayer: () => {},
   selectedPlayer: null,
   loading: true,
+  refreshPlayers: async () => {},
 });
 
 export function usePlayerContext() {
@@ -29,7 +31,7 @@ export function usePlayerContext() {
 }
 
 // Reserved top-level routes that are NOT player usernames
-const RESERVED_ROUTES = new Set(["dashboard", "_not-found"]);
+const RESERVED_ROUTES = new Set(["dashboard", "settings", "_not-found"]);
 
 function PlayerProvider({ children }: { children: ReactNode }) {
   const [players, setPlayers] = useState<Player[]>([]);
@@ -43,6 +45,18 @@ function PlayerProvider({ children }: { children: ReactNode }) {
   const urlPlayer = segments.length > 0 && !RESERVED_ROUTES.has(segments[0])
     ? segments[0]
     : null;
+
+  const refreshPlayers = async () => {
+    try {
+      const data = await fetchPlayers();
+      setPlayers(data);
+      if (data.length > 0 && !data.some((p) => p.username === currentPlayer)) {
+        setCurrentPlayer(data[0].username);
+      }
+    } catch (err) {
+      console.error("Failed to refresh players:", err);
+    }
+  };
 
   useEffect(() => {
     fetchPlayers()
@@ -72,7 +86,7 @@ function PlayerProvider({ children }: { children: ReactNode }) {
 
   return (
     <PlayerContext.Provider
-      value={{ players, currentPlayer, setCurrentPlayer, selectedPlayer, loading }}
+      value={{ players, currentPlayer, setCurrentPlayer, selectedPlayer, loading, refreshPlayers }}
     >
       {children}
     </PlayerContext.Provider>

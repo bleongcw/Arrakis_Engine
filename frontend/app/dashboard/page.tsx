@@ -27,8 +27,11 @@ export default function DashboardPage() {
         <div className="text-center py-20 text-muted-foreground">
           <p className="text-lg">No players configured.</p>
           <p className="text-sm mt-2">
-            Add players to <code>config.yaml</code> and run{" "}
-            <code>python main.py harvest</code>.
+            Go to{" "}
+            <a href="/settings" className="text-blue-600 dark:text-blue-400 underline">
+              Settings
+            </a>{" "}
+            to add players, then run the pipeline.
           </p>
         </div>
       </div>

@@ -82,11 +82,16 @@ export default function PatternsPage() {
 
       {/* Overview Stats Grid */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
-        <StatCard label="Total Games" value={stats.total_games} />
+        <StatCard
+          label="Total Games"
+          value={stats.total_games}
+          tooltip="Number of analyzed games in the database"
+        />
         <StatCard
           label="Win Rate"
           value={`${stats.results.win_rate.toFixed(1)}%`}
           subtitle={`${stats.results.wins}W / ${stats.results.losses}L / ${stats.results.draws}D`}
+          tooltip="Percentage of games won across all time controls"
         />
         <StatCard
           label="Accuracy"
@@ -96,6 +101,7 @@ export default function PatternsPage() {
               ? `${accuracy.best_moves}/${accuracy.total_moves} best moves`
               : undefined
           }
+          tooltip="Percentage of moves matching Stockfish's top engine choice"
         />
         <StatCard
           label="Avg ACPL"
@@ -105,6 +111,7 @@ export default function PatternsPage() {
               ? `Best: ${consistency.best_acpl} / Worst: ${consistency.worst_acpl}`
               : undefined
           }
+          tooltip="Average Centipawn Loss per move. Lower is better — under 50 is good, under 25 is strong"
         />
         <StatCard
           label="Consistency"
@@ -112,11 +119,13 @@ export default function PatternsPage() {
           subtitle={
             consistency ? `σ = ${consistency.std_dev}` : undefined
           }
+          tooltip="How consistent your play is game-to-game. σ (standard deviation) measures variation in ACPL — lower means more consistent"
         />
         <StatCard
           label="vs Higher Rated"
           value={`${stats.rating_performance?.vs_higher?.win_rate?.toFixed(0) || 0}%`}
           subtitle={`${stats.rating_performance?.vs_higher?.games || 0} games`}
+          tooltip="Win rate against opponents rated higher than you"
         />
       </div>
 
@@ -241,16 +250,26 @@ function StatCard({
   label,
   value,
   subtitle,
+  tooltip,
 }: {
   label: string;
   value: string | number;
   subtitle?: string;
+  tooltip?: string;
 }) {
   return (
     <Card>
       <CardContent className="pt-5 pb-4">
-        <div className="text-[10px] text-muted-foreground uppercase tracking-wider">
+        <div className="text-[10px] text-muted-foreground uppercase tracking-wider flex items-center gap-1">
           {label}
+          {tooltip && (
+            <span
+              title={tooltip}
+              className="cursor-help text-muted-foreground/60 hover:text-muted-foreground transition-colors"
+            >
+              &#9432;
+            </span>
+          )}
         </div>
         <div className="text-2xl font-bold mt-1">{value}</div>
         {subtitle && (

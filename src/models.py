@@ -1,3 +1,7 @@
+# ArrakisEngine — Chess Coaching AI
+# Copyright (C) 2026 Bernard Leong
+# Licensed under AGPL-3.0. See LICENSE file.
+
 """SQLite schema and data models for ArrakisEngine."""
 
 import os
@@ -167,6 +171,9 @@ def _migrate(conn: sqlite3.Connection):
     if "lichess_username" not in player_cols:
         conn.execute("ALTER TABLE players ADD COLUMN lichess_username TEXT")
         conn.commit()
+    if "is_active" not in player_cols:
+        conn.execute("ALTER TABLE players ADD COLUMN is_active INTEGER DEFAULT 1")
+        conn.commit()
 
 
 SCHEMA = """
@@ -278,3 +285,20 @@ def ensure_player(conn: sqlite3.Connection, username: str,
     return conn.execute(
         "SELECT id FROM players WHERE username = ?", (username,)
     ).fetchone()["id"]
+
+
+def update_player(conn: sqlite3.Connection, player_id: int, **fields) -> bool:
+    """Update a player's fields explicitly (not COALESCE — fields can be cleared to NULL).
+
+    Only updates columns that are passed as keyword arguments.
+    Returns True if a row was updated.
+    """
+    allowed = {"display_name", "age", "rating", "fide_id", "fide_rating", "lichess_username"}
+    updates = {k: v for k, v in fields.items() if k in allowed}
+    if not updates:
+        return False
+    set_clause = ", ".join(f"{k} = ?" for k in updates)
+    values = list(updates.values()) + [player_id]
+    conn.execute(f"UPDATE players SET {set_clause} WHERE id = ?", values)
+    conn.commit()
+    return conn.total_changes > 0

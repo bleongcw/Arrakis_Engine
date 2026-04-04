@@ -19,6 +19,7 @@ const IDLE_STATE: PipelineState = {
   error: null,
   started_at: null,
   finished_at: null,
+  triggered_by: null,
 };
 
 export function usePipeline() {

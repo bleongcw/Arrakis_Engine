@@ -1,3 +1,7 @@
+# ArrakisEngine — Chess Coaching AI
+# Copyright (C) 2026 Bernard Leong
+# Licensed under AGPL-3.0. See LICENSE file.
+
 """Markdown report generator for ArrakisEngine.
 
 Generates weekly/monthly coach reports with game summaries,
@@ -188,11 +192,18 @@ def build_report_data(player_username: str, period: str = "weekly",
             "win_rate": wr,
         })
 
+    # Cap swing_cp at 1000 to match patterns.py and prevent old uncapped data from distorting ACPL
+    EVAL_CAP = 1000
+
+    def _capped_loss(m):
+        """Cap swing_cp at EVAL_CAP to prevent old uncapped data from distorting ACPL."""
+        return min(m["swing_cp"] or 0, EVAL_CAP)
+
     # Game list
     game_list = []
     for g in games:
         player_moves = [m for m in moves_by_game.get(g["id"], []) if m["side"] == g["player_color"]]
-        game_acpl = round(sum(m["swing_cp"] or 0 for m in player_moves) / len(player_moves), 1) if player_moves else None
+        game_acpl = round(sum(_capped_loss(m) for m in player_moves) / len(player_moves), 1) if player_moves else None
         game_list.append({
             "game_id": g["id"],
             "game_url": g.get("game_url"),
@@ -209,7 +220,7 @@ def build_report_data(player_username: str, period: str = "weekly",
         if m["side"] == g["player_color"]
     ]
     period_acpl = round(
-        sum(m["swing_cp"] or 0 for m in all_player_moves) / len(all_player_moves), 1
+        sum(_capped_loss(m) for m in all_player_moves) / len(all_player_moves), 1
     ) if all_player_moves else None
 
     acpl_interpretation = None
@@ -235,12 +246,13 @@ def build_report_data(player_username: str, period: str = "weekly",
     phases = {"opening": [], "middlegame": [], "endgame": []}
     for m in all_player_moves:
         mn = m["move_number"]
+        loss = _capped_loss(m)
         if mn <= 15:
-            phases["opening"].append(m["swing_cp"] or 0)
+            phases["opening"].append(loss)
         elif mn <= 30:
-            phases["middlegame"].append(m["swing_cp"] or 0)
+            phases["middlegame"].append(loss)
         else:
-            phases["endgame"].append(m["swing_cp"] or 0)
+            phases["endgame"].append(loss)
 
     phase_data = {}
     worst_phase = None

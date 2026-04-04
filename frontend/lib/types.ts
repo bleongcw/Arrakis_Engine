@@ -277,6 +277,15 @@ export interface ReportData {
   recommendations?: string[];
 }
 
+export interface ScheduleState {
+  enabled: boolean;
+  interval_hours: number;
+  next_run_time: string | null;
+  last_run_at: string | null;
+  last_run_status: "success" | "error" | "skipped" | null;
+  last_run_message: string | null;
+}
+
 export interface PipelineState {
   task: "harvest" | "analyze" | "patterns" | "run_all" | null;
   status: "running" | "complete" | "error" | "idle";
@@ -291,6 +300,28 @@ export interface PipelineState {
   error: string | null;
   started_at: string | null;
   finished_at: string | null;
+  triggered_by: "manual" | "schedule" | null;
+}
+
+export interface AnalysisSettings {
+  stockfish_path: string;
+  depth: number;
+  threads: number;
+  hash_mb: number;
+  move_time_limit: number;
+  months_lookback: number;
+}
+
+export interface ApiKeyStatus {
+  anthropic_configured: boolean;
+  anthropic_key_hint: string | null;
+  openai_configured: boolean;
+  openai_key_hint: string | null;
+}
+
+export interface SettingsData {
+  analysis: AnalysisSettings;
+  api_keys: ApiKeyStatus;
 }
 
 export interface StatusResponse {

@@ -1,3 +1,7 @@
+# ArrakisEngine — Chess Coaching AI
+# Copyright (C) 2026 Bernard Leong
+# Licensed under AGPL-3.0. See LICENSE file.
+
 """Live dashboard HTTP server with SQLite API endpoints.
 
 Serves the dashboard static files AND provides /api/* endpoints
@@ -8,6 +12,7 @@ analyzer is writing — SQLite WAL mode supports concurrent readers.
 import http.server
 import json
 import logging
+import os
 import re
 import shutil
 import threading
@@ -16,10 +21,15 @@ from functools import partial
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 
-from src.models import get_connection
+import yaml
+
+from src.models import get_connection, update_player
 from src.tiers import get_tier
 
 logger = logging.getLogger(__name__)
+
+# Module-level scheduler manager, set by run_dashboard()
+_scheduler_manager = None
 
 
 def dict_from_row(row):
@@ -51,7 +61,9 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         content_length = int(self.headers.get("Content-Length", 0))
         body = json.loads(self.rfile.read(content_length)) if content_length else {}
 
-        if path == "/api/coach":
+        if path == "/api/players":
+            self._handle_create_player(body)
+        elif path == "/api/coach":
             self._handle_coach(body)
         elif path == "/api/trend-summary":
             self._handle_trend_summary(body)
@@ -63,6 +75,37 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             self._handle_pipeline_patterns(body)
         elif path == "/api/pipeline/run-all":
             self._handle_pipeline_run_all(body)
+        elif path == "/api/schedule/toggle":
+            self._handle_schedule_toggle(body)
+        elif path == "/api/schedule/interval":
+            self._handle_schedule_interval(body)
+        else:
+            self._send_json({"error": "Not found"}, 404)
+
+    def do_PUT(self):
+        parsed = urlparse(self.path)
+        path = parsed.path
+
+        content_length = int(self.headers.get("Content-Length", 0))
+        body = json.loads(self.rfile.read(content_length)) if content_length else {}
+
+        player_match = re.match(r"^/api/players/(\d+)$", path)
+        if player_match:
+            self._handle_update_player(int(player_match.group(1)), body)
+        elif path == "/api/settings/analysis":
+            self._handle_update_analysis_settings(body)
+        elif path == "/api/settings/api-keys":
+            self._handle_update_api_keys(body)
+        else:
+            self._send_json({"error": "Not found"}, 404)
+
+    def do_DELETE(self):
+        parsed = urlparse(self.path)
+        path = parsed.path
+
+        player_match = re.match(r"^/api/players/(\d+)$", path)
+        if player_match:
+            self._handle_delete_player(int(player_match.group(1)))
         else:
             self._send_json({"error": "Not found"}, 404)
 
@@ -70,7 +113,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         """Handle CORS preflight requests."""
         self.send_response(200)
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.send_header("Content-Length", "0")
         self.end_headers()
@@ -174,13 +217,238 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             "message": f"Trend summary generation started for {player_username}."
         })
 
+    # ── Player CRUD handlers ────────────────────────────────────
+
+    def _handle_create_player(self, body):
+        """Create a new player (or reactivate an archived one)."""
+        from src.models import ensure_player
+
+        username = (body.get("username") or "").strip().lower()
+        if not username:
+            self._send_json({"error": "username is required"}, 400)
+            return
+
+        conn = self._get_conn()
+        try:
+            existing = conn.execute(
+                "SELECT id, is_active FROM players WHERE username = ?", (username,)
+            ).fetchone()
+
+            if existing and existing["is_active"] == 1:
+                self._send_json({"error": f"Player '{username}' already exists"}, 409)
+                return
+
+            if existing and existing["is_active"] == 0:
+                # Reactivate archived player
+                conn.execute(
+                    "UPDATE players SET is_active = 1 WHERE id = ?", (existing["id"],)
+                )
+                update_player(
+                    conn, existing["id"],
+                    display_name=body.get("display_name"),
+                    age=body.get("age"),
+                    rating=body.get("rating"),
+                    fide_id=body.get("fide_id"),
+                    fide_rating=body.get("fide_rating"),
+                    lichess_username=body.get("lichess_username"),
+                )
+                conn.commit()
+                self._send_json({"status": "reactivated", "id": existing["id"]}, 201)
+                return
+
+            player_id = ensure_player(
+                conn, username,
+                display_name=body.get("display_name"),
+                age=body.get("age"),
+                rating=body.get("rating"),
+                fide_id=body.get("fide_id"),
+                fide_rating=body.get("fide_rating"),
+                lichess_username=body.get("lichess_username"),
+            )
+            self._send_json({"status": "created", "id": player_id}, 201)
+        finally:
+            conn.close()
+
+    def _handle_update_player(self, player_id, body):
+        """Update player fields. Username is not editable."""
+        conn = self._get_conn()
+        try:
+            existing = conn.execute(
+                "SELECT id FROM players WHERE id = ? AND is_active = 1", (player_id,)
+            ).fetchone()
+            if not existing:
+                self._send_json({"error": "Player not found"}, 404)
+                return
+
+            update_player(
+                conn, player_id,
+                display_name=body.get("display_name"),
+                age=body.get("age"),
+                rating=body.get("rating"),
+                fide_id=body.get("fide_id"),
+                fide_rating=body.get("fide_rating"),
+                lichess_username=body.get("lichess_username"),
+            )
+            self._send_json({"status": "updated", "id": player_id})
+        finally:
+            conn.close()
+
+    def _handle_delete_player(self, player_id):
+        """Archive a player (soft delete). Game history is preserved."""
+        conn = self._get_conn()
+        try:
+            existing = conn.execute(
+                "SELECT id, username FROM players WHERE id = ? AND is_active = 1",
+                (player_id,),
+            ).fetchone()
+            if not existing:
+                self._send_json({"error": "Player not found"}, 404)
+                return
+
+            game_count = conn.execute(
+                "SELECT COUNT(*) as c FROM games WHERE player_id = ?", (player_id,)
+            ).fetchone()["c"]
+
+            conn.execute("UPDATE players SET is_active = 0 WHERE id = ?", (player_id,))
+            conn.commit()
+            self._send_json({
+                "status": "archived",
+                "id": player_id,
+                "username": existing["username"],
+                "games_preserved": game_count,
+            })
+        finally:
+            conn.close()
+
+    # ── Settings handlers ────────────────────────────────────────
+
+    def _handle_settings_get(self):
+        """Return current analysis config + API key status."""
+        sf = self.config.get("stockfish", {})
+        analysis = self.config.get("analysis", {})
+
+        # Mask API keys — coach.py uses the ARRAKIS_ prefix
+        anthropic_key = os.environ.get("ARRAKIS_ANTHROPIC_API_KEY", "")
+        openai_key = os.environ.get("ARRAKIS_OPENAI_API_KEY", "")
+
+        def mask_key(key):
+            if not key or len(key) < 8:
+                return None
+            return key[:6] + "\u2022" * 6 + key[-4:]
+
+        return {
+            "analysis": {
+                "stockfish_path": sf.get("path", shutil.which("stockfish") or "stockfish"),
+                "depth": sf.get("depth", 22),
+                "threads": sf.get("threads", 6),
+                "hash_mb": sf.get("hash_mb", 512),
+                "move_time_limit": sf.get("move_time_limit", 10.0),
+                "months_lookback": analysis.get("months_lookback", 6),
+            },
+            "api_keys": {
+                "anthropic_configured": bool(anthropic_key),
+                "anthropic_key_hint": mask_key(anthropic_key),
+                "openai_configured": bool(openai_key),
+                "openai_key_hint": mask_key(openai_key),
+            },
+        }
+
+    def _handle_update_analysis_settings(self, body):
+        """Update analysis settings in config.yaml and in-memory config."""
+        config_path = Path("config.yaml")
+        if not config_path.exists():
+            self._send_json({"error": "config.yaml not found"}, 500)
+            return
+
+        try:
+            with open(config_path, "r") as f:
+                file_config = yaml.safe_load(f) or {}
+
+            # Update stockfish settings
+            sf = file_config.setdefault("stockfish", {})
+            if "stockfish_path" in body:
+                path_val = body["stockfish_path"]
+                if path_val and not Path(path_val).is_file():
+                    self._send_json(
+                        {"error": f"Stockfish not found at: {path_val}", "field": "stockfish_path"},
+                        400,
+                    )
+                    return
+                sf["path"] = path_val
+            if "depth" in body:
+                sf["depth"] = max(1, min(30, int(body["depth"])))
+            if "threads" in body:
+                sf["threads"] = max(1, min(32, int(body["threads"])))
+            if "hash_mb" in body:
+                sf["hash_mb"] = max(64, min(4096, int(body["hash_mb"])))
+            if "move_time_limit" in body:
+                sf["move_time_limit"] = max(1.0, min(60.0, float(body["move_time_limit"])))
+
+            # Update analysis settings
+            analysis = file_config.setdefault("analysis", {})
+            if "months_lookback" in body:
+                analysis["months_lookback"] = max(1, min(24, int(body["months_lookback"])))
+
+            with open(config_path, "w") as f:
+                yaml.safe_dump(file_config, f, default_flow_style=False, sort_keys=False)
+
+            # Update in-memory config
+            self.config["stockfish"] = sf
+            self.config["analysis"] = analysis
+
+            self._send_json({"status": "saved"})
+
+        except Exception as e:
+            logger.exception("Failed to update analysis settings: %s", e)
+            self._send_json({"error": str(e)}, 500)
+
+    def _handle_update_api_keys(self, body):
+        """Update API keys in .env and os.environ."""
+        env_path = Path(".env")
+        env_lines = []
+        if env_path.exists():
+            env_lines = env_path.read_text().splitlines()
+
+        def set_env_line(lines, key, value):
+            """Update or add a KEY=value line."""
+            for i, line in enumerate(lines):
+                if line.startswith(f"{key}="):
+                    lines[i] = f"{key}={value}"
+                    return lines
+            lines.append(f"{key}={value}")
+            return lines
+
+        updated = []
+        anthropic_key = (body.get("anthropic_key") or "").strip()
+        openai_key = (body.get("openai_key") or "").strip()
+
+        if anthropic_key:
+            env_lines = set_env_line(env_lines, "ARRAKIS_ANTHROPIC_API_KEY", anthropic_key)
+            os.environ["ARRAKIS_ANTHROPIC_API_KEY"] = anthropic_key
+            updated.append("anthropic")
+
+        if openai_key:
+            env_lines = set_env_line(env_lines, "ARRAKIS_OPENAI_API_KEY", openai_key)
+            os.environ["ARRAKIS_OPENAI_API_KEY"] = openai_key
+            updated.append("openai")
+
+        if not updated:
+            self._send_json({"error": "No keys provided"}, 400)
+            return
+
+        try:
+            env_path.write_text("\n".join(env_lines) + "\n")
+            self._send_json({"status": "saved", "updated": updated})
+        except Exception as e:
+            logger.exception("Failed to write .env: %s", e)
+            self._send_json({"error": str(e)}, 500)
+
     # ── Pipeline handlers ────────────────────────────────────────
 
     def _handle_pipeline_harvest(self, body):
         """Trigger game harvesting from Chess.com/Lichess."""
         from src import pipeline_state
         from src.harvester import harvest_player
-        from src.models import init_db, ensure_player
 
         if not pipeline_state.start_task("harvest"):
             current = pipeline_state.current_task()
@@ -193,35 +461,33 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         config = self.config
         db_path = self.db_path
         player_filter = body.get("player")
-        players = config.get("players", [])
         months = config.get("analysis", {}).get("months_lookback", 6)
-
-        if player_filter:
-            players = [p for p in players if p["username"] == player_filter]
 
         def run():
             try:
+                # Read active players from DB
+                conn = get_connection(db_path)
+                if player_filter:
+                    rows = conn.execute(
+                        "SELECT * FROM players WHERE COALESCE(is_active, 1) = 1 AND username = ?",
+                        (player_filter,),
+                    ).fetchall()
+                else:
+                    rows = conn.execute(
+                        "SELECT * FROM players WHERE COALESCE(is_active, 1) = 1"
+                    ).fetchall()
+                conn.close()
+                players = [dict(r) for r in rows]
+
                 total_new = 0
                 total_errors = 0
                 for i, player in enumerate(players):
                     username = player["username"]
-                    display_name = player.get("display_name", username)
+                    display_name = player.get("display_name") or username
                     pipeline_state.update_progress(
                         f"Fetching games for {display_name}...",
                         {"current_step": i + 1, "total_steps": len(players)},
                     )
-
-                    conn = init_db(db_path)
-                    ensure_player(
-                        conn, username,
-                        display_name=player.get("display_name"),
-                        age=player.get("age"),
-                        rating=player.get("rating"),
-                        fide_id=player.get("fide_id"),
-                        fide_rating=player.get("fide_rating"),
-                        lichess_username=player.get("lichess_username"),
-                    )
-                    conn.close()
 
                     stats = harvest_player(
                         username, db_path=db_path, months=months,
@@ -258,7 +524,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         config = self.config
         db_path = self.db_path
         sf_config = config.get("stockfish", {})
-        sf_path = sf_config.get("path", "/usr/local/bin/stockfish")
+        sf_path = sf_config.get("path", shutil.which("stockfish") or "stockfish")
 
         # Validate Stockfish binary
         if not Path(sf_path).is_file():
@@ -354,12 +620,12 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 conn = get_connection(db_path)
                 if player_filter:
                     rows = conn.execute(
-                        "SELECT id, username, display_name FROM players WHERE username = ?",
+                        "SELECT id, username, display_name FROM players WHERE COALESCE(is_active, 1) = 1 AND username = ?",
                         (player_filter,),
                     ).fetchall()
                 else:
                     rows = conn.execute(
-                        "SELECT id, username, display_name FROM players"
+                        "SELECT id, username, display_name FROM players WHERE COALESCE(is_active, 1) = 1"
                     ).fetchall()
                 conn.close()
 
@@ -385,10 +651,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
     def _handle_pipeline_run_all(self, body):
         """Chain harvest -> analyze -> patterns."""
         from src import pipeline_state
-        from src.harvester import harvest_player
-        from src.analyzer import analyze_pending
-        from src.patterns import compute_player_patterns
-        from src.models import init_db, ensure_player
+        from src.scheduler import run_full_pipeline
 
         if not pipeline_state.start_task("run_all"):
             current = pipeline_state.current_task()
@@ -401,139 +664,11 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         config = self.config
         db_path = self.db_path
         player_filter = body.get("player")
-        players = config.get("players", [])
-        months = config.get("analysis", {}).get("months_lookback", 6)
-        sf_config = config.get("stockfish", {})
-        sf_path = sf_config.get("path", "/usr/local/bin/stockfish")
-
-        if player_filter:
-            players = [p for p in players if p["username"] == player_filter]
-
-        # Validate stockfish
-        if not Path(sf_path).is_file():
-            found = shutil.which("stockfish")
-            if found:
-                sf_path = found
-            else:
-                pipeline_state.fail_task(
-                    "Stockfish not found. Install it with: brew install stockfish"
-                )
-                self._send_json({"status": "started", "message": "Starting pipeline..."})
-                return
 
         def run():
             try:
-                # Step 1: Harvest
-                pipeline_state.update_progress(
-                    "Step 1/3: Fetching new games...",
-                    {"current_step": 1, "total_steps": 3},
-                )
-                total_new = 0
-                total_errors = 0
-                for player in players:
-                    username = player["username"]
-                    display = player.get("display_name", username)
-                    pipeline_state.update_progress(
-                        f"Step 1/3: Fetching games for {display}...",
-                        {"current_step": 1, "total_steps": 3},
-                    )
-
-                    conn = init_db(db_path)
-                    ensure_player(
-                        conn, username,
-                        display_name=player.get("display_name"),
-                        age=player.get("age"),
-                        rating=player.get("rating"),
-                        fide_id=player.get("fide_id"),
-                        fide_rating=player.get("fide_rating"),
-                        lichess_username=player.get("lichess_username"),
-                    )
-                    conn.close()
-
-                    stats = harvest_player(
-                        username, db_path=db_path, months=months,
-                        lichess_username=player.get("lichess_username"),
-                    )
-                    total_new += stats.get("new", 0)
-                    total_errors += stats.get("errors", 0)
-
-                # Step 2: Analyze
-                conn = get_connection(db_path)
-                total_pending = conn.execute(
-                    "SELECT COUNT(*) as c FROM games WHERE analysis_status = 'pending'"
-                ).fetchone()["c"]
-                conn.close()
-
-                pipeline_state.update_progress(
-                    f"Step 2/3: Analyzing {total_pending} games...",
-                    {"current_step": 2, "total_steps": 3, "games_total": total_pending, "games_processed": 0},
-                )
-
-                # Progress polling for analyze
-                stop_polling = threading.Event()
-
-                def poll_progress():
-                    while not stop_polling.is_set():
-                        try:
-                            c = get_connection(db_path)
-                            remaining = c.execute(
-                                "SELECT COUNT(*) as c FROM games WHERE analysis_status = 'pending'"
-                            ).fetchone()["c"]
-                            c.close()
-                            done = total_pending - remaining
-                            pipeline_state.update_progress(
-                                f"Step 2/3: Analyzing game {done} of {total_pending}...",
-                                {"current_step": 2, "total_steps": 3, "games_total": total_pending, "games_processed": done},
-                            )
-                        except Exception:
-                            pass
-                        stop_polling.wait(3)
-
-                if total_pending > 0:
-                    poller = threading.Thread(target=poll_progress, daemon=True)
-                    poller.start()
-
-                games_analyzed = analyze_pending(
-                    stockfish_path=sf_path,
-                    depth=sf_config.get("depth", 22),
-                    threads=sf_config.get("threads", 6),
-                    hash_mb=sf_config.get("hash_mb", 512),
-                    move_time_limit=sf_config.get("move_time_limit", 10.0),
-                    db_path=db_path,
-                )
-
-                if total_pending > 0:
-                    stop_polling.set()
-                    poller.join(timeout=5)
-
-                # Step 3: Patterns
-                pipeline_state.update_progress(
-                    "Step 3/3: Updating insights...",
-                    {"current_step": 3, "total_steps": 3},
-                )
-                conn = get_connection(db_path)
-                player_rows = conn.execute(
-                    "SELECT id, username, display_name FROM players"
-                ).fetchall()
-                conn.close()
-
-                players_updated = 0
-                for row in player_rows:
-                    display = row["display_name"] or row["username"]
-                    pipeline_state.update_progress(
-                        f"Step 3/3: Computing insights for {display}...",
-                        {"current_step": 3, "total_steps": 3},
-                    )
-                    compute_player_patterns(row["id"], db_path=db_path)
-                    players_updated += 1
-
-                pipeline_state.complete_task({
-                    "new_games": total_new,
-                    "games_analyzed": games_analyzed,
-                    "players_updated": players_updated,
-                    "errors": total_errors,
-                })
-
+                result = run_full_pipeline(config, db_path, player_filter=player_filter)
+                pipeline_state.complete_task(result)
             except Exception as e:
                 logger.exception("Pipeline run-all failed: %s", e)
                 pipeline_state.fail_task(str(e))
@@ -561,6 +696,10 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 data = self._api_status()
             elif path == "/api/pipeline/status":
                 data = self._api_pipeline_status()
+            elif path == "/api/settings":
+                data = self._handle_settings_get()
+            elif path == "/api/schedule/status":
+                data = self._api_schedule_status()
             else:
                 self._send_json({"error": "Not found"}, 404)
                 return
@@ -568,8 +707,16 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             self._send_json(data)
 
         except Exception as e:
-            logger.exception("API error: %s", e)
-            self._send_json({"error": str(e)}, 500)
+            import sqlite3 as _sqlite3
+            if isinstance(e, _sqlite3.OperationalError) and "locked" in str(e):
+                logger.warning("API request hit DB lock: %s %s", path, e)
+                self._send_json(
+                    {"error": "Database is busy (analysis in progress). Please try again in a moment."},
+                    503,
+                )
+            else:
+                logger.exception("API error: %s", e)
+                self._send_json({"error": str(e)}, 500)
 
     def _send_json(self, data, status=200):
         """Send a JSON response."""
@@ -590,7 +737,9 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
     def _api_players(self):
         conn = self._get_conn()
         try:
-            rows = conn.execute("SELECT * FROM players").fetchall()
+            rows = conn.execute(
+                "SELECT * FROM players WHERE COALESCE(is_active, 1) = 1"
+            ).fetchall()
             players = []
             for r in rows:
                 p = dict_from_row(r)
@@ -831,6 +980,40 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         from src import pipeline_state
         return pipeline_state.get_state()
 
+    def _api_schedule_status(self):
+        if hasattr(self, '_scheduler_manager') and self._scheduler_manager:
+            return self._scheduler_manager.get_state()
+        # Fallback: read from module-level manager stored during run_dashboard
+        from src.scheduler import get_schedule_state
+        return get_schedule_state()
+
+    def _handle_schedule_toggle(self, body):
+        enabled = body.get("enabled")
+        if enabled is None:
+            self._send_json({"error": "enabled field required"}, 400)
+            return
+        manager = _scheduler_manager
+        if not manager:
+            self._send_json({"error": "Scheduler not initialized"}, 500)
+            return
+        if enabled:
+            manager.enable()
+        else:
+            manager.disable()
+        self._send_json(manager.get_state())
+
+    def _handle_schedule_interval(self, body):
+        hours = body.get("hours")
+        if not hours or not isinstance(hours, (int, float)) or hours < 1:
+            self._send_json({"error": "hours must be >= 1"}, 400)
+            return
+        manager = _scheduler_manager
+        if not manager:
+            self._send_json({"error": "Scheduler not initialized"}, 500)
+            return
+        manager.update_interval(int(hours))
+        self._send_json(manager.get_state())
+
     def log_message(self, format, *args):
         """Suppress default access logs for cleaner output."""
         if "/api/" in str(args[0]) if args else False:
@@ -840,13 +1023,31 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
 def run_dashboard(db_path: str, port: int = 8000, config: dict | None = None,
                   static_dir: str = "dashboard"):
     """Start the live dashboard server."""
+    global _scheduler_manager
+    config = config or {}
+
+    # Ensure DB migrations are applied (e.g. is_active column)
+    from src.models import init_db
+    init_db(db_path)
+
+    # Start the scheduler
+    from src.scheduler import SchedulerManager
+    _scheduler_manager = SchedulerManager(config, db_path)
+    _scheduler_manager.start()
+
     handler = partial(DashboardHandler, directory=static_dir, db_path=db_path,
-                      config=config or {})
+                      config=config)
     with http.server.HTTPServer(("", port), handler) as httpd:
+        sched_config = config.get("schedule", {})
+        sched_status = "enabled" if sched_config.get("enabled") else "disabled"
+        interval = sched_config.get("interval_hours", 6)
+
         print(f"\U0001f3f0 ArrakisEngine Dashboard running at http://localhost:{port}")
         print(f"\U0001f4ca Live data from: {db_path}")
+        print(f"\U0001f552 Auto-updates: {sched_status} (every {interval}h)")
         print("Press Ctrl+C to stop.\n")
         try:
             httpd.serve_forever()
         except KeyboardInterrupt:
+            _scheduler_manager.stop()
             print("\nDashboard stopped.")

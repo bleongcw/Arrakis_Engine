@@ -1,3 +1,7 @@
+# ArrakisEngine — Chess Coaching AI
+# Copyright (C) 2026 Bernard Leong
+# Licensed under AGPL-3.0. See LICENSE file.
+
 """In-memory pipeline task state store.
 
 Tracks the currently running pipeline task (harvest, analyze, patterns, run_all).
@@ -10,18 +14,19 @@ from datetime import datetime
 
 _lock = threading.Lock()
 _state = {
-    "task": None,       # "harvest" | "analyze" | "patterns" | "run_all" | None
-    "status": "idle",   # "running" | "complete" | "error" | "idle"
-    "progress": "",     # Human-readable progress text
-    "detail": None,     # { current_step, total_steps, games_processed, games_total }
-    "result": None,     # Set on completion
-    "error": None,      # Set on error
+    "task": None,           # "harvest" | "analyze" | "patterns" | "run_all" | None
+    "status": "idle",       # "running" | "complete" | "error" | "idle"
+    "progress": "",         # Human-readable progress text
+    "detail": None,         # { current_step, total_steps, games_processed, games_total }
+    "result": None,         # Set on completion
+    "error": None,          # Set on error
     "started_at": None,
     "finished_at": None,
+    "triggered_by": None,   # "manual" | "schedule" | None
 }
 
 
-def start_task(task_name: str) -> bool:
+def start_task(task_name: str, triggered_by: str = "manual") -> bool:
     """Try to start a new task. Returns False if another task is running."""
     with _lock:
         if _state["status"] == "running":
@@ -34,6 +39,7 @@ def start_task(task_name: str) -> bool:
         _state["error"] = None
         _state["started_at"] = datetime.now().isoformat()
         _state["finished_at"] = None
+        _state["triggered_by"] = triggered_by
         return True
 
 

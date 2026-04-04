@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, type ReactNode } from "react";
 import { usePipeline } from "@/hooks/use-pipeline";
+import { useSchedule } from "@/hooks/use-schedule";
 import { usePlayerContext } from "@/app/providers";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
@@ -29,6 +30,30 @@ function friendlyResult(result: Record<string, number>): string {
   }
   return parts.length > 0 ? parts.join(", ") : "Done!";
 }
+
+// ── Time helpers ─────────────────────────────────────────
+
+function relativeTime(isoString: string | null): string {
+  if (!isoString) return "";
+  const diff = new Date(isoString).getTime() - Date.now();
+  const absDiff = Math.abs(diff);
+  const minutes = Math.round(absDiff / 60000);
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+
+  if (diff > 0) {
+    // Future
+    if (hours > 0) return `in ${hours}h ${mins}m`;
+    return `in ${mins}m`;
+  } else {
+    // Past
+    if (hours > 0) return `${hours}h ${mins}m ago`;
+    if (mins > 0) return `${mins}m ago`;
+    return "just now";
+  }
+}
+
+const INTERVAL_OPTIONS = [1, 3, 6, 12, 24];
 
 // ── Tooltip component ────────────────────────────────────
 
@@ -321,7 +346,109 @@ export function PipelineControlPanel() {
             </button>
           </div>
         )}
+
+        {/* Automatic Updates section */}
+        <AutomaticUpdates />
       </CardContent>
     </Card>
+  );
+}
+
+// ── Automatic Updates sub-component ──────────────────────
+
+function AutomaticUpdates() {
+  const { state: sched, toggle, updateInterval } = useSchedule();
+  const [schedError, setSchedError] = useState<string | null>(null);
+
+  const handleToggle = async () => {
+    setSchedError(null);
+    try {
+      await toggle(!sched.enabled);
+    } catch (e: unknown) {
+      setSchedError(e instanceof Error ? e.message : "Failed to toggle schedule.");
+    }
+  };
+
+  const handleInterval = async (hours: number) => {
+    setSchedError(null);
+    try {
+      await updateInterval(hours);
+    } catch (e: unknown) {
+      setSchedError(e instanceof Error ? e.message : "Failed to update interval.");
+    }
+  };
+
+  return (
+    <div className="border-t pt-4 space-y-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="text-sm font-medium text-muted-foreground">
+          Automatic Updates
+        </span>
+
+        {/* Toggle */}
+        <button
+          onClick={handleToggle}
+          className={cn(
+            "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none",
+            sched.enabled ? "bg-blue-600" : "bg-muted"
+          )}
+          role="switch"
+          aria-checked={sched.enabled}
+        >
+          <span
+            className={cn(
+              "pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200",
+              sched.enabled ? "translate-x-5" : "translate-x-0"
+            )}
+          />
+        </button>
+
+        {/* Interval selector */}
+        <span className={cn("text-sm", !sched.enabled && "text-muted-foreground/50")}>
+          Every
+        </span>
+        <select
+          value={sched.interval_hours}
+          onChange={(e) => handleInterval(Number(e.target.value))}
+          disabled={!sched.enabled}
+          className="px-2 py-1 rounded-md border text-sm bg-background disabled:opacity-50"
+        >
+          {INTERVAL_OPTIONS.map((h) => (
+            <option key={h} value={h}>
+              {h} {h === 1 ? "hour" : "hours"}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {/* Schedule info */}
+      {sched.enabled && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+          {sched.next_run_time && (
+            <span>Next run: {relativeTime(sched.next_run_time)}</span>
+          )}
+          {sched.last_run_at && (
+            <span>
+              Last: {relativeTime(sched.last_run_at)}
+              {sched.last_run_status === "success" && sched.last_run_message && (
+                <span className="text-emerald-600 dark:text-emerald-400">
+                  {" "}({sched.last_run_message})
+                </span>
+              )}
+              {sched.last_run_status === "skipped" && (
+                <span className="text-amber-600 dark:text-amber-400"> (skipped)</span>
+              )}
+              {sched.last_run_status === "error" && (
+                <span className="text-red-600 dark:text-red-400"> (failed)</span>
+              )}
+            </span>
+          )}
+        </div>
+      )}
+
+      {schedError && (
+        <p className="text-xs text-amber-600 dark:text-amber-400">{schedError}</p>
+      )}
+    </div>
   );
 }
