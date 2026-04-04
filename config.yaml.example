@@ -15,7 +15,12 @@ players:
     rating: null
 
 stockfish:
-  path: /opt/homebrew/bin/stockfish
+  # Stockfish binary path — adjust for your system:
+  #   macOS (Homebrew ARM): /opt/homebrew/bin/stockfish
+  #   macOS (Homebrew Intel): /usr/local/bin/stockfish
+  #   Linux: /usr/bin/stockfish
+  #   Any OS (if on PATH): stockfish
+  path: stockfish
   depth: 22
   threads: 6
   hash_mb: 512

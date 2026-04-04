@@ -1,3 +1,7 @@
+# ArrakisEngine — Chess Coaching AI
+# Copyright (C) 2026 Bernard Leong
+# Licensed under AGPL-3.0. See LICENSE file.
+
 """Multi-platform game harvester for ArrakisEngine.
 
 Fetches games from chess.com and lichess.org, deduplicates

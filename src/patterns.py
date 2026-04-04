@@ -1,3 +1,7 @@
+# ArrakisEngine — Chess Coaching AI
+# Copyright (C) 2026 Bernard Leong
+# Licensed under AGPL-3.0. See LICENSE file.
+
 """Cross-game pattern detection for ArrakisEngine.
 
 Aggregates analysis across all games per player to find recurring

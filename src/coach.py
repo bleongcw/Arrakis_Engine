@@ -1,3 +1,7 @@
+# ArrakisEngine — Chess Coaching AI
+# Copyright (C) 2026 Bernard Leong
+# Licensed under AGPL-3.0. See LICENSE file.
+
 """LLM coaching layer for ArrakisEngine.
 
 Generates age-appropriate coaching insights from Stockfish analysis
