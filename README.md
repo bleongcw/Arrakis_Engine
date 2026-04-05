@@ -1,6 +1,6 @@
 # Arrakis Engine
 
-A local Python application that pulls games from **Chess.com** and **Lichess**, runs deep Stockfish analysis on every move, and uses **reasoning LLMs** (Claude Opus 4.6 / ChatGPT 5.4 Pro) to generate age-appropriate coaching insights. Built for tracking improvement over time with pattern detection, a live web dashboard, and exportable coach-ready reports.
+A local Python application that pulls games from **Chess.com** and **Lichess**, runs deep Stockfish analysis on every move, and uses **reasoning LLMs** (Claude Opus 4.6 / GPT-5.4) to generate age-appropriate coaching insights. Built for tracking improvement over time with pattern detection, a live web dashboard, and exportable coach-ready reports.
 
 Inspired by my three children — Eleanor, Evan, and Estella — and their journey learning chess.
 
@@ -189,7 +189,7 @@ analysis:
 coaching:
   default_provider: claude            # or "openai"
   anthropic_model: claude-opus-4-6
-  openai_model: gpt-5.4-pro        # reasoning model (required)
+  openai_model: gpt-5.4        # reasoning model (required)
 
 database:
   path: data/chess_coach.db
@@ -262,9 +262,9 @@ python main.py coach --limit 5
 python main.py coach --provider openai --limit 5
 ```
 
-> **⚠️ LLM Cost Warning:** Each coaching call sends a detailed prompt (~3,000–7,000 tokens) and receives a structured response (~2,000–4,000 tokens). At current API pricing, coaching a single game costs approximately **$0.03–0.10 with Claude Opus 4.6** and **$0.02–0.08 with ChatGPT 5.4 Pro**. For a backlog of 400+ games, this can add up to **$15–40 or more**. Start with `--limit 5` to verify quality and estimate your costs before running large batches. Monitor your API usage dashboards at [Anthropic Console](https://console.anthropic.com/) or [OpenAI Platform](https://platform.openai.com/usage).
+> **⚠️ LLM Cost Warning:** Each coaching call sends a detailed prompt (~3,000–7,000 tokens) and receives a structured response (~2,000–4,000 tokens). At current API pricing, coaching a single game costs approximately **$0.03–0.10 with Claude Opus 4.6** and **$0.02–0.08 with GPT-5.4**. For a backlog of 400+ games, this can add up to **$15–40 or more**. Start with `--limit 5` to verify quality and estimate your costs before running large batches. Monitor your API usage dashboards at [Anthropic Console](https://console.anthropic.com/) or [OpenAI Platform](https://platform.openai.com/usage).
 
-> **Rate limits:** OpenAI's `gpt-5.4-pro` has a 10,000 TPM limit (~1 game/min on free/low tiers). Use `--limit 5` per batch to avoid 429 errors. Claude typically has higher throughput — `--limit 10-20` is safe. The dashboard shows which model was used for each game's coaching (purple badge = Claude, green badge = OpenAI).
+> **Rate limits:** OpenAI's `gpt-5.4` has a 10,000 TPM limit (~1 game/min on free/low tiers). Use `--limit 5` per batch to avoid 429 errors. Claude typically has higher throughput — `--limit 10-20` is safe. The dashboard shows which model was used for each game's coaching (purple badge = Claude, green badge = OpenAI).
 
 > **Dashboard coaching:** You can also coach individual games directly from the dashboard — click the 🟣 **Coach with Claude** or 🟢 **Coach with ChatGPT** button on any game's detail page. Results auto-refresh when complete.
 
@@ -409,7 +409,7 @@ Chess coaching demands multi-step reasoning at every level:
 | Provider | Model | API Identifier | Notes |
 |---|---|---|---|
 | Anthropic | Claude Opus 4.6 | `claude-opus-4-6` | Extended thinking, excellent coaching tone |
-| OpenAI | ChatGPT 5.4 Pro | `gpt-5.4-pro` | Strong reasoning via Responses API |
+| OpenAI | GPT-5.4 | `gpt-5.4` | Strong reasoning via Responses API |
 | Google | Gemini 2.5 Pro | `gemini-2.5-pro` | Long context, strong reasoning |
 | xAI | Grok 3 | `grok-3` | OpenAI-compatible API |
 | Mistral | Mistral Medium | `mistral-medium-latest` | European alternative |

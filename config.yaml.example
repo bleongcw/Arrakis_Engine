@@ -39,7 +39,7 @@ coaching:
 
   # Cloud providers — set API keys in .env
   anthropic_model: claude-opus-4-6        # Anthropic Claude (ARRAKIS_ANTHROPIC_API_KEY)
-  openai_model: gpt-5.4-pro           # OpenAI ChatGPT (ARRAKIS_OPENAI_API_KEY)
+  openai_model: gpt-5.4           # OpenAI ChatGPT (ARRAKIS_OPENAI_API_KEY)
   gemini_model: gemini-2.5-pro            # Google Gemini (ARRAKIS_GOOGLE_API_KEY)
   grok_model: grok-3                      # xAI Grok (ARRAKIS_XAI_API_KEY)
   mistral_model: mistral-medium-latest    # Mistral AI (ARRAKIS_MISTRAL_API_KEY)

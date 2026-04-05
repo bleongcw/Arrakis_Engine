@@ -38,7 +38,7 @@ PROVIDER_REGISTRY = {
     "openai": {
         "display_name": "ChatGPT",
         "sdk_type": "openai_responses",
-        "default_model": "gpt-5.4-pro",
+        "default_model": "gpt-5.4",
         "env_var": "ARRAKIS_OPENAI_API_KEY",
         "base_url": None,
         "default_timeout": 120.0,
