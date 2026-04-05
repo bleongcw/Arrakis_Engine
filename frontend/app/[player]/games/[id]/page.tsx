@@ -11,8 +11,6 @@ import { EvalChart } from "@/components/game-detail/eval-chart";
 import { MoveQualitySummary } from "@/components/game-detail/move-quality-summary";
 import { CoachingPanels } from "@/components/game-detail/coaching-panels";
 import { CoachingButtons } from "@/components/game-detail/coaching-buttons";
-import { TierBadge } from "@/components/tier-badge";
-import { usePlayerContext } from "@/app/providers";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { GameDetail } from "@/lib/types";
@@ -50,15 +48,7 @@ function GameDetailView({
 }) {
   const router = useRouter();
   const { game, moves, coaching } = detail;
-  const { players } = usePlayerContext();
-
   const nav = useChessNavigation(game.pgn || "", game.player_color);
-
-  // Use current player's tier (from players API) instead of game-time tier
-  const currentPlayerData = players.find((p) => p.username === playerUsername);
-  const tierName = currentPlayerData?.tier || game.tier;
-  const tierLabel = currentPlayerData?.tier_label || game.tier_label;
-  const tierIcon = currentPlayerData?.tier_icon || game.tier_icon;
 
   // Build score string
   const scoreMap = { win: game.player_color === "white" ? "1-0" : "0-1", loss: game.player_color === "white" ? "0-1" : "1-0", draw: "½-½" };
@@ -81,9 +71,6 @@ function GameDetailView({
           <Button variant="outline" size="sm" onClick={() => router.push(`/${playerUsername}/games`)}>
             &larr; Back to Games
           </Button>
-          {tierName && (
-            <TierBadge tier={tierName} label={tierLabel} icon={tierIcon} />
-          )}
         </div>
         <CoachingButtons
           gameId={game.id}
