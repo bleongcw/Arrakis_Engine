@@ -19,15 +19,45 @@ The frontend is a fully mobile-responsive Next.js 16 + React 19 dashboard with p
 
 ## Screenshots
 
-<!-- Replace these placeholders with actual screenshots -->
+### Dashboard — Pipeline Control Panel
 
-| Dashboard — Games List | Dashboard — Game Analysis |
-|---|---|
-| ![Games List](docs/screenshots/games-list-placeholder.png) | ![Game Analysis](docs/screenshots/game-analysis-placeholder.png) |
+![Dashboard](docs/screenshots/Arrakis-Engine-Dashboard.png)
 
-| Dashboard — Patterns | Coach Report |
-|---|---|
-| ![Patterns](docs/screenshots/patterns-placeholder.png) | ![Report](docs/screenshots/report-placeholder.png) |
+### Games List
+
+![Games List](docs/screenshots/Arrakis-Engine-Games.png)
+
+### Patterns — Coaching Summary & Rating Progression
+
+![Patterns — Coaching Summary](docs/screenshots/Arrakis-Engine-Patterns-1.png)
+
+### Patterns — ACPL Trend, Move Quality, Danger Zones & Phase Performance
+
+![Patterns — ACPL & Move Quality](docs/screenshots/Arrakis-Engine-Patterns-2.png)
+
+### Patterns — Critical Positions, Tactical Awareness & Resilience
+
+![Patterns — Tactical Metrics](docs/screenshots/Arrakis-Engine-Patterns-3.png)
+
+### Patterns — Opening Repertoire
+
+![Patterns — Opening Repertoire](docs/screenshots/Arrakis-Engine-Patterns-4.png)
+
+### Patterns — Focus Areas & Time Control Performance
+
+![Patterns — Focus Areas](docs/screenshots/Arrakis-Engine-Patterns-5.png)
+
+### Patterns — Time Pressure Analysis & Opening Quality
+
+![Patterns — Time Pressure](docs/screenshots/Arrakis-Engine-Patterns-6.png)
+
+### Patterns — Opening Explorer
+
+![Patterns — Opening Explorer](docs/screenshots/Arrakis-Engine-Patterns-7.png)
+
+### Reports — Chess Coaching Report
+
+![Reports](docs/screenshots/Arrakis-Engine-Reports.png)
 
 ## Requirements
 
