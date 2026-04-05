@@ -5,20 +5,16 @@
 """LLM coaching layer for ArrakisEngine.
 
 Generates age-appropriate coaching insights from Stockfish analysis
-using either Claude (claude-opus-4-6) or OpenAI (chatgpt-5.4-pro) reasoning models.
+using reasoning LLMs (Claude, ChatGPT, Gemini, Grok, Mistral, DeepSeek, Qwen, Ollama).
 """
 
 import json
 import logging
-import os
 import time
 
-from dotenv import load_dotenv
-
+from src.llm_providers import call_provider, resolve_model
 from src.models import init_db
 from src.tiers import get_tier
-
-load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -363,55 +359,13 @@ def _fetch_coaching_history(conn, player_id: int, current_game_id: int,
     return "\n".join(lines)
 
 
-def _call_claude(prompt: str, model: str, timeout: float = 120.0) -> str:
-    """Call Anthropic Claude API with extended thinking."""
-    import anthropic
-
-    api_key = os.getenv("ARRAKIS_ANTHROPIC_API_KEY")
-    if not api_key:
-        raise ValueError("ARRAKIS_ANTHROPIC_API_KEY not set in environment")
-
-    client = anthropic.Anthropic(api_key=api_key, timeout=timeout)
-
-    response = client.messages.create(
-        model=model,
-        max_tokens=16000,
-        thinking={
-            "type": "adaptive",
-        },
-        messages=[{"role": "user", "content": prompt}],
-    )
-
-    # Extract text from response (skip thinking blocks)
-    for block in response.content:
-        if block.type == "text":
-            return block.text
-
-    raise ValueError("No text content in Claude response")
-
-
-def _call_openai(prompt: str, model: str, timeout: float = 120.0) -> str:
-    """Call OpenAI Responses API."""
-    from openai import OpenAI
-
-    api_key = os.getenv("ARRAKIS_OPENAI_API_KEY")
-    if not api_key:
-        raise ValueError("ARRAKIS_OPENAI_API_KEY not set in environment")
-
-    client = OpenAI(api_key=api_key, timeout=timeout)
-
-    response = client.responses.create(
-        model=model,
-        instructions="You are an expert chess coach. Respond only with valid JSON.",
-        input=prompt,
-    )
-
-    return response.output_text
-
-
 def _parse_llm_response(text: str) -> dict:
-    """Parse JSON from LLM response, handling markdown code fences."""
+    """Parse JSON from LLM response, handling markdown fences and thinking tags."""
+    import re
+
     text = text.strip()
+    # Strip <think>...</think> blocks from reasoning models (DeepSeek-R1, Qwen3)
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
     if text.startswith("```"):
         # Remove code fences
         lines = text.split("\n")
@@ -572,18 +526,12 @@ def coach_game(game_id: int, provider: str | None = "claude",
     # Call LLM — use config defaults for provider/model if not explicitly specified
     if not provider:
         provider = coaching_config.get("default_provider", "claude")
-    logger.info("Coaching game %d with %s...", game_id, provider)
 
-    if provider == "claude":
-        default_model = coaching_config.get("anthropic_model", "claude-opus-4-6")
-        raw = _call_claude(prompt, model or default_model)
-    elif provider == "openai":
-        default_model = coaching_config.get("openai_model", "chatgpt-5.4-pro")
-        raw = _call_openai(prompt, model or default_model)
-    else:
-        raise ValueError(f"Unknown provider: {provider}")
+    used_model = resolve_model(provider, model, coaching_config)
+    logger.info("Coaching game %d with %s:%s...", game_id, provider, used_model)
 
-    used_model = model or default_model
+    raw = call_provider(provider, prompt, model=used_model,
+                        coaching_config=coaching_config)
 
     # Parse response
     try:

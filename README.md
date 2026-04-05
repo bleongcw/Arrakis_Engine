@@ -86,8 +86,14 @@ The frontend is a fully mobile-responsive Next.js 16 + React 19 dashboard with p
 
 - **Anthropic** — [console.anthropic.com](https://console.anthropic.com) → API Keys
 - **OpenAI** — [platform.openai.com](https://platform.openai.com) → API Keys
+- **Google** — [aistudio.google.com](https://aistudio.google.com) → API Keys
+- **xAI** — [console.x.ai](https://console.x.ai) → API Keys
+- **Mistral** — [console.mistral.ai](https://console.mistral.ai) → API Keys
+- **DeepSeek** — [platform.deepseek.com](https://platform.deepseek.com) → API Keys
+- **Qwen (DashScope)** — [dashscope.aliyun.com](https://dashscope.aliyun.com) → API Keys
+- **Ollama** — No API key needed. Install from [ollama.com](https://ollama.com), then `ollama pull deepseek-r1:8b`
 
-The harvester and Stockfish analyzer work without API keys. You only need keys for the LLM coaching step.
+The harvester and Stockfish analyzer work without API keys. You only need at least one provider key (or Ollama) for the LLM coaching step.
 
 ## Installation
 
@@ -140,6 +146,12 @@ Create a `.env` file in the project root:
 # .env (gitignored — never committed)
 ARRAKIS_ANTHROPIC_API_KEY=sk-ant-your-key-here
 ARRAKIS_OPENAI_API_KEY=sk-your-key-here
+ARRAKIS_GOOGLE_API_KEY=your-google-api-key        # Optional — for Gemini
+ARRAKIS_XAI_API_KEY=xai-your-key-here              # Optional — for Grok
+ARRAKIS_MISTRAL_API_KEY=your-mistral-key           # Optional — for Mistral
+ARRAKIS_DEEPSEEK_API_KEY=sk-your-deepseek-key      # Optional — for DeepSeek
+ARRAKIS_QWEN_API_KEY=sk-your-qwen-key              # Optional — for Qwen
+# Ollama needs no API key — just `ollama serve` running locally
 ```
 
 ### 5. Create your config.yaml
@@ -392,14 +404,20 @@ Chess coaching demands multi-step reasoning at every level:
 | **Game type detection** | Must classify games into types (tactical battle, comeback, positional grind, opening disaster, etc.) and adjust coaching emphasis accordingly |
 | **Structured JSON output** | Must produce reliable, parseable JSON with all required fields — reasoning models are significantly more consistent at this than non-reasoning models |
 
-**Supported reasoning models:**
+**Supported reasoning models (8 providers):**
 
 | Provider | Model | API Identifier | Notes |
 |---|---|---|---|
 | Anthropic | Claude Opus 4.6 | `claude-opus-4-6` | Extended thinking, excellent coaching tone |
 | OpenAI | ChatGPT 5.4 Pro | `chatgpt-5.4-pro` | Strong reasoning via Responses API |
+| Google | Gemini 2.5 Pro | `gemini-2.5-pro` | Long context, strong reasoning |
+| xAI | Grok 3 | `grok-3` | OpenAI-compatible API |
+| Mistral | Mistral Medium | `mistral-medium-latest` | European alternative |
+| DeepSeek | DeepSeek-R1 | `deepseek-reasoner` | Strong reasoning, affordable |
+| Alibaba | Qwen3 235B | `qwen3-235b-a22b` | Large reasoning model |
+| Ollama (Local) | DeepSeek-R1 8B | `deepseek-r1:8b` | Free, runs locally, no API key |
 
-**Planned:** Local open-source reasoning models via Ollama (DeepSeek-R1, Qwen3, Llama 4). See [ROADMAP.md](ROADMAP.md) for details.
+See [ROADMAP.md](ROADMAP.md) for details on local model quality considerations.
 
 > **Non-reasoning models will not work.** Models without chain-of-thought (e.g., GPT-4o-mini, small instruction-tuned models, base models) miss tactical sequences, generate generic advice not grounded in actual positions, and produce inconsistent JSON. If you swap in a non-reasoning model, expect significantly degraded coaching quality.
 

@@ -4,6 +4,7 @@ import { useState, useCallback, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { triggerTrendSummary, fetchPatterns } from "@/lib/api";
+import { PROVIDERS } from "@/lib/providers";
 
 interface TrendSummaryProps {
   summary: string | null | undefined;
@@ -13,17 +14,15 @@ interface TrendSummaryProps {
 
 export function TrendSummary({ summary, player, onSummaryGenerated }: TrendSummaryProps) {
   const [generating, setGenerating] = useState(false);
-  const [provider, setProvider] = useState<"claude" | "openai">("claude");
+  const [selectedProvider, setSelectedProvider] = useState("openai");
   const previousSummaryRef = useRef(summary);
 
-  const handleGenerate = useCallback(async (p: "claude" | "openai") => {
-    setProvider(p);
+  const handleGenerate = useCallback(async (p: string) => {
+    setSelectedProvider(p);
     setGenerating(true);
-    // Capture the current summary so we can detect when it changes
     const oldSummary = previousSummaryRef.current;
     try {
       await triggerTrendSummary(player, p);
-      // Poll for completion — detect when summary changes from the old value
       const poll = setInterval(async () => {
         try {
           const data = await fetchPatterns(player);
@@ -35,7 +34,6 @@ export function TrendSummary({ summary, player, onSummaryGenerated }: TrendSumma
           }
         } catch {}
       }, 5000);
-      // Stop polling after 5 minutes
       setTimeout(() => {
         clearInterval(poll);
         setGenerating(false);
@@ -60,6 +58,28 @@ export function TrendSummary({ summary, player, onSummaryGenerated }: TrendSumma
     return trimmed.split("\n\n").filter(Boolean);
   })();
 
+  const providerSelector = (
+    <div className="flex items-center gap-2">
+      <select
+        value={selectedProvider}
+        onChange={(e) => setSelectedProvider(e.target.value)}
+        disabled={generating}
+        className="px-2 py-1.5 rounded-md border text-sm bg-background disabled:opacity-50"
+      >
+        <optgroup label="Cloud">
+          {PROVIDERS.filter(p => p.group === "cloud").map(p => (
+            <option key={p.slug} value={p.slug}>{p.name}</option>
+          ))}
+        </optgroup>
+        <optgroup label="Local">
+          {PROVIDERS.filter(p => p.group === "local").map(p => (
+            <option key={p.slug} value={p.slug}>{p.name}</option>
+          ))}
+        </optgroup>
+      </select>
+    </div>
+  );
+
   return (
     <Card>
       <CardHeader className="pb-3">
@@ -80,20 +100,14 @@ export function TrendSummary({ summary, player, onSummaryGenerated }: TrendSumma
             {paragraphs.map((paragraph, i) => (
               <p key={i} className="text-sm leading-relaxed">{paragraph}</p>
             ))}
-            <div className="pt-2 flex gap-2">
+            <div className="pt-2 flex items-center gap-2">
+              {providerSelector}
               <Button
                 variant="outline" size="sm"
                 disabled={generating}
-                onClick={() => handleGenerate("claude")}
+                onClick={() => handleGenerate(selectedProvider)}
               >
-                {generating && provider === "claude" ? "Regenerating..." : "Regenerate with Claude"}
-              </Button>
-              <Button
-                variant="outline" size="sm"
-                disabled={generating}
-                onClick={() => handleGenerate("openai")}
-              >
-                {generating && provider === "openai" ? "Regenerating..." : "Regenerate with ChatGPT"}
+                {generating ? "Regenerating..." : "Regenerate"}
               </Button>
             </div>
           </div>
@@ -102,22 +116,14 @@ export function TrendSummary({ summary, player, onSummaryGenerated }: TrendSumma
             <p className="text-sm text-muted-foreground">
               Generate an AI coaching summary of your cross-game patterns and trends.
             </p>
-            <div className="flex justify-center gap-2">
+            <div className="flex justify-center items-center gap-2">
+              {providerSelector}
               <Button
                 size="sm"
                 disabled={generating}
-                className="bg-purple-600 hover:bg-purple-700 text-white"
-                onClick={() => handleGenerate("claude")}
+                onClick={() => handleGenerate(selectedProvider)}
               >
-                {generating && provider === "claude" ? "Generating..." : "Generate with Claude"}
-              </Button>
-              <Button
-                size="sm"
-                disabled={generating}
-                className="bg-emerald-600 hover:bg-emerald-700 text-white"
-                onClick={() => handleGenerate("openai")}
-              >
-                {generating && provider === "openai" ? "Generating..." : "Generate with ChatGPT"}
+                {generating ? "Generating..." : "Generate"}
               </Button>
             </div>
             {generating && (

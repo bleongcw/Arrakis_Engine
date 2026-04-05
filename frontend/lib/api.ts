@@ -61,7 +61,7 @@ export async function fetchReport(
 
 export async function triggerTrendSummary(
   player: string,
-  provider: "claude" | "openai" = "claude"
+  provider: string = "claude"
 ): Promise<{ status: string; message: string }> {
   const res = await fetch(`${BASE}/trend-summary`, {
     method: "POST",
@@ -116,7 +116,7 @@ export async function triggerPipelineRunAll(player?: string) {
   return postPipeline("run-all", player ? { player } : {});
 }
 
-export async function triggerPipelineCoach(provider?: "claude" | "openai", player?: string) {
+export async function triggerPipelineCoach(provider?: string, player?: string) {
   const body: Record<string, unknown> = {};
   if (provider) body.provider = provider;
   if (player) body.player = player;
@@ -250,7 +250,7 @@ export async function updateApiKeys(
 
 export async function triggerCoaching(
   gameId: number,
-  provider: "claude" | "openai"
+  provider: string
 ): Promise<{ status: string; message: string }> {
   const res = await fetch(`${BASE}/coach`, {
     method: "POST",

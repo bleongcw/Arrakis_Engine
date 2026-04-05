@@ -10,9 +10,9 @@ export function useCoaching(gameId: number) {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const startCoaching = useCallback(
-    async (provider: "claude" | "openai", onComplete: (detail: GameDetail) => void) => {
+    async (provider: string, onComplete: (detail: GameDetail) => void) => {
       setIsCoaching(true);
-      setStatus(`Coaching with ${provider === "claude" ? "Claude" : "ChatGPT"}...`);
+      setStatus(`Coaching with ${provider}...`);
 
       // Capture the old provider to detect when coaching is done
       // (the provider field changes to "provider:model" format)

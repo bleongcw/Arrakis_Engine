@@ -132,7 +132,7 @@ class TestCoachGame:
         with pytest.raises(ValueError, match="not yet analyzed"):
             coach_game(gid, db_path=db_path)
 
-    @patch("src.coach._call_claude")
+    @patch("src.coach.call_provider")
     def test_stores_coaching_in_db(self, mock_claude, db_path, game_with_analysis):
         mock_claude.return_value = json.dumps({
             "narrative": "You played a great opening!",
@@ -237,7 +237,7 @@ class TestFormatSingleMove:
 
 
 class TestCoachGameProviderSwitch:
-    @patch("src.coach._call_claude")
+    @patch("src.coach.call_provider")
     def test_claude_provider(self, mock_claude, db_path, game_with_analysis):
         mock_claude.return_value = json.dumps({
             "narrative": "n", "key_lesson": "k", "practical_focus": "p",
@@ -246,7 +246,7 @@ class TestCoachGameProviderSwitch:
         coach_game(game_with_analysis, provider="claude", db_path=db_path)
         mock_claude.assert_called_once()
 
-    @patch("src.coach._call_openai")
+    @patch("src.coach.call_provider")
     def test_openai_provider(self, mock_openai, db_path, game_with_analysis):
         mock_openai.return_value = json.dumps({
             "narrative": "n", "key_lesson": "k", "practical_focus": "p",
@@ -257,7 +257,7 @@ class TestCoachGameProviderSwitch:
 
     def test_unknown_provider_raises(self, db_path, game_with_analysis):
         with pytest.raises(ValueError, match="Unknown provider"):
-            coach_game(game_with_analysis, provider="gemini", db_path=db_path)
+            coach_game(game_with_analysis, provider="nonexistent_provider", db_path=db_path)
 
 
 class TestCoachPendingLimit:

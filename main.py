@@ -125,14 +125,12 @@ def cmd_analyze(args, config):
 
 def cmd_coach(args, config):
     """Generate LLM coaching insights for analyzed games."""
+    from src.llm_providers import resolve_model
+
     db_path = config["database"]["path"]
     provider = args.provider or config["coaching"]["default_provider"]
-
-    model = None
-    if provider == "claude":
-        model = config["coaching"]["anthropic_model"]
-    elif provider == "openai":
-        model = config["coaching"]["openai_model"]
+    coaching_config = config.get("coaching", {})
+    model = resolve_model(provider, None, coaching_config)
 
     limit = getattr(args, 'limit', 0) or 0
     result = coach_pending(provider=provider, model=model, db_path=db_path, limit=limit, config=config)
@@ -337,7 +335,7 @@ def main():
     # coach
     coach_parser = subparsers.add_parser("coach", help="Generate LLM coaching insights")
     coach_parser.add_argument(
-        "--provider", choices=["claude", "openai"],
+        "--provider", choices=["claude", "openai", "gemini", "grok", "mistral", "deepseek", "qwen", "ollama"],
         help="LLM provider (default: from config)",
     )
     coach_parser.add_argument(
@@ -374,7 +372,7 @@ def main():
     # run-all
     run_all_parser = subparsers.add_parser("run-all", help="Run full pipeline")
     run_all_parser.add_argument("--player", action="append", help="Username(s)")
-    run_all_parser.add_argument("--provider", choices=["claude", "openai"], help="LLM provider")
+    run_all_parser.add_argument("--provider", choices=["claude", "openai", "gemini", "grok", "mistral", "deepseek", "qwen", "ollama"], help="LLM provider")
 
     args = parser.parse_args()
 

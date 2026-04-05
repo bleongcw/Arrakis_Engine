@@ -1,7 +1,9 @@
 "use client";
 
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { useCoaching } from "@/hooks/use-coaching";
+import { PROVIDERS } from "@/lib/providers";
 import type { GameDetail } from "@/lib/types";
 
 interface CoachingButtonsProps {
@@ -11,24 +13,37 @@ interface CoachingButtonsProps {
 
 export function CoachingButtons({ gameId, onCoachingComplete }: CoachingButtonsProps) {
   const { isCoaching, status, startCoaching } = useCoaching(gameId);
+  const [selectedProvider, setSelectedProvider] = useState("openai");
+
+  const providerMeta = PROVIDERS.find(p => p.slug === selectedProvider) ?? PROVIDERS[0];
 
   return (
     <div className="flex items-center gap-3">
+      <select
+        value={selectedProvider}
+        onChange={(e) => setSelectedProvider(e.target.value)}
+        disabled={isCoaching}
+        className="px-2 py-1.5 rounded-md border text-sm bg-background disabled:opacity-50"
+      >
+        <optgroup label="Cloud">
+          {PROVIDERS.filter(p => p.group === "cloud").map(p => (
+            <option key={p.slug} value={p.slug}>{p.name}</option>
+          ))}
+        </optgroup>
+        <optgroup label="Local">
+          {PROVIDERS.filter(p => p.group === "local").map(p => (
+            <option key={p.slug} value={p.slug}>{p.name}</option>
+          ))}
+        </optgroup>
+      </select>
       <Button
         size="sm"
-        className="bg-[#7c3aed] hover:bg-[#6d28d9] text-white"
+        style={{ backgroundColor: providerMeta.color }}
+        className="text-white hover:opacity-90"
         disabled={isCoaching}
-        onClick={() => startCoaching("claude", onCoachingComplete)}
+        onClick={() => startCoaching(selectedProvider, onCoachingComplete)}
       >
-        {"\uD83D\uDFE3"} Coach with Claude
-      </Button>
-      <Button
-        size="sm"
-        className="bg-[#059669] hover:bg-[#047857] text-white"
-        disabled={isCoaching}
-        onClick={() => startCoaching("openai", onCoachingComplete)}
-      >
-        {"\uD83D\uDFE2"} Coach with ChatGPT
+        Coach Game
       </Button>
       {status && (
         <span className="text-xs text-muted-foreground">{status}</span>

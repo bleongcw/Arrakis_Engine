@@ -130,7 +130,7 @@ export function PipelineControlPanel() {
     usePipeline();
   const { players } = usePlayerContext();
   const [selectedPlayer, setSelectedPlayer] = useState<string>("all");
-  const [selectedProvider, setSelectedProvider] = useState<"claude" | "openai">("openai");
+  const [selectedProvider, setSelectedProvider] = useState<string>("openai");
   const [actionError, setActionError] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
 
@@ -261,12 +261,22 @@ export function PipelineControlPanel() {
           {/* Provider selector for coaching */}
           <select
             value={selectedProvider}
-            onChange={(e) => setSelectedProvider(e.target.value as "claude" | "openai")}
+            onChange={(e) => setSelectedProvider(e.target.value)}
             disabled={isRunning}
             className="px-2 py-1.5 rounded-md border text-sm bg-background disabled:opacity-50"
           >
-            <option value="claude">Claude</option>
-            <option value="openai">OpenAI</option>
+            <optgroup label="Cloud">
+              <option value="claude">Claude</option>
+              <option value="openai">ChatGPT</option>
+              <option value="gemini">Gemini</option>
+              <option value="grok">Grok</option>
+              <option value="mistral">Mistral</option>
+              <option value="deepseek">DeepSeek</option>
+              <option value="qwen">Qwen</option>
+            </optgroup>
+            <optgroup label="Local">
+              <option value="ollama">Ollama</option>
+            </optgroup>
           </select>
 
           {/* Player selector */}

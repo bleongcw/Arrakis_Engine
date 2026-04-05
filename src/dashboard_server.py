@@ -346,6 +346,8 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
 
         coaching = self.config.get("coaching", {})
 
+        from src.llm_providers import get_available_providers
+
         return {
             "analysis": {
                 "stockfish_path": sf.get("path", shutil.which("stockfish") or "stockfish"),
@@ -360,11 +362,24 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 "anthropic_key_hint": mask_key(anthropic_key),
                 "openai_configured": bool(openai_key),
                 "openai_key_hint": mask_key(openai_key),
+                "google_configured": bool(os.environ.get("ARRAKIS_GOOGLE_API_KEY", "")),
+                "xai_configured": bool(os.environ.get("ARRAKIS_XAI_API_KEY", "")),
+                "mistral_configured": bool(os.environ.get("ARRAKIS_MISTRAL_API_KEY", "")),
+                "deepseek_configured": bool(os.environ.get("ARRAKIS_DEEPSEEK_API_KEY", "")),
+                "qwen_configured": bool(os.environ.get("ARRAKIS_QWEN_API_KEY", "")),
+                "ollama_configured": True,
             },
             "coaching": {
                 "default_provider": coaching.get("default_provider", "claude"),
                 "anthropic_model": coaching.get("anthropic_model", "claude-opus-4-6"),
                 "openai_model": coaching.get("openai_model", "chatgpt-5.4-pro"),
+                "gemini_model": coaching.get("gemini_model", "gemini-2.5-pro"),
+                "grok_model": coaching.get("grok_model", "grok-3"),
+                "mistral_model": coaching.get("mistral_model", "mistral-medium-latest"),
+                "deepseek_model": coaching.get("deepseek_model", "deepseek-reasoner"),
+                "qwen_model": coaching.get("qwen_model", "qwen3-235b-a22b"),
+                "ollama_model": coaching.get("ollama_model", "deepseek-r1:8b"),
+                "ollama_base_url": coaching.get("ollama_base_url", "http://localhost:11434"),
                 "tone": coaching.get("tone", "balanced"),
                 "detail_level": coaching.get("detail_level", "standard"),
                 "focus_areas": coaching.get("focus_areas", [
@@ -372,6 +387,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 ]),
                 "custom_instructions": coaching.get("custom_instructions", ""),
             },
+            "providers": get_available_providers(coaching),
         }
 
     def _handle_update_analysis_settings(self, body):
@@ -474,7 +490,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         VALID_TONES = {"encouraging", "balanced", "technical"}
         VALID_DETAIL = {"concise", "standard", "detailed"}
         VALID_FOCUS = {"openings", "tactics", "endgames", "time_management", "positional_play"}
-        VALID_PROVIDERS = {"claude", "openai"}
+        from src.llm_providers import VALID_PROVIDERS
 
         try:
             with open(config_path, "r") as f:
@@ -494,6 +510,13 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
 
             if "openai_model" in body:
                 coaching["openai_model"] = str(body["openai_model"]).strip()
+
+            # Additional provider model fields
+            for key in ("gemini_model", "grok_model", "mistral_model",
+                        "deepseek_model", "qwen_model", "ollama_model",
+                        "ollama_base_url"):
+                if key in body:
+                    coaching[key] = str(body[key]).strip()
 
             if "tone" in body:
                 val = str(body["tone"]).lower()
@@ -787,13 +810,11 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         db_path = self.db_path
         coaching_config = config.get("coaching", {})
 
+        from src.llm_providers import resolve_model
+
         provider = body.get("provider") or coaching_config.get("default_provider", "claude")
         player_filter = body.get("player")
-        model = None
-        if provider == "claude":
-            model = coaching_config.get("anthropic_model", "claude-opus-4-6")
-        elif provider == "openai":
-            model = coaching_config.get("openai_model", "chatgpt-5.4-pro")
+        model = resolve_model(provider, None, coaching_config)
 
         cancel_event = threading.Event()
         DashboardHandler._coach_cancel_event = cancel_event

@@ -1379,7 +1379,7 @@ def generate_trend_summary(player_id: int, db_path: str | None = None,
 
     Returns the summary text.
     """
-    from src.coach import _call_claude, _call_openai
+    from src.llm_providers import call_provider, resolve_model
     from src.tiers import get_tier
 
     conn = init_db(db_path)
@@ -1472,12 +1472,8 @@ def generate_trend_summary(player_id: int, db_path: str | None = None,
 
     # Call LLM
     logger.info("Generating trend summary for player %d with %s...", player_id, provider)
-    if provider == "claude":
-        summary = _call_claude(prompt, model or "claude-opus-4-6")
-    elif provider == "openai":
-        summary = _call_openai(prompt, model or "chatgpt-5.4-pro")
-    else:
-        raise ValueError(f"Unknown provider: {provider}")
+    used_model = resolve_model(provider, model)
+    summary = call_provider(provider, prompt, model=used_model)
 
     # Store in DB
     conn.execute(

@@ -1,5 +1,7 @@
 // TypeScript interfaces matching the Python API response shapes
 
+export type Provider = "claude" | "openai" | "gemini" | "grok" | "mistral" | "deepseek" | "qwen" | "ollama";
+
 export interface Player {
   id: number;
   username: string;
@@ -317,12 +319,35 @@ export interface ApiKeyStatus {
   anthropic_key_hint: string | null;
   openai_configured: boolean;
   openai_key_hint: string | null;
+  google_configured: boolean;
+  xai_configured: boolean;
+  mistral_configured: boolean;
+  deepseek_configured: boolean;
+  qwen_configured: boolean;
+  ollama_configured: boolean;
+}
+
+export interface ProviderInfo {
+  slug: Provider;
+  display_name: string;
+  group: "cloud" | "local";
+  color: string;
+  configured: boolean;
+  model: string;
+  env_var: string | null;
 }
 
 export interface CoachingSettings {
-  default_provider: "claude" | "openai";
+  default_provider: Provider;
   anthropic_model: string;
   openai_model: string;
+  gemini_model: string;
+  grok_model: string;
+  mistral_model: string;
+  deepseek_model: string;
+  qwen_model: string;
+  ollama_model: string;
+  ollama_base_url: string;
   tone: "encouraging" | "balanced" | "technical";
   detail_level: "concise" | "standard" | "detailed";
   focus_areas: string[];
@@ -333,6 +358,7 @@ export interface SettingsData {
   analysis: AnalysisSettings;
   api_keys: ApiKeyStatus;
   coaching: CoachingSettings;
+  providers: ProviderInfo[];
 }
 
 export interface StatusResponse {

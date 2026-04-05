@@ -17,7 +17,9 @@ First public open-source release under AGPL-3.0.
 - Stockfish analysis engine (depth 22, multi-threaded, per-move timeout)
 - ACPL calculation with ±1000cp eval capping (Lichess/Chess.com standard)
 - Adaptive tier system — analysis depth and move thresholds scale with player rating
-- LLM coaching layer with abstracted provider support (Anthropic Claude, OpenAI ChatGPT 5.4 Pro)
+- LLM coaching layer with unified provider abstraction (`src/llm_providers.py`) supporting 8 providers
+- 8 LLM providers: Claude, ChatGPT, Gemini, Grok, Mistral, DeepSeek, Qwen, Ollama (local)
+- Ollama integration for free, local coaching with no API key required
 - Reasoning models required — chain-of-thought essential for tactical analysis, coaching history, and age-appropriate explanations
 - Cross-game pattern detection (16 metrics)
 - Markdown report generator with time control filtering
@@ -30,7 +32,7 @@ First public open-source release under AGPL-3.0.
 - Coaching settings UI — customizable tone (encouraging / balanced / technical), detail level, focus areas, and free-form custom instructions
 - Variety instructions in coaching prompt to ensure fresh, non-formulaic output
 - "Generate Coaching Briefs" pipeline button — batch-coach games from the dashboard UI with progress tracking, cancel support, and per-player filtering
-- Provider selector (Claude / OpenAI) for coaching briefs
+- Provider selector (8 providers with Cloud/Local grouping) for coaching briefs and per-game coaching
 - Games coached in chronological order (oldest-first) so coaching history builds naturally
 - Full datetime storage in `date_played` for correct chronological ordering
 - Exponential backoff on API rate limits (30s → 60s → 120s, max 5 minutes)

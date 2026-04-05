@@ -7,56 +7,53 @@ demands multi-step reasoning: evaluating positions, understanding strategic them
 connecting patterns across games, and generating age-appropriate explanations.
 Non-reasoning models produce shallow, generic feedback.
 
-### Supported Providers
+### Supported Providers (8 total)
 
 | Provider | Model | Type | Status |
 |----------|-------|------|--------|
-| Anthropic | `claude-opus-4-6` | Reasoning | **Active** |
-| OpenAI | `chatgpt-5.4-pro` | Reasoning | **Active** |
+| Anthropic | `claude-opus-4-6` | Cloud / Reasoning | **Active** |
+| OpenAI | `chatgpt-5.4-pro` | Cloud / Reasoning | **Active** |
+| Google | `gemini-2.5-pro` | Cloud / Reasoning | **Active** |
+| xAI | `grok-3` | Cloud / Reasoning | **Active** |
+| Mistral | `mistral-medium-latest` | Cloud / Reasoning | **Active** |
+| DeepSeek | `deepseek-reasoner` | Cloud / Reasoning | **Active** |
+| Alibaba | `qwen3-235b-a22b` | Cloud / Reasoning | **Active** |
+| Ollama | `deepseek-r1:8b` | Local / Reasoning | **Active** |
+
+All providers are available in the CLI (`--provider`), the dashboard pipeline panel,
+per-game coaching buttons, and the Settings page. The provider abstraction in
+`src/llm_providers.py` makes adding new providers straightforward.
 
 ---
 
-## Planned: Ollama / Open-Source Models
+## Ollama / Local Models
 
-### Goal
-Enable fully local, offline coaching using open-source reasoning models via Ollama.
-This removes API costs and latency, and enables privacy-first deployments.
+### Current Support
+Ollama is fully integrated as a local provider. It uses the OpenAI-compatible API
+endpoint at `http://localhost:11434/v1` with no API key required.
 
-### Requirements
-- Model must support **chain-of-thought reasoning** — essential for:
-  - Multi-move tactical analysis ("if Nxe5, then Qd4+ forces...")
-  - Pattern recognition across game phases (opening prep → middlegame execution)
-  - Connecting current game to historical coaching context (last 5 games)
-  - Age-appropriate explanation generation (simplifying complex ideas)
-- Model must handle **structured JSON output** reliably (coaching response format)
-- Minimum context window: **16K tokens** (game PGN + move analysis + coaching history)
+**Default model:** `deepseek-r1:8b` (lightweight, ~5GB RAM, good for testing)
 
-### Candidate Models (evaluate when available)
-- **DeepSeek-R1** (32B+) — strong reasoning, Apache 2.0 license
-- **Qwen3** reasoning variants — good multilingual support
-- **Llama 4** reasoning variants — Meta's next-gen with extended context
-- **Mistral** reasoning models — strong European alternative
+### Recommended Local Models (by capability)
 
-### Implementation Plan
-1. Add `ollama` as a third provider option alongside `claude` and `openai`
-2. New `_call_ollama(prompt, model)` function in `src/coach.py`
-3. Ollama model config in `config.yaml`:
-   ```yaml
-   coaching:
-     ollama_model: deepseek-r1:32b    # or whichever reasoning model
-     ollama_base_url: http://localhost:11434
-   ```
-4. UI: Add "Ollama" option to provider selector in Settings and pipeline panel
-5. No API key needed — runs fully local
-6. Benchmark: compare coaching quality against Claude/OpenAI baseline on same 20 games
+| Model | Size | RAM | Quality | Speed (M3 Max) |
+|-------|------|-----|---------|-----------------|
+| `deepseek-r1:8b` | 8B | ~5GB | Good for testing | ~30 tok/s |
+| `deepseek-r1:14b` | 14B | ~9GB | Moderate coaching | ~20 tok/s |
+| `deepseek-r1:32b` | 32B | ~20GB | Strong coaching | ~15 tok/s |
+| `qwen3:8b` | 8B | ~5GB | Good JSON reliability | ~30 tok/s |
 
-### Challenges
+### Challenges with Local Models
 - **Quality gap**: Open-source reasoning models may not match frontier model depth,
   especially for nuanced coaching tone adjustments (encouraging vs technical)
-- **Speed**: Local inference on Apple Silicon (M-series) is viable but slower than API;
+- **Speed**: Local inference on Apple Silicon is viable but slower than API;
   32B models at ~15-20 tok/s on M3 Max, meaning ~60-90s per game coaching
 - **Memory**: 32B models need ~20GB RAM; larger models need more
-- **JSON reliability**: Smaller models may need output format enforcement or retry logic
+- **JSON reliability**: Smaller models may need retry logic for structured output
+
+---
+
+## Future Considerations
 
 ### Non-Reasoning Models: Why They Don't Work
 Models without chain-of-thought (e.g., standard chat models, small instruction-tuned
@@ -67,3 +64,7 @@ models) fail at chess coaching because they:
 - Produce inconsistent JSON structure
 
 This is a hard requirement, not a preference.
+
+### Potential Future Providers
+- Any OpenAI-compatible API can be added by registering in `src/llm_providers.py`
+- Azure OpenAI, Together AI, Groq, Fireworks — all use the same SDK pattern

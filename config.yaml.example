@@ -35,9 +35,21 @@ analysis:
     - daily
 
 coaching:
-  default_provider: claude
-  anthropic_model: claude-opus-4-6
-  openai_model: chatgpt-5.4-pro
+  default_provider: claude                # claude | openai | gemini | grok | mistral | deepseek | qwen | ollama
+
+  # Cloud providers — set API keys in .env
+  anthropic_model: claude-opus-4-6        # Anthropic Claude (ARRAKIS_ANTHROPIC_API_KEY)
+  openai_model: chatgpt-5.4-pro           # OpenAI ChatGPT (ARRAKIS_OPENAI_API_KEY)
+  gemini_model: gemini-2.5-pro            # Google Gemini (ARRAKIS_GOOGLE_API_KEY)
+  grok_model: grok-3                      # xAI Grok (ARRAKIS_XAI_API_KEY)
+  mistral_model: mistral-medium-latest    # Mistral AI (ARRAKIS_MISTRAL_API_KEY)
+  deepseek_model: deepseek-reasoner       # DeepSeek Cloud (ARRAKIS_DEEPSEEK_API_KEY)
+  qwen_model: qwen3-235b-a22b            # Alibaba Qwen (ARRAKIS_QWEN_API_KEY)
+
+  # Local provider — no API key needed, requires `ollama serve` running
+  ollama_model: deepseek-r1:8b            # Ollama local model
+  ollama_base_url: http://localhost:11434  # Ollama server URL
+
   tone: balanced                     # encouraging | balanced | technical
   detail_level: standard             # concise | standard | detailed
   focus_areas:                       # areas to emphasize in coaching feedback

@@ -102,7 +102,7 @@ export function usePipeline() {
   );
 
   const startCoach = useCallback(
-    async (provider?: "claude" | "openai", player?: string) => {
+    async (provider?: string, player?: string) => {
       setDismissed(false);
       await triggerPipelineCoach(provider, player);
       await poll();
