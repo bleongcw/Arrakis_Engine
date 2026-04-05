@@ -240,7 +240,15 @@ export async function updateCoachingSettings(
 }
 
 export async function updateApiKeys(
-  data: { anthropic_key?: string; openai_key?: string }
+  data: {
+    anthropic_key?: string;
+    openai_key?: string;
+    google_key?: string;
+    xai_key?: string;
+    mistral_key?: string;
+    deepseek_key?: string;
+    qwen_key?: string;
+  }
 ): Promise<{ status: string }> {
   const res = await fetch(`${BASE}/settings/api-keys`, {
     method: "PUT",

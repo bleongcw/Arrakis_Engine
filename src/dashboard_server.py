@@ -336,10 +336,8 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         analysis = self.config.get("analysis", {})
 
         # Mask API keys — coach.py uses the ARRAKIS_ prefix
-        anthropic_key = os.environ.get("ARRAKIS_ANTHROPIC_API_KEY", "")
-        openai_key = os.environ.get("ARRAKIS_OPENAI_API_KEY", "")
-
-        def mask_key(key):
+        def mask_key(env_var):
+            key = os.environ.get(env_var, "")
             if not key or len(key) < 8:
                 return None
             return key[:6] + "\u2022" * 6 + key[-4:]
@@ -358,15 +356,20 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 "months_lookback": analysis.get("months_lookback", 6),
             },
             "api_keys": {
-                "anthropic_configured": bool(anthropic_key),
-                "anthropic_key_hint": mask_key(anthropic_key),
-                "openai_configured": bool(openai_key),
-                "openai_key_hint": mask_key(openai_key),
+                "anthropic_configured": bool(os.environ.get("ARRAKIS_ANTHROPIC_API_KEY", "")),
+                "anthropic_key_hint": mask_key("ARRAKIS_ANTHROPIC_API_KEY"),
+                "openai_configured": bool(os.environ.get("ARRAKIS_OPENAI_API_KEY", "")),
+                "openai_key_hint": mask_key("ARRAKIS_OPENAI_API_KEY"),
                 "google_configured": bool(os.environ.get("ARRAKIS_GOOGLE_API_KEY", "")),
+                "google_key_hint": mask_key("ARRAKIS_GOOGLE_API_KEY"),
                 "xai_configured": bool(os.environ.get("ARRAKIS_XAI_API_KEY", "")),
+                "xai_key_hint": mask_key("ARRAKIS_XAI_API_KEY"),
                 "mistral_configured": bool(os.environ.get("ARRAKIS_MISTRAL_API_KEY", "")),
+                "mistral_key_hint": mask_key("ARRAKIS_MISTRAL_API_KEY"),
                 "deepseek_configured": bool(os.environ.get("ARRAKIS_DEEPSEEK_API_KEY", "")),
+                "deepseek_key_hint": mask_key("ARRAKIS_DEEPSEEK_API_KEY"),
                 "qwen_configured": bool(os.environ.get("ARRAKIS_QWEN_API_KEY", "")),
+                "qwen_key_hint": mask_key("ARRAKIS_QWEN_API_KEY"),
                 "ollama_configured": True,
             },
             "coaching": {
@@ -456,18 +459,24 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             return lines
 
         updated = []
-        anthropic_key = (body.get("anthropic_key") or "").strip()
-        openai_key = (body.get("openai_key") or "").strip()
 
-        if anthropic_key:
-            env_lines = set_env_line(env_lines, "ARRAKIS_ANTHROPIC_API_KEY", anthropic_key)
-            os.environ["ARRAKIS_ANTHROPIC_API_KEY"] = anthropic_key
-            updated.append("anthropic")
+        # Map of body field → env var name → display label
+        key_mappings = [
+            ("anthropic_key", "ARRAKIS_ANTHROPIC_API_KEY", "anthropic"),
+            ("openai_key", "ARRAKIS_OPENAI_API_KEY", "openai"),
+            ("google_key", "ARRAKIS_GOOGLE_API_KEY", "google"),
+            ("xai_key", "ARRAKIS_XAI_API_KEY", "xai"),
+            ("mistral_key", "ARRAKIS_MISTRAL_API_KEY", "mistral"),
+            ("deepseek_key", "ARRAKIS_DEEPSEEK_API_KEY", "deepseek"),
+            ("qwen_key", "ARRAKIS_QWEN_API_KEY", "qwen"),
+        ]
 
-        if openai_key:
-            env_lines = set_env_line(env_lines, "ARRAKIS_OPENAI_API_KEY", openai_key)
-            os.environ["ARRAKIS_OPENAI_API_KEY"] = openai_key
-            updated.append("openai")
+        for body_field, env_var, label in key_mappings:
+            value = (body.get(body_field) or "").strip()
+            if value:
+                env_lines = set_env_line(env_lines, env_var, value)
+                os.environ[env_var] = value
+                updated.append(label)
 
         if not updated:
             self._send_json({"error": "No keys provided"}, 400)

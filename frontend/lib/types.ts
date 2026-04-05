@@ -320,10 +320,15 @@ export interface ApiKeyStatus {
   openai_configured: boolean;
   openai_key_hint: string | null;
   google_configured: boolean;
+  google_key_hint: string | null;
   xai_configured: boolean;
+  xai_key_hint: string | null;
   mistral_configured: boolean;
+  mistral_key_hint: string | null;
   deepseek_configured: boolean;
+  deepseek_key_hint: string | null;
   qwen_configured: boolean;
+  qwen_key_hint: string | null;
   ollama_configured: boolean;
 }
 
