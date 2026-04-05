@@ -93,9 +93,9 @@ export function usePipeline() {
   );
 
   const startRunAll = useCallback(
-    async (player?: string) => {
+    async (provider?: string, player?: string) => {
       setDismissed(false);
-      await triggerPipelineRunAll(player);
+      await triggerPipelineRunAll(provider, player);
       await poll();
     },
     [poll]

@@ -4,9 +4,10 @@
 
 """Automated pipeline scheduler.
 
-Runs the full pipeline (harvest → analyze → patterns) on a configurable
-interval using a daemon thread. Integrates with pipeline_state for mutual
-exclusion — if a manual run is in progress, the scheduled run skips.
+Runs the full pipeline (harvest → analyze → patterns → coach) on a
+configurable interval using a daemon thread. Integrates with
+pipeline_state for mutual exclusion — if a manual run is in progress,
+the scheduled run skips.
 """
 
 import logging
@@ -25,16 +26,28 @@ logger = logging.getLogger(__name__)
 
 # ── Shared pipeline runner ────────────────────────────────
 
-def run_full_pipeline(config: dict, db_path: str, player_filter: str | None = None):
-    """Execute harvest → analyze → patterns.
+def run_full_pipeline(
+    config: dict,
+    db_path: str,
+    player_filter: str | None = None,
+    provider: str | None = None,
+    cancel_event: threading.Event | None = None,
+):
+    """Execute harvest → analyze → patterns → coach.
 
     Caller is responsible for pipeline_state.start_task() / complete_task().
     Updates pipeline_state.update_progress() throughout.
     Returns a result dict on success, raises on failure.
+
+    Args:
+        provider: LLM provider slug for coaching step (defaults to config default).
+        cancel_event: If set, the coaching step stops gracefully.
     """
     from src.harvester import harvest_player
     from src.analyzer import analyze_pending
     from src.patterns import compute_player_patterns
+    from src.coach import coach_pending
+    from src.llm_providers import resolve_model
 
     months = config.get("analysis", {}).get("months_lookback", 6)
     sf_config = config.get("stockfish", {})
@@ -66,8 +79,8 @@ def run_full_pipeline(config: dict, db_path: str, player_filter: str | None = No
 
     # Step 1: Harvest
     pipeline_state.update_progress(
-        "Step 1/3: Fetching new games...",
-        {"current_step": 1, "total_steps": 3},
+        "Step 1/4: Fetching new games...",
+        {"current_step": 1, "total_steps": 4},
     )
     total_new = 0
     total_errors = 0
@@ -75,8 +88,8 @@ def run_full_pipeline(config: dict, db_path: str, player_filter: str | None = No
         username = player["username"]
         display = player.get("display_name") or username
         pipeline_state.update_progress(
-            f"Step 1/3: Fetching games for {display}...",
-            {"current_step": 1, "total_steps": 3},
+            f"Step 1/4: Fetching games for {display}...",
+            {"current_step": 1, "total_steps": 4},
         )
 
         stats = harvest_player(
@@ -94,8 +107,8 @@ def run_full_pipeline(config: dict, db_path: str, player_filter: str | None = No
     conn.close()
 
     pipeline_state.update_progress(
-        f"Step 2/3: Analyzing {total_pending} games...",
-        {"current_step": 2, "total_steps": 3, "games_total": total_pending, "games_processed": 0},
+        f"Step 2/4: Analyzing {total_pending} games...",
+        {"current_step": 2, "total_steps": 4, "games_total": total_pending, "games_processed": 0},
     )
 
     # Progress polling for analyze
@@ -111,8 +124,8 @@ def run_full_pipeline(config: dict, db_path: str, player_filter: str | None = No
                 c.close()
                 done = total_pending - remaining
                 pipeline_state.update_progress(
-                    f"Step 2/3: Analyzing game {done} of {total_pending}...",
-                    {"current_step": 2, "total_steps": 3, "games_total": total_pending, "games_processed": done},
+                    f"Step 2/4: Analyzing game {done} of {total_pending}...",
+                    {"current_step": 2, "total_steps": 4, "games_total": total_pending, "games_processed": done},
                 )
             except Exception:
                 pass
@@ -137,8 +150,8 @@ def run_full_pipeline(config: dict, db_path: str, player_filter: str | None = No
 
     # Step 3: Patterns
     pipeline_state.update_progress(
-        "Step 3/3: Updating insights...",
-        {"current_step": 3, "total_steps": 3},
+        "Step 3/4: Updating insights...",
+        {"current_step": 3, "total_steps": 4},
     )
     conn = get_connection(db_path)
     player_rows = conn.execute(
@@ -150,16 +163,53 @@ def run_full_pipeline(config: dict, db_path: str, player_filter: str | None = No
     for row in player_rows:
         display = row["display_name"] or row["username"]
         pipeline_state.update_progress(
-            f"Step 3/3: Computing insights for {display}...",
-            {"current_step": 3, "total_steps": 3},
+            f"Step 3/4: Computing insights for {display}...",
+            {"current_step": 3, "total_steps": 4},
         )
         compute_player_patterns(row["id"], db_path=db_path)
         players_updated += 1
+
+    # Step 4: Coach
+    coaching_config = config.get("coaching", {})
+    coach_provider = provider or coaching_config.get("default_provider", "claude")
+    coach_model = resolve_model(coach_provider, None, coaching_config)
+
+    pipeline_state.update_progress(
+        f"Step 4/4: Generating coaching briefs with {coach_provider}...",
+        {"current_step": 4, "total_steps": 4},
+    )
+
+    def coach_progress_cb(coached, errors, total, message):
+        pipeline_state.update_progress(
+            f"Step 4/4: {message}",
+            {
+                "current_step": 4,
+                "total_steps": 4,
+                "games_processed": coached + errors,
+                "games_total": total,
+            },
+        )
+
+    coach_result = coach_pending(
+        provider=coach_provider,
+        model=coach_model,
+        db_path=db_path,
+        config=config,
+        cancel_event=cancel_event,
+        progress_callback=coach_progress_cb,
+        player=player_filter,
+    )
+    games_coached = coach_result.get("coached", 0)
+    coach_errors = coach_result.get("errors", 0)
+    coach_skipped = coach_result.get("skipped", 0)
 
     return {
         "new_games": total_new,
         "games_analyzed": games_analyzed,
         "players_updated": players_updated,
+        "coached": games_coached,
+        "coach_errors": coach_errors,
+        "skipped": coach_skipped,
         "errors": total_errors,
     }
 

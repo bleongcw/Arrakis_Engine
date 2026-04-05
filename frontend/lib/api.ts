@@ -112,8 +112,11 @@ export async function triggerPipelinePatterns(player?: string) {
   return postPipeline("patterns", player ? { player } : {});
 }
 
-export async function triggerPipelineRunAll(player?: string) {
-  return postPipeline("run-all", player ? { player } : {});
+export async function triggerPipelineRunAll(provider?: string, player?: string) {
+  const body: Record<string, unknown> = {};
+  if (provider) body.provider = provider;
+  if (player) body.player = player;
+  return postPipeline("run-all", body);
 }
 
 export async function triggerPipelineCoach(provider?: string, player?: string) {

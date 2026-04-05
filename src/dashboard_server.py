@@ -763,7 +763,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         self._send_json({"status": "started", "message": "Updating insights..."})
 
     def _handle_pipeline_run_all(self, body):
-        """Chain harvest -> analyze -> patterns."""
+        """Chain harvest -> analyze -> patterns -> coach."""
         from src import pipeline_state
         from src.scheduler import run_full_pipeline
 
@@ -778,14 +778,25 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         config = self.config
         db_path = self.db_path
         player_filter = body.get("player")
+        provider = body.get("provider")
+
+        cancel_event = threading.Event()
+        DashboardHandler._coach_cancel_event = cancel_event
 
         def run():
             try:
-                result = run_full_pipeline(config, db_path, player_filter=player_filter)
+                result = run_full_pipeline(
+                    config, db_path,
+                    player_filter=player_filter,
+                    provider=provider,
+                    cancel_event=cancel_event,
+                )
                 pipeline_state.complete_task(result)
             except Exception as e:
                 logger.exception("Pipeline run-all failed: %s", e)
                 pipeline_state.fail_task(str(e))
+            finally:
+                DashboardHandler._coach_cancel_event = None
 
         threading.Thread(target=run, daemon=True).start()
         self._send_json({"status": "started", "message": "Starting full pipeline..."})
@@ -854,11 +865,11 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         self._send_json({"status": "started", "message": "Generating coaching briefs..."})
 
     def _handle_pipeline_cancel(self):
-        """Cancel the currently running coaching pipeline."""
+        """Cancel the currently running coaching pipeline (standalone or within run_all)."""
         from src import pipeline_state
 
         current = pipeline_state.current_task()
-        if current != "coach":
+        if current not in ("coach", "run_all"):
             self._send_json(
                 {"error": "No cancellable task is running." if not current else f"Task '{current}' cannot be cancelled."},
                 400,

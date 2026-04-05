@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useRef, useEffect, type ReactNode } from "react";
+import { useState, useRef, useEffect, useCallback, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { usePipeline } from "@/hooks/use-pipeline";
 import { useSchedule } from "@/hooks/use-schedule";
 import { usePlayerContext } from "@/app/providers";
@@ -32,8 +33,9 @@ function friendlyResult(result: Record<string, number>): string {
   if (result.skipped != null && result.skipped > 0) {
     parts.push(`${result.skipped} skipped`);
   }
-  if (result.errors && result.errors > 0) {
-    parts.push(`${result.errors} error${result.errors !== 1 ? "s" : ""}`);
+  const totalErrors = (result.errors || 0) + (result.coach_errors || 0);
+  if (totalErrors > 0) {
+    parts.push(`${totalErrors} error${totalErrors !== 1 ? "s" : ""}`);
   }
   return parts.length > 0 ? parts.join(", ") : "Done!";
 }
@@ -66,41 +68,53 @@ const INTERVAL_OPTIONS = [1, 3, 6, 12, 24];
 
 function Tooltip({ children, text }: { children: ReactNode; text: string }) {
   const [show, setShow] = useState(false);
-  const [position, setPosition] = useState<"top" | "bottom">("top");
+  const [coords, setCoords] = useState<{ x: number; y: number; below: boolean } | null>(null);
   const triggerRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (show && triggerRef.current) {
-      const rect = triggerRef.current.getBoundingClientRect();
-      // If too close to top of viewport, show below
-      setPosition(rect.top < 80 ? "bottom" : "top");
-    }
-  }, [show]);
+  const updatePosition = useCallback(() => {
+    if (!triggerRef.current) return;
+    const rect = triggerRef.current.getBoundingClientRect();
+    const below = rect.top < 100;
+    setCoords({
+      x: rect.left + rect.width / 2,
+      y: below ? rect.bottom + 8 : rect.top - 8,
+      below,
+    });
+  }, []);
 
   return (
     <div
       ref={triggerRef}
-      className="relative inline-flex"
-      onMouseEnter={() => setShow(true)}
+      className="inline-flex"
+      onMouseEnter={() => {
+        updatePosition();
+        setShow(true);
+      }}
       onMouseLeave={() => setShow(false)}
     >
       {children}
-      {show && (
-        <div
-          className={cn(
-            "absolute left-1/2 -translate-x-1/2 z-50 px-3 py-2 text-xs text-white bg-gray-900 dark:bg-gray-700 rounded-lg shadow-lg whitespace-normal text-center max-w-[220px] w-max pointer-events-none",
-            position === "top" ? "bottom-full mb-2" : "top-full mt-2"
-          )}
-        >
-          {text}
+      {show &&
+        coords &&
+        createPortal(
           <div
-            className={cn(
-              "absolute left-1/2 -translate-x-1/2 w-2 h-2 bg-gray-900 dark:bg-gray-700 rotate-45",
-              position === "top" ? "top-full -mt-1" : "bottom-full -mb-1"
-            )}
-          />
-        </div>
-      )}
+            className="fixed z-[9999] px-3 py-2 text-xs text-white bg-gray-900 dark:bg-gray-700 rounded-lg shadow-lg whitespace-normal text-center max-w-[280px] w-max pointer-events-none"
+            style={{
+              left: coords.x,
+              top: coords.below ? coords.y : undefined,
+              bottom: coords.below ? undefined : `calc(100vh - ${coords.y}px)`,
+              transform: "translateX(-50%)",
+            }}
+          >
+            {text}
+            <div
+              className={cn(
+                "absolute left-1/2 -translate-x-1/2 w-2 h-2 bg-gray-900 dark:bg-gray-700 rotate-45",
+                coords.below ? "bottom-full -mb-1" : "top-full -mt-1"
+              )}
+            />
+          </div>,
+          document.body
+        )}
     </div>
   );
 }
@@ -298,10 +312,10 @@ export function PipelineControlPanel() {
         {/* Run All row */}
         <div className="flex items-center gap-2">
           <span className="text-sm text-muted-foreground">or</span>
-          <Tooltip text="Run the full pipeline in one go: fetch new games, analyze them with Stockfish, then update all insights and patterns.">
+          <Tooltip text="Run the full pipeline in one go: fetch new games, analyze with Stockfish, update insights, then generate coaching briefs with the selected AI provider.">
             <button
               disabled={isRunning}
-              onClick={() => handleAction(() => startRunAll(playerArg))}
+              onClick={() => handleAction(() => startRunAll(selectedProvider, playerArg))}
               className={cn(
                 "px-3 py-2 rounded-md text-sm font-medium transition-colors",
                 isRunning
@@ -362,8 +376,8 @@ export function PipelineControlPanel() {
             {progressPct != null && (
               <p className="text-xs text-muted-foreground text-right">{progressPct}%</p>
             )}
-            {/* Cancel button for coaching */}
-            {state.task === "coach" && (
+            {/* Cancel button for coaching (standalone or within run_all) */}
+            {(state.task === "coach" || state.task === "run_all") && (
               <button
                 disabled={cancelling}
                 onClick={handleCancel}
