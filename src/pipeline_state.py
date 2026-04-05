@@ -14,7 +14,7 @@ from datetime import datetime
 
 _lock = threading.Lock()
 _state = {
-    "task": None,           # "harvest" | "analyze" | "patterns" | "run_all" | None
+    "task": None,           # "harvest" | "analyze" | "patterns" | "run_all" | "coach" | None
     "status": "idle",       # "running" | "complete" | "error" | "idle"
     "progress": "",         # Human-readable progress text
     "detail": None,         # { current_step, total_steps, games_processed, games_total }

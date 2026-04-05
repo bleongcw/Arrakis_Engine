@@ -5,7 +5,7 @@
 """LLM coaching layer for ArrakisEngine.
 
 Generates age-appropriate coaching insights from Stockfish analysis
-using either Claude Opus 4.6 or ChatGPT 5.4 Pro (swappable).
+using either Claude (claude-opus-4-6) or OpenAI (chatgpt-5.4-pro) reasoning models.
 """
 
 import json
@@ -363,7 +363,7 @@ def _fetch_coaching_history(conn, player_id: int, current_game_id: int,
     return "\n".join(lines)
 
 
-def _call_claude(prompt: str, model: str) -> str:
+def _call_claude(prompt: str, model: str, timeout: float = 120.0) -> str:
     """Call Anthropic Claude API with extended thinking."""
     import anthropic
 
@@ -371,7 +371,7 @@ def _call_claude(prompt: str, model: str) -> str:
     if not api_key:
         raise ValueError("ARRAKIS_ANTHROPIC_API_KEY not set in environment")
 
-    client = anthropic.Anthropic(api_key=api_key)
+    client = anthropic.Anthropic(api_key=api_key, timeout=timeout)
 
     response = client.messages.create(
         model=model,
@@ -390,7 +390,7 @@ def _call_claude(prompt: str, model: str) -> str:
     raise ValueError("No text content in Claude response")
 
 
-def _call_openai(prompt: str, model: str) -> str:
+def _call_openai(prompt: str, model: str, timeout: float = 120.0) -> str:
     """Call OpenAI Responses API."""
     from openai import OpenAI
 
@@ -398,7 +398,7 @@ def _call_openai(prompt: str, model: str) -> str:
     if not api_key:
         raise ValueError("ARRAKIS_OPENAI_API_KEY not set in environment")
 
-    client = OpenAI(api_key=api_key)
+    client = OpenAI(api_key=api_key, timeout=timeout)
 
     response = client.responses.create(
         model=model,
@@ -578,7 +578,7 @@ def coach_game(game_id: int, provider: str | None = "claude",
         default_model = coaching_config.get("anthropic_model", "claude-opus-4-6")
         raw = _call_claude(prompt, model or default_model)
     elif provider == "openai":
-        default_model = coaching_config.get("openai_model", "gpt-5.4")
+        default_model = coaching_config.get("openai_model", "chatgpt-5.4-pro")
         raw = _call_openai(prompt, model or default_model)
     else:
         raise ValueError(f"Unknown provider: {provider}")
@@ -625,69 +625,204 @@ def coach_game(game_id: int, provider: str | None = "claude",
     return coaching
 
 
+def _is_rate_limit_error(e: Exception) -> bool:
+    """Check if an exception is a rate limit (429) error."""
+    msg = str(e).lower()
+    return "429" in msg or "rate_limit" in msg or "rate limit" in msg
+
+
+def _is_auth_error(e: Exception) -> bool:
+    """Check if an exception is an authentication/authorization error."""
+    msg = str(e).lower()
+    return "401" in msg or "403" in msg or "invalid api key" in msg or "not set" in msg
+
+
 def coach_pending(provider: str = "claude", model: str | None = None,
                   db_path: str | None = None, limit: int = 0,
-                  config: dict | None = None) -> int:
-    """Generate coaching for analyzed but uncoached games.
+                  config: dict | None = None,
+                  cancel_event: "threading.Event | None" = None,
+                  progress_callback: "callable | None" = None,
+                  player: str | None = None) -> dict:
+    """Generate coaching for analyzed but uncoached games with robust error handling.
 
     Args:
         limit: Max games to coach (0 = all pending).
         config: Full config dict (from config.yaml) for coaching customization.
+        cancel_event: threading.Event — if set, the batch stops gracefully.
+        progress_callback: Optional callback(coached, errors, total, message)
+                          for real-time progress updates.
+        player: Optional username — if provided, only coach this player's games.
 
-    Returns the number of games coached.
+    Returns dict with {coached, errors, skipped, aborted, abort_reason}.
     """
+    import threading as _threading
+
     conn = init_db(db_path)
+
+    # Resolve player filter to player_id
+    player_id = None
+    if player:
+        row = conn.execute("SELECT id FROM players WHERE username = ?", (player,)).fetchone()
+        if row:
+            player_id = row["id"]
+        else:
+            logger.warning("Player '%s' not found — coaching all pending games.", player)
+
     sql = """SELECT id FROM games
         WHERE analysis_status = 'complete' AND coaching_status = 'pending'"""
+    params = []
+    if player_id:
+        sql += " AND player_id = ?"
+        params.append(player_id)
+    sql += " ORDER BY date_played ASC"
     if limit > 0:
         sql += f" LIMIT {limit}"
-    pending = conn.execute(sql).fetchall()
+    pending = conn.execute(sql, params).fetchall()
     conn.close()
 
     total_pending = len(pending)
+    result = {"coached": 0, "errors": 0, "skipped": 0, "total": total_pending,
+              "aborted": False, "abort_reason": None}
+
+    if total_pending == 0:
+        logger.info("No pending games to coach.")
+        return result
+
     logger.info("Found %d games to coach%s", total_pending,
                 f" (limited to {limit})" if limit > 0 else "")
 
-    # Rate limit advisory
+    # Rate limiting configuration per provider
     if provider == "openai":
-        logger.warning(
-            "⚠️  OpenAI rate limits: gpt-5.4 has 10k TPM limit (~1 game/min). "
-            "Recommended: --limit 5 per batch with 10s delay between calls. "
-            "For higher throughput, use --provider claude or upgrade your OpenAI plan."
-        )
-    elif provider == "claude":
-        logger.info(
-            "Using Claude API. Recommended: --limit 10-20 per batch."
-        )
+        base_delay = 15  # seconds between calls
+        logger.info("Using OpenAI — base delay %ds between calls.", base_delay)
+    else:
+        base_delay = 10  # Claude has more generous limits
+        logger.info("Using Claude API — base delay %ds between calls.", base_delay)
 
-    coached = 0
+    current_delay = base_delay
+    consecutive_failures = 0
+    max_consecutive_failures = 3  # Abort batch after this many in a row
+    max_retries_per_game = 3     # Retries for rate-limited games
+
     for i, row in enumerate(pending):
-        logger.info("Coaching game %d/%d (id=%d)", i + 1, len(pending), row["id"])
-        try:
-            coach_game(row["id"], provider=provider, model=model, db_path=db_path, config=config)
-            coached += 1
-            # Rate limit: wait 10s between API calls to avoid 429s
-            if i < len(pending) - 1:
-                logger.info("Waiting 10s for rate limit cooldown...")
-                time.sleep(10)
-        except Exception as e:
-            logger.error("Failed to coach game %d: %s", row["id"], e)
-            if "429" in str(e) or "rate_limit" in str(e).lower():
-                logger.info("Rate limited — waiting 60s before retry...")
-                time.sleep(60)
-                # Retry once after cooldown
-                try:
-                    coach_game(row["id"], provider=provider, model=model, db_path=db_path, config=config)
-                    coached += 1
-                    continue
-                except Exception as retry_e:
-                    logger.error("Retry failed for game %d: %s", row["id"], retry_e)
-            err_conn = init_db(db_path)
-            err_conn.execute(
-                "UPDATE games SET coaching_status = 'error' WHERE id = ?",
-                (row["id"],),
-            )
-            err_conn.commit()
-            err_conn.close()
+        # ── Check cancellation ──
+        if cancel_event and cancel_event.is_set():
+            result["skipped"] = total_pending - i
+            result["aborted"] = True
+            result["abort_reason"] = "Cancelled by user"
+            logger.info("Coaching batch cancelled by user at game %d/%d", i + 1, total_pending)
+            break
 
-    return coached
+        game_id = row["id"]
+        logger.info("Coaching game %d/%d (id=%d)", i + 1, total_pending, game_id)
+
+        if progress_callback:
+            progress_callback(
+                result["coached"], result["errors"], total_pending,
+                f"Coaching game {i + 1} of {total_pending} with {provider}..."
+            )
+
+        # ── Attempt coaching with retries ──
+        success = False
+        for attempt in range(1, max_retries_per_game + 1):
+            try:
+                coach_game(game_id, provider=provider, model=model,
+                           db_path=db_path, config=config)
+                success = True
+                consecutive_failures = 0  # Reset on success
+                # Gradually recover delay back to base after successful calls
+                if current_delay > base_delay:
+                    current_delay = max(base_delay, current_delay - 5)
+                break
+
+            except Exception as e:
+                error_msg = str(e)
+
+                if _is_rate_limit_error(e):
+                    # ── Rate limit: exponential backoff ──
+                    backoff = min(30 * (2 ** (attempt - 1)), 300)  # 30s, 60s, 120s (max 5min)
+                    logger.warning(
+                        "Rate limited on game %d (attempt %d/%d). "
+                        "Waiting %ds before retry...",
+                        game_id, attempt, max_retries_per_game, backoff
+                    )
+                    # Increase delay for all subsequent games in this batch
+                    current_delay = min(current_delay + 10, 60)
+                    time.sleep(backoff)
+                    continue  # Retry
+
+                elif _is_auth_error(e):
+                    # ── Auth error: abort immediately ──
+                    result["errors"] += 1
+                    result["skipped"] = total_pending - i - 1
+                    result["aborted"] = True
+                    result["abort_reason"] = f"Authentication error: {error_msg}"
+                    logger.error("Auth error — aborting batch: %s", error_msg)
+                    _mark_game_error(game_id, db_path)
+                    return result
+
+                else:
+                    # ── Other error: don't retry, count as failure ──
+                    logger.error("Failed to coach game %d (attempt %d): %s",
+                                 game_id, attempt, error_msg)
+                    break  # Don't retry non-rate-limit errors
+
+        if not success:
+            result["errors"] += 1
+            consecutive_failures += 1
+            _mark_game_error(game_id, db_path)
+
+            # ── Consecutive failure circuit breaker ──
+            if consecutive_failures >= max_consecutive_failures:
+                result["skipped"] = total_pending - i - 1
+                result["aborted"] = True
+                result["abort_reason"] = (
+                    f"Stopped after {max_consecutive_failures} consecutive failures. "
+                    f"Last error: {error_msg}"
+                )
+                logger.error(
+                    "Aborting batch: %d consecutive failures. Last error: %s",
+                    consecutive_failures, error_msg
+                )
+                break
+        else:
+            result["coached"] += 1
+
+        # ── Delay before next game ──
+        if i < total_pending - 1:
+            logger.info("Waiting %ds before next game...", current_delay)
+            # Use cancel_event as interruptible sleep
+            if cancel_event:
+                cancel_event.wait(current_delay)
+                if cancel_event.is_set():
+                    result["skipped"] = total_pending - i - 1
+                    result["aborted"] = True
+                    result["abort_reason"] = "Cancelled by user"
+                    break
+            else:
+                time.sleep(current_delay)
+
+    # Final progress update
+    if progress_callback:
+        progress_callback(
+            result["coached"], result["errors"], total_pending,
+            "Coaching complete."
+        )
+
+    logger.info(
+        "Coaching batch finished: %d coached, %d errors, %d skipped%s",
+        result["coached"], result["errors"], result["skipped"],
+        f" (ABORTED: {result['abort_reason']})" if result["aborted"] else ""
+    )
+    return result
+
+
+def _mark_game_error(game_id: int, db_path: str | None):
+    """Mark a game's coaching status as error."""
+    err_conn = init_db(db_path)
+    err_conn.execute(
+        "UPDATE games SET coaching_status = 'error' WHERE id = ?",
+        (game_id,),
+    )
+    err_conn.commit()
+    err_conn.close()

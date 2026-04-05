@@ -287,7 +287,7 @@ export interface ScheduleState {
 }
 
 export interface PipelineState {
-  task: "harvest" | "analyze" | "patterns" | "run_all" | null;
+  task: "harvest" | "analyze" | "patterns" | "run_all" | "coach" | null;
   status: "running" | "complete" | "error" | "idle";
   progress: string;
   detail: {

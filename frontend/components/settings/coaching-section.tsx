@@ -35,7 +35,7 @@ const ALL_FOCUS_AREAS = [
 const DEFAULTS: CoachingForm = {
   default_provider: "claude",
   anthropic_model: "claude-opus-4-6",
-  openai_model: "gpt-5.4",
+  openai_model: "chatgpt-5.4-pro",
   tone: "balanced",
   detail_level: "standard",
   focus_areas: ["openings", "tactics", "endgames", "time_management", "positional_play"],
@@ -232,7 +232,7 @@ export function CoachingSection() {
                 setForm((prev) => ({ ...prev, openai_model: e.target.value }));
                 setStatus(null);
               }}
-              placeholder="gpt-5.4"
+              placeholder="chatgpt-5.4-pro"
             />
           </div>
         </div>

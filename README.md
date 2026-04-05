@@ -1,6 +1,6 @@
 # Arrakis Engine
 
-A local Python application that pulls games from **Chess.com** and **Lichess**, runs deep Stockfish analysis on every move, and uses LLMs (Claude Opus 4.6 / GPT-5.4) to generate age-appropriate coaching insights. Built for tracking improvement over time with pattern detection, a live web dashboard, and exportable coach-ready reports.
+A local Python application that pulls games from **Chess.com** and **Lichess**, runs deep Stockfish analysis on every move, and uses **reasoning LLMs** (Claude Opus 4.6 / ChatGPT 5.4 Pro) to generate age-appropriate coaching insights. Built for tracking improvement over time with pattern detection, a live web dashboard, and exportable coach-ready reports.
 
 Inspired by my three children — Eleanor, Evan, and Estella — and their journey learning chess.
 
@@ -132,7 +132,7 @@ analysis:
 coaching:
   default_provider: claude            # or "openai"
   anthropic_model: claude-opus-4-6
-  openai_model: gpt-5.4               # or gpt-5.4-pro (requires Responses API)
+  openai_model: chatgpt-5.4-pro        # reasoning model (required)
 
 database:
   path: data/chess_coach.db
@@ -205,9 +205,9 @@ python main.py coach --limit 5
 python main.py coach --provider openai --limit 5
 ```
 
-> **⚠️ LLM Cost Warning:** Each coaching call sends a detailed prompt (~3,000–7,000 tokens) and receives a structured response (~2,000–4,000 tokens). At current API pricing, coaching a single game costs approximately **$0.03–0.10 with Claude Opus 4.6** and **$0.02–0.08 with GPT-5.4**. For a backlog of 400+ games, this can add up to **$15–40 or more**. Start with `--limit 5` to verify quality and estimate your costs before running large batches. Monitor your API usage dashboards at [Anthropic Console](https://console.anthropic.com/) or [OpenAI Platform](https://platform.openai.com/usage).
+> **⚠️ LLM Cost Warning:** Each coaching call sends a detailed prompt (~3,000–7,000 tokens) and receives a structured response (~2,000–4,000 tokens). At current API pricing, coaching a single game costs approximately **$0.03–0.10 with Claude Opus 4.6** and **$0.02–0.08 with ChatGPT 5.4 Pro**. For a backlog of 400+ games, this can add up to **$15–40 or more**. Start with `--limit 5` to verify quality and estimate your costs before running large batches. Monitor your API usage dashboards at [Anthropic Console](https://console.anthropic.com/) or [OpenAI Platform](https://platform.openai.com/usage).
 
-> **Rate limits:** OpenAI's `gpt-5.4` has a 10,000 TPM limit (~1 game/min on free/low tiers). Use `--limit 5` per batch to avoid 429 errors. Claude typically has higher throughput — `--limit 10-20` is safe. The dashboard shows which model was used for each game's coaching (purple badge = Claude, green badge = OpenAI).
+> **Rate limits:** OpenAI's `chatgpt-5.4-pro` has a 10,000 TPM limit (~1 game/min on free/low tiers). Use `--limit 5` per batch to avoid 429 errors. Claude typically has higher throughput — `--limit 10-20` is safe. The dashboard shows which model was used for each game's coaching (purple badge = Claude, green badge = OpenAI).
 
 > **Dashboard coaching:** You can also coach individual games directly from the dashboard — click the 🟣 **Coach with Claude** or 🟢 **Coach with ChatGPT** button on any game's detail page. Results auto-refresh when complete.
 
@@ -331,6 +331,32 @@ win% = 50 + 50 × (2 / (1 + exp(-0.00368208 × cp)) - 1)
 ```
 
 This makes evaluation swings more intuitive — a drop from 70% to 30% win probability is far more meaningful than "lost 200 centipawns."
+
+### Why Reasoning Models Are Required
+
+ArrakisEngine requires **reasoning LLMs** — models with chain-of-thought capabilities — for its coaching layer. This is a hard requirement, not a preference. Standard chat or instruction-tuned models produce shallow, generic feedback that fails to help players improve.
+
+Chess coaching demands multi-step reasoning at every level:
+
+| Coaching Task | Why Reasoning Is Essential |
+|---|---|
+| **Tactical analysis** | Must trace forcing sequences ("if Nxe5, then Qd4+ forces Kf1, and Bh3+ wins the queen") — requires look-ahead over multiple moves |
+| **Pattern recognition** | Must connect move classifications, eval swings, and game phases into a coherent strategic narrative rather than listing isolated facts |
+| **Coaching history** | Must read the last 5 games' coaching and deliberately vary advice, build on prior lessons, and track whether the player is improving at specific skills |
+| **Age-appropriate explanations** | Must simplify complex positional concepts for a 7-year-old differently than for a 14-year-old, while keeping the analysis accurate |
+| **Game type detection** | Must classify games into types (tactical battle, comeback, positional grind, opening disaster, etc.) and adjust coaching emphasis accordingly |
+| **Structured JSON output** | Must produce reliable, parseable JSON with all required fields — reasoning models are significantly more consistent at this than non-reasoning models |
+
+**Supported reasoning models:**
+
+| Provider | Model | API Identifier | Notes |
+|---|---|---|---|
+| Anthropic | Claude Opus 4.6 | `claude-opus-4-6` | Extended thinking, excellent coaching tone |
+| OpenAI | ChatGPT 5.4 Pro | `chatgpt-5.4-pro` | Strong reasoning via Responses API |
+
+**Planned:** Local open-source reasoning models via Ollama (DeepSeek-R1, Qwen3, Llama 4). See [ROADMAP.md](ROADMAP.md) for details.
+
+> **Non-reasoning models will not work.** Models without chain-of-thought (e.g., GPT-4o-mini, small instruction-tuned models, base models) miss tactical sequences, generate generic advice not grounded in actual positions, and produce inconsistent JSON. If you swap in a non-reasoning model, expect significantly degraded coaching quality.
 
 ### LLM Coaching Output
 

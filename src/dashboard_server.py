@@ -75,6 +75,10 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             self._handle_pipeline_patterns(body)
         elif path == "/api/pipeline/run-all":
             self._handle_pipeline_run_all(body)
+        elif path == "/api/pipeline/coach":
+            self._handle_pipeline_coach(body)
+        elif path == "/api/pipeline/cancel":
+            self._handle_pipeline_cancel()
         elif path == "/api/schedule/toggle":
             self._handle_schedule_toggle(body)
         elif path == "/api/schedule/interval":
@@ -360,7 +364,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             "coaching": {
                 "default_provider": coaching.get("default_provider", "claude"),
                 "anthropic_model": coaching.get("anthropic_model", "claude-opus-4-6"),
-                "openai_model": coaching.get("openai_model", "gpt-5.4"),
+                "openai_model": coaching.get("openai_model", "chatgpt-5.4-pro"),
                 "tone": coaching.get("tone", "balanced"),
                 "detail_level": coaching.get("detail_level", "standard"),
                 "focus_areas": coaching.get("focus_areas", [
@@ -762,6 +766,90 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
 
         threading.Thread(target=run, daemon=True).start()
         self._send_json({"status": "started", "message": "Starting full pipeline..."})
+
+    # Module-level cancel event for coaching pipeline
+    _coach_cancel_event = None
+
+    def _handle_pipeline_coach(self, body):
+        """Trigger LLM coaching on analyzed but uncoached games."""
+        from src import pipeline_state
+        from src.coach import coach_pending
+
+        if not pipeline_state.start_task("coach"):
+            current = pipeline_state.current_task()
+            self._send_json(
+                {"error": f"Another task is running: {current}"},
+                409,
+            )
+            return
+
+        config = self.config
+        db_path = self.db_path
+        coaching_config = config.get("coaching", {})
+
+        provider = body.get("provider") or coaching_config.get("default_provider", "claude")
+        player_filter = body.get("player")
+        model = None
+        if provider == "claude":
+            model = coaching_config.get("anthropic_model", "claude-opus-4-6")
+        elif provider == "openai":
+            model = coaching_config.get("openai_model", "chatgpt-5.4-pro")
+
+        cancel_event = threading.Event()
+        DashboardHandler._coach_cancel_event = cancel_event
+
+        def progress_cb(coached, errors, total, message):
+            pipeline_state.update_progress(
+                message,
+                {
+                    "games_processed": coached + errors,
+                    "games_total": total,
+                },
+            )
+
+        def run():
+            try:
+                result = coach_pending(
+                    provider=provider,
+                    model=model,
+                    db_path=db_path,
+                    config=config,
+                    cancel_event=cancel_event,
+                    progress_callback=progress_cb,
+                    player=player_filter,
+                )
+                pipeline_state.complete_task({
+                    "coached": result.get("coached", 0),
+                    "errors": result.get("errors", 0),
+                    "skipped": result.get("skipped", 0),
+                })
+            except Exception as e:
+                logger.exception("Pipeline coach failed: %s", e)
+                pipeline_state.fail_task(str(e))
+            finally:
+                DashboardHandler._coach_cancel_event = None
+
+        threading.Thread(target=run, daemon=True).start()
+        self._send_json({"status": "started", "message": "Generating coaching briefs..."})
+
+    def _handle_pipeline_cancel(self):
+        """Cancel the currently running coaching pipeline."""
+        from src import pipeline_state
+
+        current = pipeline_state.current_task()
+        if current != "coach":
+            self._send_json(
+                {"error": "No cancellable task is running." if not current else f"Task '{current}' cannot be cancelled."},
+                400,
+            )
+            return
+
+        cancel_event = DashboardHandler._coach_cancel_event
+        if cancel_event:
+            cancel_event.set()
+            self._send_json({"status": "cancelling", "message": "Cancellation requested..."})
+        else:
+            self._send_json({"error": "No cancel event available."}, 400)
 
     # ── API routing ──────────────────────────────────────────────
 

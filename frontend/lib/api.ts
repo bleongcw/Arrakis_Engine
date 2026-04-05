@@ -116,6 +116,17 @@ export async function triggerPipelineRunAll(player?: string) {
   return postPipeline("run-all", player ? { player } : {});
 }
 
+export async function triggerPipelineCoach(provider?: "claude" | "openai", player?: string) {
+  const body: Record<string, unknown> = {};
+  if (provider) body.provider = provider;
+  if (player) body.player = player;
+  return postPipeline("coach", body);
+}
+
+export async function cancelPipeline(): Promise<{ status: string; message: string }> {
+  return postPipeline("cancel");
+}
+
 // ── Schedule API ─────────────────────────────────────────
 
 export async function fetchScheduleStatus(): Promise<ScheduleState> {

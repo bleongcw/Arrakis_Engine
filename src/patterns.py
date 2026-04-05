@@ -1474,7 +1474,7 @@ def generate_trend_summary(player_id: int, db_path: str | None = None,
     if provider == "claude":
         summary = _call_claude(prompt, model or "claude-opus-4-6")
     elif provider == "openai":
-        summary = _call_openai(prompt, model or "gpt-5.4")
+        summary = _call_openai(prompt, model or "chatgpt-5.4-pro")
     else:
         raise ValueError(f"Unknown provider: {provider}")
 

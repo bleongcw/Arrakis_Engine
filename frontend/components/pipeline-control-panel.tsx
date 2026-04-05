@@ -11,6 +11,7 @@ const TASK_LABELS: Record<string, string> = {
   harvest: "Fetch New Games",
   analyze: "Run Analysis",
   patterns: "Update Insights",
+  coach: "Generate Coaching Briefs",
   run_all: "Run All Steps",
 };
 
@@ -24,6 +25,12 @@ function friendlyResult(result: Record<string, number>): string {
   }
   if (result.players_updated != null) {
     parts.push(`insights updated for ${result.players_updated} player${result.players_updated !== 1 ? "s" : ""}`);
+  }
+  if (result.coached != null) {
+    parts.push(`${result.coached} game${result.coached !== 1 ? "s" : ""} coached`);
+  }
+  if (result.skipped != null && result.skipped > 0) {
+    parts.push(`${result.skipped} skipped`);
   }
   if (result.errors && result.errors > 0) {
     parts.push(`${result.errors} error${result.errors !== 1 ? "s" : ""}`);
@@ -119,10 +126,11 @@ function StepArrow() {
 // ── Main component ───────────────────────────────────────
 
 export function PipelineControlPanel() {
-  const { state, dismissed, startHarvest, startAnalyze, startPatterns, startRunAll, dismiss } =
+  const { state, dismissed, startHarvest, startAnalyze, startPatterns, startRunAll, startCoach, cancel, dismiss } =
     usePipeline();
   const { players } = usePlayerContext();
   const [selectedPlayer, setSelectedPlayer] = useState<string>("all");
+  const [selectedProvider, setSelectedProvider] = useState<"claude" | "openai">("claude");
   const [actionError, setActionError] = useState<string | null>(null);
 
   const isRunning = state.status === "running";
@@ -216,6 +224,35 @@ export function PipelineControlPanel() {
             </button>
           </Tooltip>
 
+          <StepArrow />
+
+          {/* Step 4: Coach */}
+          <Tooltip text="Generate AI coaching briefs for all analyzed games that haven't been coached yet, using the selected AI provider.">
+            <button
+              disabled={isRunning}
+              onClick={() => handleAction(() => startCoach(selectedProvider, playerArg))}
+              className={cn(
+                "px-3 py-2 rounded-md text-sm font-medium transition-colors",
+                isRunning
+                  ? "bg-muted text-muted-foreground cursor-not-allowed"
+                  : "bg-rose-600 text-white hover:bg-rose-700"
+              )}
+            >
+              Generate Coaching Briefs
+            </button>
+          </Tooltip>
+
+          {/* Provider selector for coaching */}
+          <select
+            value={selectedProvider}
+            onChange={(e) => setSelectedProvider(e.target.value as "claude" | "openai")}
+            disabled={isRunning}
+            className="px-2 py-1.5 rounded-md border text-sm bg-background disabled:opacity-50"
+          >
+            <option value="claude">Claude</option>
+            <option value="openai">OpenAI</option>
+          </select>
+
           {/* Player selector */}
           <select
             value={selectedPlayer}
@@ -298,6 +335,15 @@ export function PipelineControlPanel() {
             )}
             {progressPct != null && (
               <p className="text-xs text-muted-foreground text-right">{progressPct}%</p>
+            )}
+            {/* Cancel button for coaching */}
+            {state.task === "coach" && (
+              <button
+                onClick={() => handleAction(() => cancel())}
+                className="px-3 py-1.5 rounded-md text-xs font-medium bg-red-600 text-white hover:bg-red-700 transition-colors self-start"
+              >
+                Cancel
+              </button>
             )}
           </div>
         )}

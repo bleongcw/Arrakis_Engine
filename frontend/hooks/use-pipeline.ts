@@ -7,6 +7,8 @@ import {
   triggerPipelineAnalyze,
   triggerPipelinePatterns,
   triggerPipelineRunAll,
+  triggerPipelineCoach,
+  cancelPipeline,
 } from "@/lib/api";
 import type { PipelineState } from "@/lib/types";
 
@@ -99,6 +101,20 @@ export function usePipeline() {
     [poll]
   );
 
+  const startCoach = useCallback(
+    async (provider?: "claude" | "openai", player?: string) => {
+      setDismissed(false);
+      await triggerPipelineCoach(provider, player);
+      await poll();
+    },
+    [poll]
+  );
+
+  const cancel = useCallback(async () => {
+    await cancelPipeline();
+    await poll();
+  }, [poll]);
+
   const dismiss = useCallback(() => {
     setDismissed(true);
   }, []);
@@ -110,6 +126,8 @@ export function usePipeline() {
     startAnalyze,
     startPatterns,
     startRunAll,
+    startCoach,
+    cancel,
     dismiss,
     refresh: poll,
   };

@@ -135,8 +135,10 @@ def cmd_coach(args, config):
         model = config["coaching"]["openai_model"]
 
     limit = getattr(args, 'limit', 0) or 0
-    count = coach_pending(provider=provider, model=model, db_path=db_path, limit=limit, config=config)
-    print(f"Coached {count} games with {provider} ({model}).")
+    result = coach_pending(provider=provider, model=model, db_path=db_path, limit=limit, config=config)
+    print(f"Coached {result['coached']} games with {provider} ({model}). "
+          f"Errors: {result['errors']}, Skipped: {result['skipped']}"
+          + (f" — Aborted: {result['abort_reason']}" if result.get('aborted') else ""))
 
 
 def cmd_patterns(args, config):
