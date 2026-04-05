@@ -18,8 +18,12 @@ pattern tracking over time. Inspired by Eleanor, Evan, and Estella.
 
 ## Key Configuration
 - Stockfish: depth 22, 6 threads, 512MB hash, path configured in config.yaml
-- LLM: abstracted provider supporting both Anthropic (Claude Opus 4.6) and OpenAI (GPT-5.4)
-- Config via config.yaml, secrets via .env (ARRAKIS_ANTHROPIC_API_KEY, ARRAKIS_OPENAI_API_KEY)
+- LLM: unified provider abstraction (`src/llm_providers.py`) supporting 8 providers:
+  - **Cloud:** Claude (`claude-opus-4-6`), ChatGPT (`gpt-5.4`), Gemini (`gemini-2.5-pro`), Grok (`grok-3`), Mistral (`mistral-medium-latest`), DeepSeek (`deepseek-reasoner`), Qwen (`qwen3-235b-a22b`)
+  - **Local:** Ollama (`deepseek-r1:8b`) — no API key required
+- Config via config.yaml, secrets via .env:
+  - `ARRAKIS_ANTHROPIC_API_KEY`, `ARRAKIS_OPENAI_API_KEY`, `ARRAKIS_GOOGLE_API_KEY`
+  - `ARRAKIS_XAI_API_KEY`, `ARRAKIS_MISTRAL_API_KEY`, `ARRAKIS_DEEPSEEK_API_KEY`, `ARRAKIS_QWEN_API_KEY`
 - Initial scope: last 6 months of games
 
 ## Analysis Standards
@@ -48,7 +52,8 @@ ArrakisEngine/
 ├── src/
 │   ├── harvester.py           # Chess.com + Lichess game fetcher
 │   ├── analyzer.py            # Stockfish analysis engine + clock extraction
-│   ├── coach.py               # LLM coaching layer (Anthropic + OpenAI)
+│   ├── llm_providers.py       # Unified LLM provider abstraction (8 providers)
+│   ├── coach.py               # LLM coaching layer (uses llm_providers)
 │   ├── patterns.py            # Cross-game pattern detection + LLM trend summaries
 │   ├── models.py              # SQLite schema & data models (5 tables + migrations, clock_seconds column)
 │   ├── tiers.py               # Adaptive tier system (rating-based)
@@ -80,7 +85,7 @@ ArrakisEngine/
 │   │   ├── patterns/          # 14 visualization components + trend summary + opening explorer + time pressure
 │   │   └── ui/                # shadcn/ui primitives (card, table, button, etc.)
 │   ├── hooks/                 # useChessNavigation
-│   └── lib/                   # API client, types, utilities
+│   └── lib/                   # API client, types, utilities, provider metadata
 ├── dashboard/                 # Legacy single-file HTML dashboard
 │   └── index.html
 ├── data/

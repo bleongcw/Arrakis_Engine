@@ -1,6 +1,6 @@
 # Arrakis Engine
 
-A local Python application that pulls games from **Chess.com** and **Lichess**, runs deep Stockfish analysis on every move, and uses **reasoning LLMs** (Claude Opus 4.6 / GPT-5.4) to generate age-appropriate coaching insights. Built for tracking improvement over time with pattern detection, a live web dashboard, and exportable coach-ready reports.
+A local Python application that pulls games from **Chess.com** and **Lichess**, runs deep Stockfish analysis on every move, and uses **reasoning LLMs** (8 providers: Claude, GPT-5.4, Gemini, Grok, Mistral, DeepSeek, Qwen, or Ollama locally) to generate age-appropriate coaching insights. Built for tracking improvement over time with pattern detection, a live web dashboard, and exportable coach-ready reports.
 
 Inspired by my three children — Eleanor, Evan, and Estella — and their journey learning chess.
 
@@ -154,7 +154,31 @@ ARRAKIS_QWEN_API_KEY=sk-your-qwen-key              # Optional — for Qwen
 # Ollama needs no API key — just `ollama serve` running locally
 ```
 
-### 5. Create your config.yaml
+### 5. Set up Ollama (optional — for free local coaching)
+
+If you want to use local models instead of (or alongside) cloud APIs:
+
+```bash
+# Install Ollama
+brew install ollama
+
+# Pull the default model (~5GB download)
+ollama pull deepseek-r1:8b
+
+# Start the Ollama server (keep running in a separate terminal)
+ollama serve
+```
+
+**Available local models:**
+
+| Model | Pull Command | RAM | Quality |
+|-------|-------------|-----|---------|
+| DeepSeek-R1 8B | `ollama pull deepseek-r1:8b` | ~5GB | Good for testing |
+| DeepSeek-R1 14B | `ollama pull deepseek-r1:14b` | ~9GB | Moderate coaching |
+| DeepSeek-R1 32B | `ollama pull deepseek-r1:32b` | ~20GB | Strong coaching |
+| Qwen3 8B | `ollama pull qwen3:8b` | ~5GB | Good JSON reliability |
+
+### 6. Create your config.yaml
 
 Copy the example template and fill in your details:
 
@@ -187,9 +211,16 @@ analysis:
   months_lookback: 6
 
 coaching:
-  default_provider: claude            # or "openai"
+  default_provider: claude            # claude | openai | gemini | grok | mistral | deepseek | qwen | ollama
   anthropic_model: claude-opus-4-6
-  openai_model: gpt-5.4        # reasoning model (required)
+  openai_model: gpt-5.4
+  gemini_model: gemini-2.5-pro        # optional — requires ARRAKIS_GOOGLE_API_KEY
+  grok_model: grok-3                  # optional — requires ARRAKIS_XAI_API_KEY
+  mistral_model: mistral-medium-latest # optional — requires ARRAKIS_MISTRAL_API_KEY
+  deepseek_model: deepseek-reasoner   # optional — requires ARRAKIS_DEEPSEEK_API_KEY
+  qwen_model: qwen3-235b-a22b        # optional — requires ARRAKIS_QWEN_API_KEY
+  ollama_model: deepseek-r1:8b        # optional — requires `ollama serve` running
+  ollama_base_url: http://localhost:11434
 
 database:
   path: data/chess_coach.db
@@ -249,11 +280,17 @@ python main.py analyze
 **Generate coaching insights:**
 
 ```bash
-# Use default provider from config (Claude Opus 4.6)
+# Use default provider from config
 python main.py coach
 
-# Use a specific provider
+# Use a specific cloud provider
 python main.py coach --provider openai
+python main.py coach --provider gemini
+python main.py coach --provider grok
+python main.py coach --provider deepseek
+
+# Use Ollama for free local coaching (requires `ollama serve` running)
+python main.py coach --provider ollama --limit 5
 
 # Limit batch size (recommended for rate limits)
 python main.py coach --limit 5
@@ -262,11 +299,11 @@ python main.py coach --limit 5
 python main.py coach --provider openai --limit 5
 ```
 
-> **⚠️ LLM Cost Warning:** Each coaching call sends a detailed prompt (~3,000–7,000 tokens) and receives a structured response (~2,000–4,000 tokens). At current API pricing, coaching a single game costs approximately **$0.03–0.10 with Claude Opus 4.6** and **$0.02–0.08 with GPT-5.4**. For a backlog of 400+ games, this can add up to **$15–40 or more**. Start with `--limit 5` to verify quality and estimate your costs before running large batches. Monitor your API usage dashboards at [Anthropic Console](https://console.anthropic.com/) or [OpenAI Platform](https://platform.openai.com/usage).
+> **⚠️ LLM Cost Warning:** Each coaching call sends a detailed prompt (~3,000–7,000 tokens) and receives a structured response (~2,000–4,000 tokens). At current API pricing, coaching a single game costs approximately **$0.03–0.10 with Claude** and **$0.02–0.08 with GPT-5.4**. For a backlog of 400+ games, this can add up to **$15–40 or more**. Start with `--limit 5` to verify quality and estimate your costs before running large batches. **Ollama is free** — it runs locally with no API costs.
 
-> **Rate limits:** OpenAI's `gpt-5.4` has a 10,000 TPM limit (~1 game/min on free/low tiers). Use `--limit 5` per batch to avoid 429 errors. Claude typically has higher throughput — `--limit 10-20` is safe. The dashboard shows which model was used for each game's coaching (purple badge = Claude, green badge = OpenAI).
+> **Rate limits:** Cloud providers have tokens-per-minute caps (e.g., OpenAI's `gpt-5.4` at ~10,000 TPM on free tiers). Use `--limit 5` per batch to avoid 429 errors. Claude typically has higher throughput — `--limit 10-20` is safe. Ollama has no rate limits but is slower (~30–90s per game depending on model size).
 
-> **Dashboard coaching:** You can also coach individual games directly from the dashboard — click the 🟣 **Coach with Claude** or 🟢 **Coach with ChatGPT** button on any game's detail page. Results auto-refresh when complete.
+> **Dashboard coaching:** You can also coach individual games directly from the dashboard — select any provider from the dropdown on a game's detail page and click **Coach Game**. The pipeline panel also supports all 8 providers with Cloud/Local grouping. Results auto-refresh when complete.
 
 **Update FIDE rating:**
 
@@ -504,10 +541,10 @@ python main.py dashboard
 - **Game analysis** — interactive chessboard, move-by-move eval chart (bars colored by move classification), color-coded move list for both player and opponent
 - **Move quality summary** — per-game table with proportional bars for excellent/good/inaccuracy/mistake/blunder
 - **Opening analysis** — LLM-generated assessment with opening name, quality rating, counter-move correctness, and tips
-- **On-demand coaching** — Coach with Claude / Coach with ChatGPT buttons on each game, with auto-refresh
+- **On-demand coaching** — provider dropdown (8 providers: Claude, ChatGPT, Gemini, Grok, Mistral, DeepSeek, Qwen, Ollama) with Coach Game button on each game, auto-refresh on completion
 - **Feedback to Player** — personal letter with 3 actionable tips and growth mindset framing
 - **Patterns page** — 13 visualization panels + AI coaching summary:
-  - **LLM Trend Summary** — AI-generated coaching narrative interpreting cross-game patterns (Generate with Claude or ChatGPT, with regenerate option)
+  - **LLM Trend Summary** — AI-generated coaching narrative interpreting cross-game patterns (provider dropdown with all 8 providers, regenerate option)
   - Overview stat cards (games, win rate, accuracy %, ACPL, consistency, vs higher-rated)
   - ACPL Trend chart with clickable info modal
   - Move Quality Distribution donut with percentages
@@ -567,7 +604,8 @@ ArrakisEngine/
 │   ├── models.py          # SQLite schema (5 tables) and data helpers
 │   ├── harvester.py       # Multi-platform game fetcher (Chess.com + Lichess)
 │   ├── analyzer.py        # Stockfish move-by-move analysis engine + clock extraction
-│   ├── coach.py           # LLM coaching layer (Claude / OpenAI)
+│   ├── coach.py           # LLM coaching layer (8 providers via llm_providers.py)
+│   ├── llm_providers.py   # Unified LLM provider abstraction (Claude, OpenAI, Gemini, Grok, Mistral, DeepSeek, Qwen, Ollama)
 │   ├── tiers.py           # Adaptive tier system (Beginner → Expert)
 │   ├── patterns.py        # Cross-game pattern detection + LLM trend summaries
 │   ├── export.py          # JSON export for dashboard
@@ -605,8 +643,8 @@ ArrakisEngine/
 │   │   ├── game-detail/       # ChessBoard, EvalChart, MoveList, CoachingPanels, ComparisonSummary
 │   │   ├── patterns/          # 14 visualization components + TrendSummary + TimePressure + OpeningExplorer + RatingProgression + OpeningRepertoire
 │   │   └── ui/                # shadcn/ui primitives (card, table, button, etc.)
-│   ├── hooks/                 # useChessNavigation, usePipeline
-│   └── lib/                   # API client (api.ts), types (types.ts), utils
+│   ├── hooks/                 # useChessNavigation, usePipeline, useCoaching
+│   └── lib/                   # API client (api.ts), types (types.ts), providers (providers.ts), utils
 ├── docs/
 │   └── screenshots/       # Architecture diagram and screenshots
 ├── tests/                 # Test suite (182 tests across 3 tiers)
@@ -712,8 +750,14 @@ The `data/` directory is created automatically. If you see this error, check tha
 **"No such file or directory: '/usr/local/bin/stockfish'"**
 Update the `stockfish.path` in `config.yaml` to match your installation. Use `which stockfish` to find the correct path.
 
-**"ARRAKIS_ANTHROPIC_API_KEY not set"**
-Create a `.env` file in the project root with your API keys (see [Configure API keys](#4-configure-api-keys)).
+**"ARRAKIS_ANTHROPIC_API_KEY not set" (or any provider key)**
+Create a `.env` file in the project root with your API keys (see [Configure API keys](#4-configure-api-keys)). You only need keys for the providers you use. Ollama requires no API key.
+
+**"Cannot connect to Ollama"**
+Ollama must be running before you start coaching. Start it with `ollama serve` in a separate terminal. If using a non-default URL, update `ollama_base_url` in `config.yaml`.
+
+**Ollama coaching is slow**
+Local models are slower than cloud APIs. The 8B model (~30 tok/s on M3 Max) takes ~30–60s per game. For faster results, use a cloud provider. For better local quality, try a larger model: `ollama pull deepseek-r1:14b` or `deepseek-r1:32b` (requires more RAM).
 
 **Analysis is very slow**
 Homebrew Stockfish runs at ~4.4M nodes/sec vs ~9–14M nodes/sec for a source-compiled binary. Consider compiling from source (see [Install Stockfish](#2-install-stockfish)). Each move has a 10-second time limit to prevent hanging. You can also reduce depth in `config.yaml` — depth 18 is ~3x faster with minimal loss in accuracy for beginner-to-intermediate players.
