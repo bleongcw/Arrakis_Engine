@@ -35,6 +35,7 @@ export function ApiKeysSection() {
   const [keys, setKeys] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState<string | null>(null);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [expanded, setExpanded] = useState(false);
 
   const loadStatus = () => {
     fetchSettings()
@@ -97,59 +98,82 @@ export function ApiKeysSection() {
           })}
         </div>
 
-        {anyConfigured && (
-          <p className="text-xs text-muted-foreground">
-            Keys detected from environment. Leave fields empty to keep current keys. Only fill in to replace.
-          </p>
-        )}
-
-        {/* Key inputs — 2 columns on desktop */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {PROVIDER_KEYS.map((p) => {
-            const hint = status[p.hintKey as keyof ApiKeyStatus] as string | null;
-            return (
-              <div key={p.slug} className="space-y-1.5">
-                <Label htmlFor={`key_${p.slug}`}>
-                  {p.label} API Key
-                  <span className="ml-1.5 text-[10px] text-muted-foreground font-normal">
-                    {p.envVar}
-                  </span>
-                </Label>
-                <div className="flex gap-2">
-                  <Input
-                    id={`key_${p.slug}`}
-                    type="password"
-                    value={keys[p.slug] || ""}
-                    onChange={(e) => {
-                      setKeys((prev) => ({ ...prev, [p.slug]: e.target.value }));
-                      setMessage(null);
-                    }}
-                    placeholder={hint || p.placeholder}
-                    className="flex-1"
-                  />
-                  <Button
-                    size="sm"
-                    onClick={() => handleUpdate(p)}
-                    disabled={!(keys[p.slug] || "").trim() || saving === p.slug}
-                  >
-                    {saving === p.slug ? "..." : "Update"}
-                  </Button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        {message && (
-          <p
-            className={`text-sm ${
-              message.type === "success"
-                ? "text-emerald-600 dark:text-emerald-400"
-                : "text-destructive"
-            }`}
+        {/* Toggle to show/hide key inputs */}
+        <button
+          onClick={() => setExpanded((v) => !v)}
+          className="text-sm text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"
+        >
+          <svg
+            className={`w-3.5 h-3.5 transition-transform ${expanded ? "rotate-90" : ""}`}
+            viewBox="0 0 20 20"
+            fill="currentColor"
           >
-            {message.text}
-          </p>
+            <path
+              fillRule="evenodd"
+              d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z"
+              clipRule="evenodd"
+            />
+          </svg>
+          {expanded ? "Hide key management" : "Manage API keys"}
+        </button>
+
+        {expanded && (
+          <>
+            {anyConfigured && (
+              <p className="text-xs text-muted-foreground">
+                Keys detected from environment. Leave fields empty to keep current keys. Only fill in to replace.
+              </p>
+            )}
+
+            {/* Key inputs — 2 columns on desktop */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {PROVIDER_KEYS.map((p) => {
+                const hint = status[p.hintKey as keyof ApiKeyStatus] as string | null;
+                return (
+                  <div key={p.slug} className="space-y-1.5">
+                    <Label htmlFor={`key_${p.slug}`}>
+                      {p.label} API Key
+                      <span className="ml-1.5 text-[10px] text-muted-foreground font-normal">
+                        {p.envVar}
+                      </span>
+                    </Label>
+                    <div className="flex gap-2">
+                      <Input
+                        id={`key_${p.slug}`}
+                        type="password"
+                        value={keys[p.slug] || ""}
+                        onChange={(e) => {
+                          setKeys((prev) => ({ ...prev, [p.slug]: e.target.value }));
+                          setMessage(null);
+                        }}
+                        placeholder={hint || p.placeholder}
+                        className="flex-1"
+                      />
+                      <Button
+                        size="sm"
+                        onClick={() => handleUpdate(p)}
+                        disabled={!(keys[p.slug] || "").trim() || saving === p.slug}
+                      >
+                        {saving === p.slug ? "..." : "Update"}
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {message && (
+              <p
+                className={`text-sm ${
+                  message.type === "success"
+                    ? "text-emerald-600 dark:text-emerald-400"
+                    : "text-destructive"
+                }`}
+              >
+                {message.text}
+              </p>
+            )}
+          </>
         )}
       </div>
     </SettingsSection>
