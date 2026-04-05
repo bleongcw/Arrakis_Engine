@@ -264,8 +264,9 @@ def _compute_acpl_trend(games: list[dict],
         if not g["date_played"]:
             continue
         try:
-            date = datetime.strptime(g["date_played"], "%Y-%m-%d")
-        except ValueError:
+            dp = g["date_played"]
+            date = datetime.strptime(dp, "%Y-%m-%d %H:%M:%S") if " " in dp else datetime.strptime(dp, "%Y-%m-%d")
+        except (ValueError, TypeError):
             continue
         week_start = (date - timedelta(days=date.weekday())).strftime("%Y-%m-%d")
 

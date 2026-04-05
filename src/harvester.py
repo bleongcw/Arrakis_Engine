@@ -139,7 +139,7 @@ def harvest_chess_com(username: str, player_id: int, conn,
 
                 end_time = game.get("end_time")
                 if end_time:
-                    date_played = datetime.fromtimestamp(end_time).strftime("%Y-%m-%d")
+                    date_played = datetime.fromtimestamp(end_time).strftime("%Y-%m-%d %H:%M:%S")
                 else:
                     date_played = None
 
@@ -171,13 +171,17 @@ LICHESS_API_BASE = "https://lichess.org/api"
 
 
 def _lichess_extract_date(pgn_text: str) -> str | None:
-    """Extract date from PGN [UTCDate] or [Date] header."""
-    match = re.search(r'\[UTCDate\s+"(\d{4}\.\d{2}\.\d{2})"\]', pgn_text)
-    if match:
-        return match.group(1).replace(".", "-")
-    match = re.search(r'\[Date\s+"(\d{4}\.\d{2}\.\d{2})"\]', pgn_text)
-    if match:
-        return match.group(1).replace(".", "-")
+    """Extract date+time from PGN [UTCDate]+[UTCTime] or [Date] headers."""
+    date_match = re.search(r'\[UTCDate\s+"(\d{4}\.\d{2}\.\d{2})"\]', pgn_text)
+    time_match = re.search(r'\[UTCTime\s+"(\d{2}:\d{2}:\d{2})"\]', pgn_text)
+    if date_match:
+        date_str = date_match.group(1).replace(".", "-")
+        if time_match:
+            return f"{date_str} {time_match.group(1)}"
+        return date_str
+    date_match = re.search(r'\[Date\s+"(\d{4}\.\d{2}\.\d{2})"\]', pgn_text)
+    if date_match:
+        return date_match.group(1).replace(".", "-")
     return None
 
 
