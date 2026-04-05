@@ -372,7 +372,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             "coaching": {
                 "default_provider": coaching.get("default_provider", "claude"),
                 "anthropic_model": coaching.get("anthropic_model", "claude-opus-4-6"),
-                "openai_model": coaching.get("openai_model", "chatgpt-5.4-pro"),
+                "openai_model": coaching.get("openai_model", "gpt-5.4-pro"),
                 "gemini_model": coaching.get("gemini_model", "gemini-2.5-pro"),
                 "grok_model": coaching.get("grok_model", "grok-3"),
                 "mistral_model": coaching.get("mistral_model", "mistral-medium-latest"),

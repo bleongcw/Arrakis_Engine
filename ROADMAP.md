@@ -12,7 +12,7 @@ Non-reasoning models produce shallow, generic feedback.
 | Provider | Model | Type | Status |
 |----------|-------|------|--------|
 | Anthropic | `claude-opus-4-6` | Cloud / Reasoning | **Active** |
-| OpenAI | `chatgpt-5.4-pro` | Cloud / Reasoning | **Active** |
+| OpenAI | `gpt-5.4-pro` | Cloud / Reasoning | **Active** |
 | Google | `gemini-2.5-pro` | Cloud / Reasoning | **Active** |
 | xAI | `grok-3` | Cloud / Reasoning | **Active** |
 | Mistral | `mistral-medium-latest` | Cloud / Reasoning | **Active** |

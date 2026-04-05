@@ -46,7 +46,7 @@ const ALL_FOCUS_AREAS = [
 const DEFAULTS: CoachingForm = {
   default_provider: "claude",
   anthropic_model: "claude-opus-4-6",
-  openai_model: "chatgpt-5.4-pro",
+  openai_model: "gpt-5.4-pro",
   gemini_model: "gemini-2.5-pro",
   grok_model: "grok-3",
   mistral_model: "mistral-medium-latest",
@@ -62,7 +62,7 @@ const DEFAULTS: CoachingForm = {
 
 const MODEL_FIELDS: { key: keyof CoachingForm; label: string; placeholder: string }[] = [
   { key: "anthropic_model", label: "Claude Model", placeholder: "claude-opus-4-6" },
-  { key: "openai_model", label: "ChatGPT Model", placeholder: "chatgpt-5.4-pro" },
+  { key: "openai_model", label: "ChatGPT Model", placeholder: "gpt-5.4-pro" },
   { key: "gemini_model", label: "Gemini Model", placeholder: "gemini-2.5-pro" },
   { key: "grok_model", label: "Grok Model", placeholder: "grok-3" },
   { key: "mistral_model", label: "Mistral Model", placeholder: "mistral-medium-latest" },
