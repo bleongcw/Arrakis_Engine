@@ -67,6 +67,8 @@ First public open-source release under AGPL-3.0.
 - CONTRIBUTING.md with CLA for dual-licensing
 - CODE_OF_CONDUCT.md (Contributor Covenant v2.1)
 - ROADMAP.md with Ollama/open-source reasoning model plans
+- README.md table of contents with linked section navigation
+- 10 screenshots added to README.md (Dashboard, Games, Patterns 1–7, Reports)
 
 ---
 

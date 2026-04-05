@@ -4,6 +4,21 @@ A local Python application that pulls games from **Chess.com** and **Lichess**, 
 
 Inspired by my three children — Eleanor, Evan, and Estella — and their journey learning chess.
 
+## Table of Contents
+
+- [Architecture](#architecture)
+- [Screenshots](#screenshots)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [CLI Commands](#cli-commands)
+- [Typical Workflow](#typical-workflow)
+- [How Analysis Works](#how-analysis-works)
+- [Web Dashboard](#web-dashboard)
+- [Project Structure](#project-structure)
+- [Running Tests](#running-tests)
+- [Troubleshooting](#troubleshooting)
+- [License](#license)
+
 ## Architecture
 
 ![Arrakis Engine Architecture](docs/screenshots/Arrakis-Engine-Architecture-TB.jpg)
