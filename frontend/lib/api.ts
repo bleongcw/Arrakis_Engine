@@ -124,7 +124,13 @@ export async function triggerPipelineCoach(provider?: "claude" | "openai", playe
 }
 
 export async function cancelPipeline(): Promise<{ status: string; message: string }> {
-  return postPipeline("cancel");
+  const res = await fetch(`${BASE}/pipeline/cancel`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  // Don't throw on 400 — task may have already finished
+  return res.json();
 }
 
 // ── Schedule API ─────────────────────────────────────────

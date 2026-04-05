@@ -733,6 +733,15 @@ def coach_pending(provider: str = "claude", model: str | None = None,
                 # Gradually recover delay back to base after successful calls
                 if current_delay > base_delay:
                     current_delay = max(base_delay, current_delay - 5)
+
+                # ── Check cancellation immediately after LLM call ──
+                if cancel_event and cancel_event.is_set():
+                    result["coached"] += 1
+                    result["skipped"] = total_pending - i - 1
+                    result["aborted"] = True
+                    result["abort_reason"] = "Cancelled by user"
+                    logger.info("Coaching cancelled after completing game %d/%d", i + 1, total_pending)
+                    break
                 break
 
             except Exception as e:
@@ -748,7 +757,16 @@ def coach_pending(provider: str = "claude", model: str | None = None,
                     )
                     # Increase delay for all subsequent games in this batch
                     current_delay = min(current_delay + 10, 60)
-                    time.sleep(backoff)
+                    # Interruptible backoff sleep
+                    if cancel_event:
+                        cancel_event.wait(backoff)
+                        if cancel_event.is_set():
+                            result["skipped"] = total_pending - i
+                            result["aborted"] = True
+                            result["abort_reason"] = "Cancelled by user"
+                            return result
+                    else:
+                        time.sleep(backoff)
                     continue  # Retry
 
                 elif _is_auth_error(e):

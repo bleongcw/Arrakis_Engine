@@ -130,11 +130,27 @@ export function PipelineControlPanel() {
     usePipeline();
   const { players } = usePlayerContext();
   const [selectedPlayer, setSelectedPlayer] = useState<string>("all");
-  const [selectedProvider, setSelectedProvider] = useState<"claude" | "openai">("claude");
+  const [selectedProvider, setSelectedProvider] = useState<"claude" | "openai">("openai");
   const [actionError, setActionError] = useState<string | null>(null);
+  const [cancelling, setCancelling] = useState(false);
 
   const isRunning = state.status === "running";
   const playerArg = selectedPlayer === "all" ? undefined : selectedPlayer;
+
+  // Reset cancelling state when task finishes
+  if (!isRunning && cancelling) {
+    setCancelling(false);
+  }
+
+  const handleCancel = async () => {
+    setCancelling(true);
+    setActionError(null);
+    try {
+      await cancel();
+    } catch {
+      // Ignore — task may have finished between click and request
+    }
+  };
 
   const handleAction = async (action: () => Promise<void>) => {
     setActionError(null);
@@ -339,10 +355,16 @@ export function PipelineControlPanel() {
             {/* Cancel button for coaching */}
             {state.task === "coach" && (
               <button
-                onClick={() => handleAction(() => cancel())}
-                className="px-3 py-1.5 rounded-md text-xs font-medium bg-red-600 text-white hover:bg-red-700 transition-colors self-start"
+                disabled={cancelling}
+                onClick={handleCancel}
+                className={cn(
+                  "px-3 py-1.5 rounded-md text-xs font-medium transition-colors self-start",
+                  cancelling
+                    ? "bg-red-400 text-white cursor-not-allowed"
+                    : "bg-red-600 text-white hover:bg-red-700"
+                )}
               >
-                Cancel
+                {cancelling ? "Cancelling..." : "Cancel"}
               </button>
             )}
           </div>
