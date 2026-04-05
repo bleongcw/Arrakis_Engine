@@ -67,8 +67,9 @@ export function useCoaching(gameId: number) {
           } catch {
             // ignore polling errors
           }
-          if (attempts >= 90) {
-            // 90 * 3s = 4.5 minutes timeout
+          if (attempts >= 200) {
+            // 200 * 3s = 10 minutes timeout
+            // Reasoning models (Claude Opus, DeepSeek-R1) can take 2-5 min per game
             if (pollRef.current) clearInterval(pollRef.current);
             setIsCoaching(false);
             setStatus("Coaching timed out. Refresh to check.");

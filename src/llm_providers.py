@@ -30,7 +30,7 @@ PROVIDER_REGISTRY = {
         "default_model": "claude-opus-4-6",
         "env_var": "ARRAKIS_ANTHROPIC_API_KEY",
         "base_url": None,
-        "default_timeout": 120.0,
+        "default_timeout": 300.0,  # Opus with extended thinking needs more time
         "config_model_key": "anthropic_model",
         "group": "cloud",
         "color": "#7c3aed",
@@ -52,7 +52,7 @@ PROVIDER_REGISTRY = {
         "default_model": "gemini-2.5-pro",
         "env_var": "ARRAKIS_GOOGLE_API_KEY",
         "base_url": None,
-        "default_timeout": 120.0,
+        "default_timeout": 300.0,  # Reasoning model, needs more time
         "config_model_key": "gemini_model",
         "group": "cloud",
         "color": "#4285f4",
@@ -85,7 +85,7 @@ PROVIDER_REGISTRY = {
         "default_model": "deepseek-reasoner",
         "env_var": "ARRAKIS_DEEPSEEK_API_KEY",
         "base_url": "https://api.deepseek.com",
-        "default_timeout": 120.0,
+        "default_timeout": 300.0,  # Reasoning model, needs more time
         "config_model_key": "deepseek_model",
         "group": "cloud",
         "color": "#6366f1",

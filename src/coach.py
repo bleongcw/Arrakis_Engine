@@ -662,6 +662,18 @@ def coach_pending(provider: str = "claude", model: str | None = None,
             break
 
         game_id = row["id"]
+
+        # ── Skip if already coached (e.g. per-game coaching clicked during batch) ──
+        check_conn = init_db(db_path)
+        current_status = check_conn.execute(
+            "SELECT coaching_status FROM games WHERE id = ?", (game_id,)
+        ).fetchone()
+        check_conn.close()
+        if current_status and current_status["coaching_status"] == "complete":
+            logger.info("Game %d already coached — skipping (%d/%d)", game_id, i + 1, total_pending)
+            result["skipped"] += 1
+            continue
+
         logger.info("Coaching game %d/%d (id=%d)", i + 1, total_pending, game_id)
 
         if progress_callback:
