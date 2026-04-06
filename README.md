@@ -1,15 +1,42 @@
 # Arrakis Engine
 
-A local Python application that pulls games from **Chess.com** and **Lichess**, runs deep Stockfish analysis on every move, and uses **reasoning LLMs** (8 providers: Claude, GPT-5.4, Gemini, Grok, Mistral, DeepSeek, Qwen, or Ollama locally) to generate age-appropriate coaching insights. Built for tracking improvement over time with pattern detection, a live web dashboard, and exportable coach-ready reports.
+[![CI](https://github.com/bleongcw/Arrakis_Engine/actions/workflows/ci.yml/badge.svg)](https://github.com/bleongcw/Arrakis_Engine/actions/workflows/ci.yml)
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-yellow.svg)](https://www.python.org/)
+[![Release](https://img.shields.io/github/v/release/bleongcw/Arrakis_Engine)](https://github.com/bleongcw/Arrakis_Engine/releases)
 
-Inspired by my three children — Eleanor, Evan, and Estella — and their journey learning chess.
+A local chess coaching AI that pulls your games from Chess.com and Lichess, runs deep Stockfish analysis on every move, and uses reasoning LLMs to generate personalized, age-appropriate coaching insights — with pattern tracking over time and a live web dashboard.
+
+*Dedicated to my wife Yuying Deng and our three children — Eleanor, Evan, and Estella — whose chess journey inspired every line of this project.*
+
+## Why Arrakis Engine?
+
+My kids play chess. After every game, they'd ask: *"How did I do? What should I practice?"*
+
+Chess engines can tell you *what* went wrong — move 23 was a blunder, you lost 300 centipawns. But they can't tell you *why* it matters, *what* pattern caused it, or *how* to fix it next time. A list of computer evaluations isn't coaching.
+
+Online platforms like Chess.com and Lichess offer basic game review, but nothing that adapts to a child's age, connects lessons across multiple games, or builds on what was taught last week. Real coaching requires context — and context is what's missing.
+
+**Arrakis Engine bridges that gap.** It pairs Stockfish's analytical depth with reasoning LLMs (Claude, GPT, Gemini, and 5 more) to produce coaching that:
+
+- Explains positions in language a 9-year-old can understand
+- Remembers what was taught in the last 5 games and builds on it
+- Detects game types (tactical battle, comeback, opening disaster) and adjusts advice accordingly
+- Tracks patterns over weeks and months — not just single games
+- Writes a personal letter to the player after each game with 3 specific things to practice
+
+It supports 8 LLM providers (including Ollama for free local coaching) and runs entirely on your own machine. Your data stays yours.
+
+The name comes from Frank Herbert's *Dune* — on Arrakis, the spice must flow. In chess, good coaching must flow.
 
 ## Table of Contents
 
-- [Architecture](#architecture)
+- [Why Arrakis Engine?](#why-arrakis-engine)
 - [Screenshots](#screenshots)
-- [Requirements](#requirements)
-- [Installation](#installation)
+- [How a Chess Parent Uses This](#how-a-chess-parent-uses-this)
+- [Quick Start for Chess Parents](#quick-start-for-chess-parents)
+- [Architecture](#architecture)
+- [Full Installation Guide](#full-installation-guide)
 - [CLI Commands](#cli-commands)
 - [Typical Workflow](#typical-workflow)
 - [How Analysis Works](#how-analysis-works)
@@ -17,20 +44,8 @@ Inspired by my three children — Eleanor, Evan, and Estella — and their journ
 - [Project Structure](#project-structure)
 - [Running Tests](#running-tests)
 - [Troubleshooting](#troubleshooting)
+- [Acknowledgements](#acknowledgements)
 - [License](#license)
-
-## Architecture
-
-![Arrakis Engine Architecture](docs/screenshots/Arrakis-Engine-Architecture-TB.jpg)
-
-The pipeline is five layers:
-1. **Stockfish engine evaluation** — objective, per-move centipawn analysis with clock time extraction
-2. **LLM coaching interpretation** — transforms raw engine output into human-readable insights
-3. **Pattern aggregation** — tracks trends across games over weeks and months
-4. **LLM trend summaries** — interprets cross-game patterns into coaching narratives
-5. **Time pressure analysis** — per-move clock data reveals time management patterns and pressure-induced blunders
-
-The frontend is a fully mobile-responsive Next.js 16 + React 19 dashboard with player-scoped URLs (`/<player>/games`, `/<player>/patterns`, `/<player>/reports`).
 
 ## Screenshots
 
@@ -74,7 +89,94 @@ The frontend is a fully mobile-responsive Next.js 16 + React 19 dashboard with p
 
 ![Reports](docs/screenshots/Arrakis-Engine-Reports.png)
 
-## Requirements
+## How a Chess Parent Uses This
+
+You don't need to understand Stockfish, centipawns, or LLMs to use Arrakis Engine. Here's what the experience looks like:
+
+### 1. Pull Your Games
+
+Add your child's Chess.com or Lichess username to the config file. Arrakis fetches every game from the last 6 months automatically — rapid, blitz, bullet, and daily. It deduplicates, so you can run it as often as you like without worrying about double-counting.
+
+### 2. See What Happened
+
+Every game gets deep engine analysis: each move is evaluated, blunders and mistakes are highlighted, and a win-probability chart shows exactly where the game turned. You'll see which moves were excellent, which were inaccurate, and which were outright blunders — color-coded and interactive on the dashboard (see [Games List screenshot](#games-list) above).
+
+### 3. Get Real Coaching
+
+This is where Arrakis is different. An AI reads the full analysis and writes a coaching brief for each game:
+
+- **A game story** — "You played the Italian Game and got a great position out of the opening, but after move 18 you started rushing..."
+- **A key lesson** — "When you're winning, slow down and look for your opponent's best reply before moving."
+- **A personal letter** — 3 specific, actionable tips written in an encouraging tone appropriate for the player's age.
+- **Coach notes** — a technical summary for the parent or coach to use in lesson planning.
+
+The AI remembers what it taught in previous games, so advice builds over time rather than repeating the same tips.
+
+### 4. Track Improvement Over Time
+
+After a few weeks of games, the Patterns page comes alive (see [Patterns screenshots](#patterns--coaching-summary--rating-progression) above). You'll see:
+
+- Whether accuracy and consistency are improving week over week
+- Which openings are working and which need attention
+- Danger zones — the move ranges where errors cluster
+- How well your child converts winning positions in endgames
+- Time management patterns — do they blunder more when the clock is low?
+
+**All of this runs locally on your computer. Your data stays yours.**
+
+## Quick Start for Chess Parents
+
+A simplified path to get up and running. You'll need macOS or Linux, Python 3.11+, and Node.js 18+.
+
+```bash
+# 1. Clone the repository
+git clone git@github.com:bleongcw/Arrakis_Engine.git
+cd Arrakis_Engine
+
+# 2. Install Stockfish (the chess engine)
+brew install stockfish
+
+# 3. Set up Python
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+
+# 4. Configure your players
+cp config.yaml.example config.yaml
+# Edit config.yaml — replace "your_chess_com_username" with your child's username
+```
+
+For LLM coaching, create a `.env` file with at least one API key (see [Configure API keys](#4-configure-api-keys)). Or use [Ollama](https://ollama.com) for free local coaching — no API key needed.
+
+```bash
+# 5. Run the full pipeline and launch the dashboard
+python main.py run-all
+
+# 6. Start the web dashboard (in a new terminal)
+cd frontend && pnpm install && pnpm dev
+# Open http://localhost:3000
+```
+
+For advanced options (compile Stockfish from source, configure multiple providers, Ollama setup), see the [Full Installation Guide](#full-installation-guide) below.
+
+## Architecture
+
+![Arrakis Engine Architecture](docs/screenshots/Arrakis-Engine-Architecture-TB.jpg)
+
+The pipeline is five layers:
+1. **Stockfish engine evaluation** — objective, per-move centipawn analysis with clock time extraction
+2. **LLM coaching interpretation** — transforms raw engine output into human-readable insights
+3. **Pattern aggregation** — tracks trends across games over weeks and months
+4. **LLM trend summaries** — interprets cross-game patterns into coaching narratives
+5. **Time pressure analysis** — per-move clock data reveals time management patterns and pressure-induced blunders
+
+The frontend is a fully mobile-responsive Next.js 16 + React 19 dashboard with player-scoped URLs (`/<player>/games`, `/<player>/patterns`, `/<player>/reports`).
+
+## Full Installation Guide
+
+> Looking for a faster path? See [Quick Start for Chess Parents](#quick-start-for-chess-parents) above.
+
+### Requirements
 
 | Requirement | Version | Notes |
 |---|---|---|
@@ -82,7 +184,7 @@ The frontend is a fully mobile-responsive Next.js 16 + React 19 dashboard with p
 | Stockfish | 16+ | Apple Silicon recommended |
 | macOS / Linux | Any | Developed on macOS (Apple Silicon) |
 
-### API Keys (for LLM coaching only)
+#### API Keys (for LLM coaching only)
 
 - **Anthropic** — [console.anthropic.com](https://console.anthropic.com) → API Keys
 - **OpenAI** — [platform.openai.com](https://platform.openai.com) → API Keys
@@ -95,13 +197,11 @@ The frontend is a fully mobile-responsive Next.js 16 + React 19 dashboard with p
 
 The harvester and Stockfish analyzer work without API keys. You only need at least one provider key (or Ollama) for the LLM coaching step.
 
-## Installation
-
 ### 1. Clone the repository
 
 ```bash
 git clone git@github.com:bleongcw/Arrakis_Engine.git
-cd ArrakisEngine
+cd Arrakis_Engine
 ```
 
 ### 2. Install Stockfish
@@ -299,7 +399,7 @@ python main.py coach --limit 5
 python main.py coach --provider openai --limit 5
 ```
 
-> **⚠️ LLM Cost Warning:** Each coaching call sends a detailed prompt (~3,000–7,000 tokens) and receives a structured response (~2,000–4,000 tokens). At current API pricing, coaching a single game costs approximately **$0.03–0.10 with Claude** and **$0.02–0.08 with GPT-5.4**. For a backlog of 400+ games, this can add up to **$15–40 or more**. Start with `--limit 5` to verify quality and estimate your costs before running large batches. **Ollama is free** — it runs locally with no API costs.
+> **LLM Cost Warning:** Each coaching call sends a detailed prompt (~3,000–7,000 tokens) and receives a structured response (~2,000–4,000 tokens). At current API pricing, coaching a single game costs approximately **$0.03–0.10 with Claude** and **$0.02–0.08 with GPT-5.4**. For a backlog of 400+ games, this can add up to **$15–40 or more**. Start with `--limit 5` to verify quality and estimate your costs before running large batches. **Ollama is free** — it runs locally with no API costs.
 
 > **Rate limits:** Cloud providers have tokens-per-minute caps (e.g., OpenAI's `gpt-5.4` at ~10,000 TPM on free tiers). Use `--limit 5` per batch to avoid 429 errors. Claude typically has higher throughput — `--limit 10-20` is safe. Ollama has no rate limits but is slower (~30–90s per game depending on model size).
 
@@ -330,11 +430,13 @@ python main.py report --monthly --output reports/march
 **Launch the dashboard:**
 
 ```bash
+# Terminal 1: Start the Python API backend
 python main.py dashboard
 # → http://localhost:8000
 
-# Custom port
-python main.py dashboard --port 3000
+# Terminal 2: Start the Next.js frontend
+cd frontend && pnpm install && pnpm dev
+# Open http://localhost:3000
 ```
 
 **Run the full pipeline:**
@@ -505,10 +607,6 @@ Patterns are aggregated across all games per player:
 
 ## Web Dashboard
 
-Two dashboard options are available — both connect to the same Python backend API:
-
-### Next.js Dashboard (recommended)
-
 Built with Next.js 16, React 19, shadcn/ui, Tailwind CSS, and Recharts. Fully mobile-responsive (320px+). Requires Node.js 18+.
 
 ```bash
@@ -522,20 +620,14 @@ cd frontend && pnpm install && pnpm dev
 
 **Player-scoped URLs:** All player pages use bookmarkable URLs like `/<username>/games`, `/<username>/patterns`, etc. Switching players in the header navigates to the same section under the new player's URL.
 
-### Legacy Dashboard
-
-Single-file vanilla HTML/JS/CSS dashboard served directly by the Python backend.
-
-```bash
-python main.py dashboard
-# Open http://localhost:8000
-```
-
-### Dashboard Features
+### Player Hub & Navigation
 
 - **Player-scoped URLs** — every player page is bookmarkable and shareable: `/<username>/games`, `/<username>/patterns`, `/<username>/reports`
 - **Multi-player switching** — player selector in the header; switching players navigates to the same section under the new player's URL
 - **Player Hub** — default landing page with Chess.com, Lichess, and FIDE profiles, tier badge, game counts, and direct links to external profiles
+
+### Games & Analysis
+
 - **Games list** — filterable by result, time control, coaching status, month, platform (Chess.com / Lichess), and date range
 - **Platform icons** — ♜ Chess.com / ♞ Lichess shown per game
 - **Game analysis** — interactive chessboard, move-by-move eval chart (bars colored by move classification), color-coded move list for both player and opponent
@@ -543,39 +635,47 @@ python main.py dashboard
 - **Opening analysis** — LLM-generated assessment with opening name, quality rating, counter-move correctness, and tips
 - **On-demand coaching** — provider dropdown (8 providers: Claude, ChatGPT, Gemini, Grok, Mistral, DeepSeek, Qwen, Ollama) with Coach Game button on each game, auto-refresh on completion
 - **Feedback to Player** — personal letter with 3 actionable tips and growth mindset framing
-- **Patterns page** — 13 visualization panels + AI coaching summary:
-  - **LLM Trend Summary** — AI-generated coaching narrative interpreting cross-game patterns (provider dropdown with all 8 providers, regenerate option)
-  - Overview stat cards (games, win rate, accuracy %, ACPL, consistency, vs higher-rated)
-  - ACPL Trend chart with clickable info modal
-  - Move Quality Distribution donut with percentages
-  - Danger Zones histogram (blunders/mistakes by move range)
-  - Phase Performance bar chart (opening/middlegame/endgame)
-  - Endgame Conversion rates (winning/losing/equal positions)
-  - Critical Position gauges (under pressure + capitalizing on opponent mistakes)
-  - Tactical Awareness bars (found vs missed by phase)
-  - Resilience & Composure (comeback rate + collapse rate)
-  - Repertoire Consistency (white/black focus scores with top-3 openings)
-  - Time Control Performance table (win%, ACPL, blunder% per format)
-  - Opening Quality Analysis table (ACPL per opening with verdict badges)
-  - Time Pressure Analysis: time management score, time trouble rate, avg time per move by phase (bar chart), blunder rate comparison under pressure vs comfortable
-  - **Rating Progression Chart** — interactive line chart showing rating over time with result-colored dots (green win / red loss / amber draw), time class filter (all/rapid/blitz/bullet/daily), 10-game moving average trend line, and info modal
-  - **Opening Repertoire Tracker** — ECO distribution bar chart, sortable opening table with win rate and trend indicators (improving/declining/stable), All/White/Black filter tabs, and focus areas panel highlighting openings that need work
-  - Opening Win Rate table (split by All / White / Black) with **interactive Opening Explorer** — click any opening to expand a chessboard showing the opening position with step-through move controls, plus a linked list of all games using that opening; board orientation flips on the Black tab
-  - **Opening Book Integration** — ECO code and opening name badge, moves annotated with green checkmarks (matches book theory) and orange markers (deviations), with "Book move: X" vs "Player played: Y" callouts; expanded to 438 ECO entries (A00-E99) with deeper variations
-- **Games page** enhancements:
-  - **Game Comparison View** — select two games and compare side-by-side with independent chessboards, eval charts, move quality summaries, and a comparison table highlighting differences in ACPL, excellent moves, blunders, and more
-- **Reports page** — monthly/weekly coaching reports for coaches:
-  - Time class filter tabs: **Rapid** (default), **Daily**, **All** — stats recompute per filter
-  - Summary cards: games, W/L/D, win rate, rating change
-  - Results by time control table
-  - Game-by-game results with clickable links to game detail pages, sorted most-recent-first, color-coded result badges (green win / red loss / amber draw)
-  - ACPL analysis with interpretation
-  - Move quality distribution
-  - Game phase analysis (opening/middlegame/endgame) with worst-phase highlighting
-  - Top improvement areas (auto-generated from blunder/mistake counts and phase weaknesses)
-  - Critical positions to review with game links (from LLM coaching data)
-  - Coaching recommendations (aggregated from individual game coaching)
-  - **PDF export** via `window.print()` with print-optimized CSS
+- **Game Comparison View** — select two games and compare side-by-side with independent chessboards, eval charts, move quality summaries, and a comparison table highlighting differences in ACPL, excellent moves, blunders, and more
+
+### Patterns & Insights
+
+- **LLM Trend Summary** — AI-generated coaching narrative interpreting cross-game patterns (provider dropdown with all 8 providers, regenerate option)
+- Overview stat cards (games, win rate, accuracy %, ACPL, consistency, vs higher-rated)
+- ACPL Trend chart with clickable info modal
+- Move Quality Distribution donut with percentages
+- Danger Zones histogram (blunders/mistakes by move range)
+- Phase Performance bar chart (opening/middlegame/endgame)
+- Endgame Conversion rates (winning/losing/equal positions)
+- Critical Position gauges (under pressure + capitalizing on opponent mistakes)
+- Tactical Awareness bars (found vs missed by phase)
+- Resilience & Composure (comeback rate + collapse rate)
+- Repertoire Consistency (white/black focus scores with top-3 openings)
+- Time Control Performance table (win%, ACPL, blunder% per format)
+- Opening Quality Analysis table (ACPL per opening with verdict badges)
+- Time Pressure Analysis: time management score, time trouble rate, avg time per move by phase (bar chart), blunder rate comparison under pressure vs comfortable
+- **Rating Progression Chart** — interactive line chart showing rating over time with result-colored dots (green win / red loss / amber draw), time class filter (all/rapid/blitz/bullet/daily), 10-game moving average trend line, and info modal
+- **Opening Repertoire Tracker** — ECO distribution bar chart, sortable opening table with win rate and trend indicators (improving/declining/stable), All/White/Black filter tabs, and focus areas panel highlighting openings that need work
+- Opening Win Rate table (split by All / White / Black) with **interactive Opening Explorer** — click any opening to expand a chessboard showing the opening position with step-through move controls, plus a linked list of all games using that opening; board orientation flips on the Black tab
+- **Opening Book Integration** — ECO code and opening name badge, moves annotated with green checkmarks (matches book theory) and orange markers (deviations), with "Book move: X" vs "Player played: Y" callouts; expanded to 438 ECO entries (A00-E99) with deeper variations
+- Info modals (ⓘ) with educational explanations for every pattern component
+
+### Reports
+
+- **Monthly/weekly coaching reports** for coaches
+- Time class filter tabs: **Rapid** (default), **Daily**, **All** — stats recompute per filter
+- Summary cards: games, W/L/D, win rate, rating change
+- Results by time control table
+- Game-by-game results with clickable links to game detail pages, sorted most-recent-first, color-coded result badges (green win / red loss / amber draw)
+- ACPL analysis with interpretation
+- Move quality distribution
+- Game phase analysis (opening/middlegame/endgame) with worst-phase highlighting
+- Top improvement areas (auto-generated from blunder/mistake counts and phase weaknesses)
+- Critical positions to review with game links (from LLM coaching data)
+- Coaching recommendations (aggregated from individual game coaching)
+- **PDF export** via `window.print()` with print-optimized CSS
+
+### Pipeline Control
+
 - **Data Updates panel** — one-click buttons on the dashboard to run the pipeline without CLI:
   - **Fetch New Games** → **Run Analysis** → **Update Insights** shown as a visual flow with arrows
   - **Run All Steps** option to chain all four (harvest → analyze → patterns → coach) in one click
@@ -583,14 +683,19 @@ python main.py dashboard
   - Player selector to run for a specific player or all players
   - Real-time progress bar, step indicators, and friendly result summaries
   - Tooltips explaining what each step does
+
+### Accessibility & Theming
+
 - **Mobile responsive** — all pages adapt to mobile (320px+), tablet, and desktop; ChessBoard auto-sizes via ResizeObserver; tables progressively hide low-priority columns; nav bar scrolls horizontally; player selector shows first names on mobile
 - **Light/dark mode** — toggle with theme button, persists across sessions
+- **Error boundaries** — root error boundary, player-scoped error boundary, custom 404 page
+- **Aria-labels** on player selector buttons and game table rows
 - **Live data** — reads from SQLite directly, updates in real-time
 
 ## Project Structure
 
 ```
-ArrakisEngine/
+Arrakis_Engine/
 ├── CLAUDE.md              # Project context for Claude Code
 ├── README.md              # This file
 ├── config.yaml.example    # Template config (copy to config.yaml)
@@ -613,10 +718,6 @@ ArrakisEngine/
 │   ├── pipeline_state.py  # In-memory pipeline task state (thread-safe)
 │   ├── scheduler.py       # Automated pipeline scheduler (harvest → analyze → patterns → coach)
 │   └── report.py          # Report generator (structured JSON + markdown export)
-├── dashboard/
-│   ├── index.html         # Legacy web dashboard (served by dashboard_server.py)
-│   ├── img/pieces/        # Lichess cburnett SVG chess pieces
-│   └── data/              # Exported JSON (auto-generated, gitignored)
 ├── frontend/              # Next.js 16 + React 19 + shadcn/ui dashboard
 │   ├── app/
 │   │   ├── layout.tsx         # Root layout (providers, header, nav)
@@ -801,6 +902,17 @@ python main.py coach --limit 5
 
 **"database is locked"**
 SQLite only allows one writer at a time. Stop the analyzer before running harvest or coach in another terminal. The dashboard (read-only) can run concurrently without issues.
+
+## Acknowledgements
+
+This project wouldn't exist without the generous work of others:
+
+- **Chess coaches and parents** who tested early versions, stress-tested the pipeline with real game data, and gave invaluable feedback on what makes coaching advice actually useful for young players.
+- **The Stockfish team** — the open-source chess engine that powers all analysis in this project. Decades of engineering distilled into a single binary.
+- **python-chess** by Niklas Fiekas — the library that makes PGN parsing and board manipulation effortless in Python.
+- **Lichess** — for the opening book data (438 ECO entries) and the win probability formula that the entire chess community relies on.
+- **Next.js, shadcn/ui, and Recharts** — the frontend stack that made the dashboard possible.
+- **The reasoning model ecosystem** — Anthropic, OpenAI, Google, xAI, Mistral, DeepSeek, Alibaba (Qwen), and the Ollama project — for building the AI models that turn raw analysis into real coaching.
 
 ## License
 
