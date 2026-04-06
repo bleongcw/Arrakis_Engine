@@ -364,7 +364,7 @@ def main():
     fide_parser = subparsers.add_parser("fide-update", help="Update FIDE rating for a player")
     fide_parser.add_argument("--player", required=True, help="Chess.com username of the player")
     fide_parser.add_argument("--rating", type=int, help="New FIDE rating")
-    fide_parser.add_argument("--fide-id", help="FIDE player ID (e.g., 5871042)")
+    fide_parser.add_argument("--fide-id", help="FIDE player ID (e.g., 1234567)")
 
     # backfill-clocks
     backfill_parser = subparsers.add_parser("backfill-clocks", help="Backfill clock data from PGN annotations")

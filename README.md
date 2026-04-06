@@ -192,7 +192,7 @@ Edit `config.yaml` to match your setup (this file is gitignored — your persona
 players:
   - username: your_chess_com_username       # Chess.com username (required)
     lichess_username: your_lichess_id       # Lichess username (optional)
-    fide_id: null                           # FIDE player ID (optional, e.g., 5871042)
+    fide_id: null                           # FIDE player ID (optional, e.g., 1234567)
     display_name: Player 1
     age: null
     rating: null
