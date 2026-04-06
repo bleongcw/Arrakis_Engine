@@ -100,7 +100,7 @@ The harvester and Stockfish analyzer work without API keys. You only need at lea
 ### 1. Clone the repository
 
 ```bash
-git clone git@github.com:bleongcw/ArrakisEngine.git
+git clone git@github.com:bleongcw/Arrakis_Engine.git
 cd ArrakisEngine
 ```
 
