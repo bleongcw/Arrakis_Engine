@@ -309,10 +309,10 @@ python main.py coach --provider openai --limit 5
 
 ```bash
 # Update FIDE rating for a player
-python main.py fide-update --player your_username --rating 1544
+python main.py fide-update --player your_username --rating 1600
 
 # Set FIDE ID and rating together
-python main.py fide-update --player your_username --fide-id 12345678 --rating 1544
+python main.py fide-update --player your_username --fide-id 12345678 --rating 1600
 ```
 
 > FIDE ratings are updated manually via the CLI. You can also set `fide_id` in `config.yaml` to have it linked on first harvest. The dashboard links directly to the player's FIDE profile at `ratings.fide.com/profile/{fide_id}`.
