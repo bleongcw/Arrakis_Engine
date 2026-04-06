@@ -578,11 +578,11 @@ python main.py dashboard
   - **PDF export** via `window.print()` with print-optimized CSS
 - **Data Updates panel** — one-click buttons on the dashboard to run the pipeline without CLI:
   - **Fetch New Games** → **Run Analysis** → **Update Insights** shown as a visual flow with arrows
-  - **Run All Steps** option to chain all three in one click
+  - **Run All Steps** option to chain all four (harvest → analyze → patterns → coach) in one click
+  - Provider selector for coaching step (all 8 providers with Cloud/Local grouping)
   - Player selector to run for a specific player or all players
   - Real-time progress bar, step indicators, and friendly result summaries
   - Tooltips explaining what each step does
-- **Tier badge** — color-coded skill tier displayed per game and on player profiles
 - **Mobile responsive** — all pages adapt to mobile (320px+), tablet, and desktop; ChessBoard auto-sizes via ResizeObserver; tables progressively hide low-priority columns; nav bar scrolls horizontally; player selector shows first names on mobile
 - **Light/dark mode** — toggle with theme button, persists across sessions
 - **Live data** — reads from SQLite directly, updates in real-time
@@ -611,6 +611,7 @@ ArrakisEngine/
 │   ├── export.py          # JSON export for dashboard
 │   ├── dashboard_server.py # REST API server (GET + POST endpoints)
 │   ├── pipeline_state.py  # In-memory pipeline task state (thread-safe)
+│   ├── scheduler.py       # Automated pipeline scheduler (harvest → analyze → patterns → coach)
 │   └── report.py          # Report generator (structured JSON + markdown export)
 ├── dashboard/
 │   ├── index.html         # Legacy web dashboard (served by dashboard_server.py)
@@ -622,8 +623,11 @@ ArrakisEngine/
 │   │   ├── page.tsx           # Home → redirect to /dashboard
 │   │   ├── providers.tsx      # ThemeProvider, PlayerProvider (syncs from URL)
 │   │   ├── globals.css        # Global styles + print CSS for PDF export
+│   │   ├── error.tsx          # Root error boundary
+│   │   ├── not-found.tsx      # Custom 404 page
 │   │   ├── dashboard/page.tsx # All-players overview
 │   │   └── [player]/          # Player-scoped dynamic routes
+│   │       ├── error.tsx              # Player-scoped error boundary
 │   │       ├── games/page.tsx         # Games list with filters + compare mode
 │   │       ├── games/[id]/page.tsx    # Game detail: board, eval, coaching
 │   │       ├── games/compare/page.tsx # Side-by-side game comparison
@@ -639,7 +643,7 @@ ArrakisEngine/
 │   │   ├── games-filters.tsx  # Result, time, coaching, month, platform filters
 │   │   ├── tier-badge.tsx     # Color-coded tier display
 │   │   ├── theme-toggle.tsx   # Dark/light mode toggle
-│   │   ├── pipeline-control-panel.tsx # Data Updates panel (harvest/analyze/patterns)
+│   │   ├── pipeline-control-panel.tsx # Data Updates panel (harvest/analyze/patterns/coach)
 │   │   ├── game-detail/       # ChessBoard, EvalChart, MoveList, CoachingPanels, ComparisonSummary
 │   │   ├── patterns/          # 14 visualization components + TrendSummary + TimePressure + OpeningExplorer + RatingProgression + OpeningRepertoire
 │   │   └── ui/                # shadcn/ui primitives (card, table, button, etc.)
@@ -647,7 +651,7 @@ ArrakisEngine/
 │   └── lib/                   # API client (api.ts), types (types.ts), providers (providers.ts), utils
 ├── docs/
 │   └── screenshots/       # Architecture diagram and screenshots
-├── tests/                 # Test suite (182 tests across 3 tiers)
+├── tests/                 # Test suite (240 tests across 3 tiers)
 │   ├── conftest.py        # Shared fixtures (db, player, stockfish, llm)
 │   ├── test_models.py
 │   ├── test_harvester.py
@@ -658,6 +662,8 @@ ArrakisEngine/
 │   ├── test_export.py
 │   ├── test_report.py
 │   ├── test_dashboard_server.py
+│   ├── test_llm_providers.py         # Provider registry, model resolution, dispatch
+│   ├── test_scheduler.py             # 4-step pipeline, cancel, provider passthrough
 │   ├── test_analyzer_integration.py  # Stockfish integration (pytest -m integration)
 │   ├── test_coach_live.py            # LLM API live tests (pytest -m live)
 │   └── test_pipeline_e2e.py          # Full pipeline E2E (requires both)
@@ -678,14 +684,14 @@ ArrakisEngine/
 
 ## Running Tests
 
-182 tests across 13 files, organized into three tiers using pytest markers. Integration and live tests are excluded by default — opt in explicitly.
+240 tests across 15 files, organized into three tiers using pytest markers. Integration and live tests are excluded by default — opt in explicitly.
 
 ### Commands
 
 ```bash
 # Unit tests only (default — fast, no external dependencies)
 python -m pytest tests/ -v
-# → 169 tests in ~14s, all mocked
+# → 227 tests in ~14s, all mocked
 
 # Stockfish integration tests (requires Stockfish binary)
 python -m pytest tests/ -m integration -v
@@ -701,12 +707,12 @@ python -m pytest tests/ -m "integration and live" -v
 
 # Everything
 python -m pytest tests/ -m "" -v
-# → All 182 tests (~5min)
+# → All 240 tests (~5min)
 ```
 
 ### Test Coverage by Module
 
-**Unit tests** (169 tests — all mocked, no external dependencies):
+**Unit tests** (227 tests — all mocked, no external dependencies):
 
 | File | Tests | Coverage |
 |------|-------|---------|
@@ -719,6 +725,8 @@ python -m pytest tests/ -m "" -v
 | `test_report.py` | 9 | Report generation (weekly/monthly), ACPL interpretation thresholds, time control tables, missing data handling |
 | `test_dashboard_server.py` | 14 | HTTP endpoints (players/games/status/patterns), filtering (result, time class, date range, player), CORS headers, 404 |
 | `test_export.py` | 7 | JSON export, PGN preview truncation, coaching data, missing analysis, patterns |
+| `test_llm_providers.py` | 52 | Provider registry validation (8 providers), thinking tag stripping, model resolution (explicit/config/default), provider dispatch (Anthropic/OpenAI/Google/Mistral/Ollama), API key detection, availability listing |
+| `test_scheduler.py` | 6 | 4-step pipeline execution (harvest→analyze→patterns→coach), player filter passthrough, cancel event propagation, provider passthrough, progress update verification (1/4–4/4), Stockfish validation |
 
 **Stockfish integration tests** (7 tests — requires Stockfish binary):
 

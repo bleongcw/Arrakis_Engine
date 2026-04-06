@@ -4,7 +4,7 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [1.0.0] - 2026-04-05
+## [1.0.0] - 2026-04-06
 
 First public open-source release under AGPL-3.0.
 
@@ -23,7 +23,7 @@ First public open-source release under AGPL-3.0.
 - Reasoning models required — chain-of-thought essential for tactical analysis, coaching history, and age-appropriate explanations
 - Cross-game pattern detection (16 metrics)
 - Markdown report generator with time control filtering
-- Automated pipeline scheduler (harvest → analyze → patterns)
+- Automated pipeline scheduler (harvest → analyze → patterns → coach) with cancel support
 - CLI with 10 commands: harvest, analyze, coach, patterns, export-json, report, dashboard, fide-update, backfill-clocks, run-all
 
 **LLM Coaching**
@@ -33,12 +33,15 @@ First public open-source release under AGPL-3.0.
 - Variety instructions in coaching prompt to ensure fresh, non-formulaic output
 - "Generate Coaching Briefs" pipeline button — batch-coach games from the dashboard UI with progress tracking, cancel support, and per-player filtering
 - Provider selector (8 providers with Cloud/Local grouping) for coaching briefs and per-game coaching
+- "Run All Steps" executes the full 4-step pipeline (harvest → analyze → patterns → coach) with provider selection
+- Per-game coaching runs independently from batch coaching — skip guard prevents overwrites
 - Games coached in chronological order (oldest-first) so coaching history builds naturally
 - Full datetime storage in `date_played` for correct chronological ordering
 - Exponential backoff on API rate limits (30s → 60s → 120s, max 5 minutes)
 - Consecutive failure circuit breaker (3 failures → abort batch)
 - Authentication error detection with immediate abort
 - Interruptible sleep via threading.Event for responsive cancellation
+- Extended SDK timeouts (300s) for reasoning models (Claude Opus, Gemini 2.5 Pro, DeepSeek Reasoner)
 
 **Frontend Dashboard (Next.js + shadcn/ui)**
 - Player landing page with rating cards and platform links
@@ -55,17 +58,21 @@ First public open-source release under AGPL-3.0.
 - Reports page with LLM-powered cross-game trend summaries
 - Opening explorer with Lichess opening book integration
 - Rating progression charts
-- Settings page (player CRUD, Stockfish config, API key management, coaching settings)
-- Pipeline control panel (harvest → analyze → insights → coaching briefs from UI)
+- Settings page — player CRUD, Stockfish config, API key management for all 7 cloud providers (collapsible), coaching settings
+- Pipeline control panel (harvest → analyze → insights → coaching briefs from UI) with provider selector
+- Portal-rendered tooltips for pipeline buttons (prevents card overflow clipping)
+- Error boundaries — root error boundary, player-scoped error boundary, custom 404 page
+- Accessibility — aria-labels on player selector buttons and game table rows
 - Dark/light mode toggle
 - Mobile responsive layout
 
 **Infrastructure**
 - SQLite database with auto-migration
-- Config via YAML with environment variable secrets
+- Config via YAML with environment variable secrets (schedule section for auto-pipeline)
+- Pinned Python dependencies (`==`) for reproducible installs
 - AGPL-3.0 license
 - GitHub Actions CI (Python 3.11/3.12 + frontend build)
-- 169 tests (unit, integration, live API)
+- 240 tests across 15 files (227 unit + integration + live API)
 - CONTRIBUTING.md with CLA for dual-licensing
 - CODE_OF_CONDUCT.md (Contributor Covenant v2.1)
 - ROADMAP.md with Ollama/open-source reasoning model plans
