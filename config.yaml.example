@@ -60,5 +60,10 @@ coaching:
     - positional_play
   custom_instructions: ""            # free-form instructions injected into coaching prompt
 
+schedule:
+  enabled: false                       # set to true to auto-run the pipeline on a timer
+  interval_hours: 6                    # how often (in hours) to run the pipeline
+  run_on_startup: false                # if true, run immediately when the server starts
+
 database:
   path: data/chess_coach.db

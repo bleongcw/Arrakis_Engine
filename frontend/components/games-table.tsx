@@ -70,6 +70,8 @@ export function GamesTable({
           return (
             <TableRow
               key={g.id}
+              role="link"
+              aria-label={`View game: ${g.display_name || g.username} vs ${g.opponent_username || "unknown"}, ${g.date_played || "unknown date"}`}
               className={cn(
                 "cursor-pointer hover:bg-muted/50",
                 isSelected && "bg-blue-50 dark:bg-blue-950/30"

@@ -2,13 +2,16 @@ data/
 /reports/
 venv/
 .env
+.env.*
 config.yaml
 __pycache__/
 *.pyc
 *.db
 *.egg-info/
+*.log
 dist/
 build/
+.DS_Store
 .pytest_cache/
 frontend/node_modules/
 frontend/.next/

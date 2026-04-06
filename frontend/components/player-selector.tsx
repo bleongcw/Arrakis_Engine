@@ -48,6 +48,7 @@ export function PlayerSelector() {
                 ? "bg-[#1e40af] text-white hover:bg-[#1e3a8a]"
                 : "text-muted-foreground hover:text-foreground"
             )}
+            aria-label={`Switch to ${displayName}`}
             onClick={() => handlePlayerSwitch(p.username)}
           >
             <span className="sm:hidden">{shortName}</span>
