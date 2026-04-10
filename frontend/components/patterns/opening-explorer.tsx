@@ -227,8 +227,8 @@ export function OpeningExplorer({
                     href={`/${playerUsername}/games/${g.game_id}`}
                     className="flex items-center gap-2 text-sm py-1 px-2 rounded hover:bg-muted/50 transition-colors group"
                   >
-                    <span className="text-muted-foreground w-20 shrink-0">{g.date || "\u2014"}</span>
-                    <span className="text-muted-foreground">vs</span>
+                    <span className="text-muted-foreground w-36 shrink-0">{g.date || "\u2014"}</span>
+                    <span className="text-muted-foreground shrink-0">vs</span>
                     <span className="truncate group-hover:text-blue-500 dark:group-hover:text-blue-400 transition-colors">
                       {g.opponent}
                     </span>
