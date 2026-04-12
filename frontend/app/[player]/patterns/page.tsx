@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { useParams } from "next/navigation";
 import { usePlayerContext } from "@/app/providers";
 import { fetchPatterns, fetchGames } from "@/lib/api";
@@ -246,6 +247,28 @@ export default function PatternsPage() {
   );
 }
 
+function StatCardInfoModal({ label, tooltip, onClose }: { label: string; tooltip: string; onClose: () => void }) {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  return createPortal(
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/30" />
+      <div className="relative bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl shadow-2xl w-[340px] p-5 text-sm" onClick={(e) => e.stopPropagation()}>
+        <div className="flex justify-between items-start mb-3">
+          <h4 className="font-bold text-base text-zinc-900 dark:text-zinc-100">{label}</h4>
+          <button onClick={onClose} className="text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 text-xl leading-none -mt-1">&times;</button>
+        </div>
+        <p className="text-zinc-600 dark:text-zinc-400 text-xs">{tooltip}</p>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 function StatCard({
   label,
   value,
@@ -257,18 +280,20 @@ function StatCard({
   subtitle?: string;
   tooltip?: string;
 }) {
+  const [showInfo, setShowInfo] = useState(false);
   return (
     <Card>
       <CardContent className="pt-5 pb-4">
         <div className="text-[10px] text-muted-foreground uppercase tracking-wider flex items-center gap-1">
           {label}
           {tooltip && (
-            <span
-              title={tooltip}
+            <button
+              onClick={() => setShowInfo(true)}
               className="cursor-help text-muted-foreground/60 hover:text-muted-foreground transition-colors"
+              title={label}
             >
               &#9432;
-            </span>
+            </button>
           )}
         </div>
         <div className="text-2xl font-bold mt-1">{value}</div>
@@ -276,6 +301,9 @@ function StatCard({
           <div className="text-xs text-muted-foreground mt-1">{subtitle}</div>
         )}
       </CardContent>
+      {showInfo && tooltip && (
+        <StatCardInfoModal label={label} tooltip={tooltip} onClose={() => setShowInfo(false)} />
+      )}
     </Card>
   );
 }

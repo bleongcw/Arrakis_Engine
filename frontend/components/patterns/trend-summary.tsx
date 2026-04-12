@@ -1,10 +1,44 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { triggerTrendSummary, fetchPatterns } from "@/lib/api";
 import { PROVIDERS } from "@/lib/providers";
+
+function CoachingSummaryInfoModal({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  return createPortal(
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/30" />
+      <div className="relative bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl shadow-2xl w-[340px] p-5 text-sm" onClick={(e) => e.stopPropagation()}>
+        <div className="flex justify-between items-start mb-3">
+          <h4 className="font-bold text-base text-zinc-900 dark:text-zinc-100">Coaching Summary</h4>
+          <button onClick={onClose} className="text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 text-xl leading-none -mt-1">&times;</button>
+        </div>
+        <p className="text-zinc-600 dark:text-zinc-400 text-xs mb-3">
+          An AI coach analyzes all your pattern data and writes a personalized summary.
+        </p>
+        <ul className="text-xs space-y-1.5 text-zinc-600 dark:text-zinc-400">
+          <li><strong>Accuracy &amp; ACPL</strong> — How precise your moves are overall</li>
+          <li><strong>Openings</strong> — Which openings you play and how well</li>
+          <li><strong>Time management</strong> — Whether you rush or use time well</li>
+          <li><strong>Blunder patterns</strong> — When and where mistakes happen</li>
+        </ul>
+        <p className="text-zinc-500 dark:text-zinc-500 text-[10px] mt-3">
+          The summary highlights strengths, weaknesses, and what to work on next.
+        </p>
+      </div>
+    </div>,
+    document.body
+  );
+}
 
 interface TrendSummaryProps {
   summary: string | null | undefined;
@@ -15,6 +49,7 @@ interface TrendSummaryProps {
 export function TrendSummary({ summary, player, onSummaryGenerated }: TrendSummaryProps) {
   const [generating, setGenerating] = useState(false);
   const [selectedProvider, setSelectedProvider] = useState("openai");
+  const [showInfo, setShowInfo] = useState(false);
   const previousSummaryRef = useRef(summary);
 
   const handleGenerate = useCallback(async (p: string) => {
@@ -88,12 +123,14 @@ export function TrendSummary({ summary, player, onSummaryGenerated }: TrendSumma
           {summary && (
             <span className="text-xs font-normal text-muted-foreground">AI-generated</span>
           )}
-          <span
-            title="An AI coach analyzes all your pattern data (accuracy, openings, time management, blunders) and writes a personalized summary of strengths, weaknesses, and what to work on next."
+          <button
+            onClick={() => setShowInfo(true)}
             className="text-sm font-normal text-muted-foreground hover:text-foreground cursor-help select-none transition-colors"
-          >&#9432;</span>
+            title="What is coaching summary?"
+          >&#9432;</button>
         </CardTitle>
       </CardHeader>
+      {showInfo && <CoachingSummaryInfoModal onClose={() => setShowInfo(false)} />}
       <CardContent>
         {summary ? (
           <div className="space-y-3">
