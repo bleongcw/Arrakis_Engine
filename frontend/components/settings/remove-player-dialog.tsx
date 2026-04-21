@@ -57,11 +57,13 @@ export function RemovePlayerDialog({
         {error && <p className="text-sm text-destructive">{error}</p>}
 
         <DialogFooter>
-          <DialogClose>
-            <Button variant="outline" disabled={removing}>
-              Cancel
-            </Button>
-          </DialogClose>
+          <DialogClose
+            render={
+              <Button variant="outline" disabled={removing}>
+                Cancel
+              </Button>
+            }
+          />
           <Button
             variant="destructive"
             onClick={handleConfirm}

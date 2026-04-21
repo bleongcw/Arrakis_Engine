@@ -189,11 +189,13 @@ export function PlayerFormDialog({
           )}
 
           <DialogFooter>
-            <DialogClose>
-              <Button type="button" variant="outline" disabled={saving}>
-                Cancel
-              </Button>
-            </DialogClose>
+            <DialogClose
+              render={
+                <Button type="button" variant="outline" disabled={saving}>
+                  Cancel
+                </Button>
+              }
+            />
             <Button type="submit" disabled={saving}>
               {saving ? "Saving..." : isEdit ? "Save Changes" : "Add Player"}
             </Button>
