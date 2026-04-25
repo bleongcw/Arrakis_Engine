@@ -181,3 +181,64 @@ class TestPlayerFilter:
         """Requesting an unknown player should return empty list."""
         data = api_get(live_server, "/api/games?player=nonexistent")
         assert data == []
+
+
+class TestClientDisconnectHandling:
+    """When the client disconnects mid-response, the server should swallow
+    the resulting ConnectionResetError/BrokenPipeError and log at DEBUG —
+    not blow up with two stack traces in the console.
+
+    Regression guard for the v1.3.x console-noise bug where dev-mode
+    Next.js hot reload + AbortController-cancelled fetches triggered
+    full ERROR-level traces."""
+
+    def _make_handler(self):
+        """Construct a DashboardHandler without running BaseHTTPRequestHandler
+        socket setup. We just need an object with the right method binding."""
+        from src.dashboard_server import DashboardHandler
+        from unittest.mock import MagicMock
+        h = DashboardHandler.__new__(DashboardHandler)
+        h.wfile = MagicMock()
+        h.headers = {}
+        h._headers_buffer = []
+        h.send_response = MagicMock()
+        h.send_header = MagicMock()
+        h.end_headers = MagicMock()
+        return h
+
+    def test_send_json_swallows_connection_reset(self):
+        """ConnectionResetError on wfile.write must not propagate."""
+        h = self._make_handler()
+        h.wfile.write.side_effect = ConnectionResetError("simulated client gone")
+        # Must not raise:
+        h._send_json({"ok": True})
+
+    def test_send_json_swallows_broken_pipe(self):
+        """BrokenPipeError on wfile.write must not propagate."""
+        h = self._make_handler()
+        h.wfile.write.side_effect = BrokenPipeError("simulated broken pipe")
+        h._send_json({"ok": True})
+
+    def test_send_json_propagates_other_errors(self):
+        """Other exceptions (real bugs) should still bubble up."""
+        h = self._make_handler()
+        h.wfile.write.side_effect = RuntimeError("real bug")
+        with pytest.raises(RuntimeError, match="real bug"):
+            h._send_json({"ok": True})
+
+    def test_handle_api_skips_recovery_on_disconnect(self):
+        """When _handle_api's primary _send_json raises a disconnect error,
+        the exception handler must NOT try a secondary 500-response (which
+        would only raise BrokenPipeError again).
+
+        Verified by source inspection — the exception handler must short-
+        circuit on (ConnectionResetError, BrokenPipeError)."""
+        from src import dashboard_server
+        import inspect
+        source = inspect.getsource(dashboard_server.DashboardHandler._handle_api)
+        assert "ConnectionResetError" in source and "BrokenPipeError" in source, (
+            "_handle_api must detect client-disconnect errors and short-circuit"
+        )
+        assert "Client disconnected" in source, (
+            "_handle_api must log client disconnects at debug, not as ERROR"
+        )

@@ -941,6 +941,14 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
 
         except Exception as e:
             import sqlite3 as _sqlite3
+            if isinstance(e, (ConnectionResetError, BrokenPipeError)):
+                # Client closed the connection before we finished. Common
+                # in dev (Next.js hot reload, page navigation, AbortController
+                # cancelling in-flight fetches). Not a server bug — log
+                # quietly and skip the recovery response (it would only
+                # raise BrokenPipeError again).
+                logger.debug("Client disconnected during %s: %s", path, e)
+                return
             if isinstance(e, _sqlite3.OperationalError) and "locked" in str(e):
                 logger.warning("API request hit DB lock: %s %s", path, e)
                 self._send_json(
@@ -952,14 +960,23 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 self._send_json({"error": str(e)}, 500)
 
     def _send_json(self, data, status=200):
-        """Send a JSON response."""
+        """Send a JSON response.
+
+        Silently swallows client-disconnect errors (ConnectionResetError,
+        BrokenPipeError). These mean the browser closed the connection
+        before we finished writing — normal during hot reload or page
+        navigation, not a server-side problem.
+        """
         body = json.dumps(data, default=str).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(body)
+        except (ConnectionResetError, BrokenPipeError) as e:
+            logger.debug("Client disconnected while writing response: %s", e)
 
     def _get_conn(self):
         """Open a read-only DB connection for this request."""
