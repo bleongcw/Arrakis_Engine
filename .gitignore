@@ -15,6 +15,8 @@ build/
 .pytest_cache/
 frontend/node_modules/
 frontend/.next/
-docs/
+# docs/ — most working docs are private; only architecture.md is tracked
+docs/*
+!docs/architecture.md
 .claude/
 .mcp.json
