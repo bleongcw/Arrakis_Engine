@@ -357,6 +357,7 @@ export interface CoachingSettings {
   detail_level: "concise" | "standard" | "detailed";
   focus_areas: string[];
   custom_instructions: string;
+  coaching_history_count: number;
 }
 
 export interface SettingsData {

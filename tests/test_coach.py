@@ -8,6 +8,7 @@ import pytest
 from src.coach import (
     _build_analysis_text,
     _build_critical_moments,
+    _fetch_coaching_history,
     _format_single_move,
     _parse_llm_response,
     coach_game,
@@ -281,3 +282,104 @@ class TestCoachPendingLimit:
         mock_coach.return_value = {"narrative": "ok"}
         coach_pending(provider="claude", db_path=db_path, limit=1)
         assert mock_coach.call_count == 1
+
+
+class TestCoachingHistoryDepth:
+    """Tests for the configurable coaching_history_count setting (v1.3.0)."""
+
+    def _seed_history(self, db_path, n_history_games: int):
+        """Seed `n_history_games` already-coached games + 1 pending game.
+        Returns (player_id, pending_game_id, conn). Caller closes conn.
+        """
+        conn = init_db(db_path)
+        pid = ensure_player(conn, "histplayer", display_name="H", age=9, rating=1000)
+
+        for i in range(n_history_games):
+            conn.execute(
+                """INSERT INTO games
+                (player_id, game_url, pgn, player_color, result,
+                 analysis_status, coaching_status, date_played)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (pid, f"https://chess.com/h/{i}", "1. e4 *", "white",
+                 "win", "complete", "complete", f"2026-03-{i+1:02d}"),
+            )
+            gid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+            conn.execute(
+                """INSERT INTO game_coaching
+                (game_id, provider, narrative, key_lesson, practical_focus, coach_notes)
+                VALUES (?, ?, ?, ?, ?, ?)""",
+                (gid, "claude", f"narrative-{i}", f"lesson-{i}",
+                 f"focus-{i}", f"notes-{i}"),
+            )
+
+        # One pending game (the one being coached now, excluded from history)
+        conn.execute(
+            """INSERT INTO games
+            (player_id, game_url, pgn, player_color, result,
+             analysis_status, coaching_status, date_played)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (pid, "https://chess.com/h/current", "1. e4 *", "white",
+             "win", "complete", "pending", "2026-04-01"),
+        )
+        pending_gid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        conn.commit()
+        return pid, pending_gid, conn
+
+    def test_default_limit_is_5(self, db_path):
+        """When no limit kwarg is passed, history fetch returns at most 5 games."""
+        pid, pending_gid, conn = self._seed_history(db_path, 10)
+        try:
+            text = _fetch_coaching_history(conn, pid, pending_gid)
+            # Default limit=5 → exactly 5 history blocks rendered
+            assert text.count("### Game ") == 5
+        finally:
+            conn.close()
+
+    def test_custom_limit_returns_more(self, db_path):
+        """Passing limit=10 returns 10 history games."""
+        pid, pending_gid, conn = self._seed_history(db_path, 12)
+        try:
+            text = _fetch_coaching_history(conn, pid, pending_gid, limit=10)
+            assert text.count("### Game ") == 10
+        finally:
+            conn.close()
+
+    def test_limit_caps_at_available_games(self, db_path):
+        """If only 3 history games exist but limit=10, return all 3."""
+        pid, pending_gid, conn = self._seed_history(db_path, 3)
+        try:
+            text = _fetch_coaching_history(conn, pid, pending_gid, limit=10)
+            assert text.count("### Game ") == 3
+        finally:
+            conn.close()
+
+    def test_excludes_current_game(self, db_path):
+        """The pending (currently-being-coached) game must not appear in history."""
+        pid, pending_gid, conn = self._seed_history(db_path, 3)
+        try:
+            text = _fetch_coaching_history(conn, pid, pending_gid, limit=10)
+            assert f"chess.com/h/current" not in text
+        finally:
+            conn.close()
+
+    def test_coach_game_wires_history_count_from_config(self):
+        """coach_game must read coaching_history_count from config and pass
+        it as limit= to _fetch_coaching_history. Guards against accidental
+        removal of the config plumbing."""
+        from src import coach as coach_mod
+        import inspect
+
+        source = inspect.getsource(coach_mod.coach_game)
+        assert "coaching_history_count" in source, \
+            "coach_game must read coaching_history_count from config"
+        assert "limit=history_count" in source, \
+            "coach_game must pass history_count as limit= to _fetch_coaching_history"
+
+    def test_history_count_clamps_to_valid_range(self):
+        """Out-of-range or invalid values in config should be clamped to 1-20."""
+        from src import coach as coach_mod
+        import inspect
+
+        source = inspect.getsource(coach_mod.coach_game)
+        assert "max(1, min(20" in source, \
+            "coach_game must clamp coaching_history_count to [1, 20]"

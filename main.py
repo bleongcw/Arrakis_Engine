@@ -132,6 +132,14 @@ def cmd_coach(args, config):
     coaching_config = config.get("coaching", {})
     model = resolve_model(provider, None, coaching_config)
 
+    # Optional --history N override; clamps to 1-20 and persists into config
+    # for the duration of this run so coach_game() picks it up.
+    history_override = getattr(args, "history", None)
+    if history_override is not None:
+        n = max(1, min(20, int(history_override)))
+        config.setdefault("coaching", {})["coaching_history_count"] = n
+        print(f"Coaching history depth: {n} (overridden via --history)")
+
     limit = getattr(args, 'limit', 0) or 0
     result = coach_pending(provider=provider, model=model, db_path=db_path, limit=limit, config=config)
     print(f"Coached {result['coached']} games with {provider} ({model}). "
@@ -342,6 +350,11 @@ def main():
         "--limit", type=int, default=0,
         help="Max games to coach (default: all pending)",
     )
+    coach_parser.add_argument(
+        "--history", type=int,
+        help="Coaching history depth: number of recent coached games to inject "
+             "into the LLM prompt (default: from config, range 1-20)",
+    )
 
     # patterns
     patterns_parser = subparsers.add_parser("patterns", help="Update pattern tracking")
@@ -373,6 +386,10 @@ def main():
     run_all_parser = subparsers.add_parser("run-all", help="Run full pipeline")
     run_all_parser.add_argument("--player", action="append", help="Username(s)")
     run_all_parser.add_argument("--provider", choices=["claude", "openai", "gemini", "grok", "mistral", "deepseek", "qwen", "ollama"], help="LLM provider")
+    run_all_parser.add_argument(
+        "--history", type=int,
+        help="Coaching history depth (default: from config, range 1-20)",
+    )
 
     args = parser.parse_args()
 

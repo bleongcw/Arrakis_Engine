@@ -322,6 +322,11 @@ coaching:
   ollama_model: deepseek-r1:8b        # optional — requires `ollama serve` running
   ollama_base_url: http://localhost:11434
 
+  # How many recent coached games to inject into each new coaching prompt
+  # so the AI avoids repeating prior advice. Default 5, range 1-20.
+  # See "Coaching history depth" below for token-cost guidance.
+  coaching_history_count: 5
+
 database:
   path: data/chess_coach.db
 ```
@@ -336,7 +341,7 @@ database:
 |---|---|
 | `python main.py harvest` | Fetch games from Chess.com and Lichess for all configured players |
 | `python main.py analyze` | Run Stockfish analysis on all pending games |
-| `python main.py coach` | Generate LLM coaching insights (supports `--limit` and `--provider`) |
+| `python main.py coach` | Generate LLM coaching insights (supports `--limit`, `--provider`, `--history`) |
 | `python main.py patterns` | Compute cross-game pattern statistics |
 | `python main.py export-json` | Export database to JSON for the web dashboard |
 | `python main.py report` | Generate Markdown coaching reports |
@@ -574,6 +579,25 @@ For each analyzed game, the LLM produces:
 | **Player feedback** | Child | Personal letter with 3 actionable tips, growth mindset framing |
 | **Coach notes** | Coach | Technical summary for lesson planning |
 
+### Coaching History Depth
+
+To prevent the AI coach from giving the same advice every game, Arrakis injects a "coaching history" block into every prompt — the **last N coached games' lessons, practical focuses, and narrative openings**. The coach is then instructed to build on that history rather than repeat it.
+
+The depth is configurable via the `coaching_history_count` setting (in `config.yaml`, the Settings page, or `--history N` on the CLI). Default is **5**; range is **1–20**.
+
+**Token cost — each history game adds ~500 prompt tokens.** Pick the depth that fits your provider's context window:
+
+| Depth | Extra prompt tokens | Recommended for |
+|---|---|---|
+| **5** (default) | ~2,500 | All providers, including Ollama 8B local — safe baseline |
+| 10 | ~5,000 | All cloud providers; tight on Ollama 8B (may overflow) |
+| 15 | ~7,500 | Cloud providers only |
+| 20 (max) | ~10,000 | Large-context cloud providers only — Claude, Gemini |
+
+**When to increase it.** If a player has 50+ coached games and you find the coach repeating itself or missing recurring issues that span more than 5 games, raise the depth to 10. If you're running a deep retrospective (end of month, end of season), 15–20 gives the AI enough context to surface long-arc patterns.
+
+**Local model warning.** Ollama with `deepseek-r1:8b` has a smaller context window. Settings above 10 may cause prompt truncation or degraded coaching quality. Use 5 for local Ollama, 10–20 for Claude / Gemini / GPT-5.
+
 ### Pattern Tracking
 
 Patterns are aggregated across all games per player:
@@ -752,7 +776,7 @@ Arrakis_Engine/
 │   └── lib/                   # API client (api.ts), types (types.ts), providers (providers.ts), utils
 ├── docs/
 │   └── screenshots/       # Architecture diagram and screenshots
-├── tests/                 # Test suite (240 tests across 3 tiers)
+├── tests/                 # Test suite (246 tests across 3 tiers)
 │   ├── conftest.py        # Shared fixtures (db, player, stockfish, llm)
 │   ├── test_models.py
 │   ├── test_harvester.py
@@ -785,7 +809,7 @@ Arrakis_Engine/
 
 ## Running Tests
 
-240 tests across 15 files, organized into three tiers using pytest markers. Integration and live tests are excluded by default — opt in explicitly.
+246 tests across 15 files, organized into three tiers using pytest markers. Integration and live tests are excluded by default — opt in explicitly.
 
 ### Commands
 
@@ -808,7 +832,7 @@ python -m pytest tests/ -m "integration and live" -v
 
 # Everything
 python -m pytest tests/ -m "" -v
-# → All 240 tests (~5min)
+# → All 246 tests (~5min)
 ```
 
 ### Test Coverage by Module

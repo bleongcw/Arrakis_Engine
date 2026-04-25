@@ -389,6 +389,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                     "openings", "tactics", "endgames", "time_management", "positional_play"
                 ]),
                 "custom_instructions": coaching.get("custom_instructions", ""),
+                "coaching_history_count": coaching.get("coaching_history_count", 5),
             },
             "providers": get_available_providers(coaching),
         }
@@ -555,6 +556,22 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             if "custom_instructions" in body:
                 text = str(body["custom_instructions"])[:2000]
                 coaching["custom_instructions"] = text
+
+            if "coaching_history_count" in body:
+                try:
+                    n = int(body["coaching_history_count"])
+                except (TypeError, ValueError):
+                    self._send_json(
+                        {"error": "coaching_history_count must be an integer"}, 400
+                    )
+                    return
+                if n < 1 or n > 20:
+                    self._send_json(
+                        {"error": "coaching_history_count must be between 1 and 20"},
+                        400,
+                    )
+                    return
+                coaching["coaching_history_count"] = n
 
             with open(config_path, "w") as f:
                 yaml.safe_dump(file_config, f, default_flow_style=False, sort_keys=False)

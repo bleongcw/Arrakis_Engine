@@ -1,6 +1,6 @@
 # Arrakis Engine — Architecture
 
-*Last updated: 2026-04-25 — corresponds to v1.0.2*
+*Last updated: 2026-04-26 — corresponds to v1.3.0*
 
 This document describes the technical architecture of Arrakis Engine: how the pieces fit together, what runs where, and the design decisions behind them. It is aimed at contributors and developers reading the codebase. For end-user / setup docs, see [README.md](../README.md). For changelog, see [CHANGELOG.md](../CHANGELOG.md).
 
@@ -90,7 +90,7 @@ The backend is intentionally dependency-light — `http.server` is enough for a 
 - `coach.py` builds the prompt from Stockfish data + recent coaching history, sends it through the provider abstraction, and stores the structured output in `game_coaching`.
 - **Reasoning models are required.** The system enforces this — non-reasoning models produce shallow, generic coaching that misses tactics. See [`ROADMAP.md`](../ROADMAP.md) (root, not the gitignored one) for the full rationale.
 - Coaching output is structured: narrative, key lesson, practical focus, critical moments, opening analysis, coach notes — for two audiences (child-facing, coach-facing).
-- **Coaching history injection**: the last 5 coached games' lessons are fed into the prompt so the LLM doesn't repeat itself across a session and can build on prior advice.
+- **Coaching history injection**: a configurable number of recent coached games' lessons are fed into the prompt so the LLM doesn't repeat itself and can build on prior advice. Default is 5 (range 1–20) via the `coaching_history_count` setting in `config.yaml` or the `--history N` CLI flag. Each history game adds ~500 prompt tokens — see the README "Coaching History Depth" section for per-provider guidance.
 - **Game-type detection** classifies games into 10 archetypes (tactical battle, comeback, collapse, positional grind, miniature, etc.) and tailors the prompt accordingly.
 - Resilience: exponential backoff (30s → 60s → 120s, max 5 min), 3-failure circuit breaker, 300s SDK timeout for reasoning models, interruptible sleep via `threading.Event`.
 
@@ -212,7 +212,7 @@ shadcn/ui components live in `frontend/components/ui/`. They wrap Base UI primit
 ## 6. Configuration
 
 ### `config.yaml`
-Engine and runtime config — Stockfish path / depth / threads / hash, lookback period, coaching provider, schedule interval, database path. Player list is **not** stored here (DB is the source of truth).
+Engine and runtime config — Stockfish path / depth / threads / hash, lookback period, coaching provider, coaching tone / detail level / focus areas / `coaching_history_count`, schedule interval, database path. Player list is **not** stored here (DB is the source of truth). Coaching settings can be edited live via the Settings page (`PUT /api/settings/coaching`) which writes back to `config.yaml`.
 
 ### Environment variables
 ```

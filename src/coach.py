@@ -428,17 +428,28 @@ def coach_game(game_id: int, provider: str | None = "claude",
     # Detect game type for tailored coaching angle
     game_type, game_type_guidance = _detect_game_type(moves, dict(game))
 
-    # Fetch coaching history to avoid repetition
-    coaching_history = _fetch_coaching_history(conn, game["player_id"], game_id)
+    # Load coaching config for customization (read first so history depth can be configured)
+    coaching_config = config.get("coaching", {}) if config else {}
+
+    # Fetch coaching history to avoid repetition.
+    # `coaching_history_count` controls how many recent coached games are injected
+    # into the prompt; default 5, range 1-20. Each game adds ~500 prompt tokens.
+    history_count = coaching_config.get("coaching_history_count", 5)
+    try:
+        history_count = int(history_count)
+    except (TypeError, ValueError):
+        history_count = 5
+    history_count = max(1, min(20, history_count))
+
+    coaching_history = _fetch_coaching_history(
+        conn, game["player_id"], game_id, limit=history_count
+    )
     if coaching_history:
         previous_coaching_guidance = coaching_history
     else:
         previous_coaching_guidance = ("\n## Coaching History\n"
                                       "No previous coaching history — this is the first coached game. "
                                       "Set a strong, encouraging foundation.\n")
-
-    # Load coaching config for customization
-    coaching_config = config.get("coaching", {}) if config else {}
 
     # Build tone modifier from config
     tone = coaching_config.get("tone", "balanced")

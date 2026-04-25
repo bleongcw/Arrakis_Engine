@@ -33,6 +33,7 @@ interface CoachingForm {
   detail_level: "concise" | "standard" | "detailed";
   focus_areas: string[];
   custom_instructions: string;
+  coaching_history_count: number;
 }
 
 const ALL_FOCUS_AREAS = [
@@ -58,6 +59,7 @@ const DEFAULTS: CoachingForm = {
   detail_level: "standard",
   focus_areas: ["openings", "tactics", "endgames", "time_management", "positional_play"],
   custom_instructions: "",
+  coaching_history_count: 5,
 };
 
 const MODEL_FIELDS: { key: keyof CoachingForm; label: string; placeholder: string }[] = [
@@ -95,6 +97,7 @@ export function CoachingSection() {
             detail_level: s.coaching.detail_level || DEFAULTS.detail_level,
             focus_areas: s.coaching.focus_areas || DEFAULTS.focus_areas,
             custom_instructions: s.coaching.custom_instructions || "",
+            coaching_history_count: s.coaching.coaching_history_count ?? DEFAULTS.coaching_history_count,
           });
         }
       })
@@ -225,6 +228,40 @@ export function CoachingSection() {
               </label>
             ))}
           </div>
+        </div>
+
+        {/* Coaching History Depth */}
+        <div className="space-y-2">
+          <Label htmlFor="coaching_history_count">Coaching History Depth</Label>
+          <div className="flex items-center gap-3">
+            <Input
+              id="coaching_history_count"
+              type="number"
+              min={1}
+              max={20}
+              value={form.coaching_history_count}
+              onChange={(e) => {
+                const n = Number(e.target.value);
+                setForm((prev) => ({
+                  ...prev,
+                  coaching_history_count: Number.isFinite(n) ? Math.max(1, Math.min(20, n)) : 5,
+                }));
+                setStatus(null);
+              }}
+              className="w-24"
+            />
+            <span className="text-xs text-muted-foreground">
+              games (1–20, default 5) · ≈{(form.coaching_history_count * 500).toLocaleString()} extra prompt tokens
+            </span>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            How many recent coached games to inject into the LLM prompt so the coach
+            avoids repeating prior advice and builds on past lessons. Each game adds
+            ~500 tokens. <strong>5</strong> is safe for all providers including Ollama 8B local.
+            <strong> 10</strong> is safe for cloud providers but may be tight on Ollama 8B.
+            <strong> 15-20</strong> is recommended only for large-context cloud providers
+            (Claude, Gemini).
+          </p>
         </div>
 
         {/* Default Provider */}
