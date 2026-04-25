@@ -1292,9 +1292,17 @@ def run_dashboard(db_path: str, port: int = 8000, config: dict | None = None,
         sched_status = "enabled" if sched_config.get("enabled") else "disabled"
         interval = sched_config.get("interval_hours", 6)
 
-        print(f"\U0001f3f0 ArrakisEngine Dashboard running at http://localhost:{port}")
+        print(f"\U0001f3f0 Arrakis Engine API running at http://localhost:{port}")
         print(f"\U0001f4ca Live data from: {db_path}")
         print(f"\U0001f552 Auto-updates: {sched_status} (every {interval}h)")
+        print("")
+        print("\U0001f4cd Open the dashboard UI in a SECOND terminal:")
+        print("     cd frontend && pnpm dev")
+        print(f"     → then open http://localhost:3000 in your browser")
+        print("")
+        print("   (This terminal serves the API only. The Next.js frontend on")
+        print(f"    port 3000 calls back here on port {port} for data.)")
+        print("")
         print("Press Ctrl+C to stop.\n")
         try:
             httpd.serve_forever()

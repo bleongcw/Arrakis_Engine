@@ -149,13 +149,22 @@ cp config.yaml.example config.yaml
 For LLM coaching, create a `.env` file with at least one API key (see [Configure API keys](#4-configure-api-keys)). Or use [Ollama](https://ollama.com) for free local coaching — no API key needed.
 
 ```bash
-# 5. Run the full pipeline and launch the dashboard
+# 5. Run the full pipeline (harvest → analyze → coach → patterns)
 python main.py run-all
-
-# 6. Start the web dashboard (in a new terminal)
-cd frontend && pnpm install && pnpm dev
-# Open http://localhost:3000
 ```
+
+### Two-server setup — both must be running
+
+Arrakis runs as two cooperating servers. **You need to start both — one in each terminal.**
+
+| | What runs | Port | Start with |
+|---|---|---|---|
+| **Terminal 1** | Python API backend (SQLite, Stockfish, LLM coaching) | `8000` | `python main.py dashboard` |
+| **Terminal 2** | Next.js frontend (the dashboard UI) | `3000` | `cd frontend && pnpm install && pnpm dev` |
+
+**Open `http://localhost:3000` in your browser** — that's the dashboard. The frontend on port 3000 calls the backend on port 8000 for all data, so both must be running.
+
+> **Why two servers?** The backend is a minimal Python `http.server` that exposes the database over REST. The frontend is a Next.js app that provides the rich UI. Splitting them lets the frontend hot-reload while you develop, and keeps the backend dependency-light.
 
 For advanced options (compile Stockfish from source, configure multiple providers, Ollama setup), see the [Full Installation Guide](#full-installation-guide) below.
 
