@@ -31,26 +31,56 @@ Thank you for your interest in contributing to ArrakisEngine! This document prov
 
 ### Running Tests
 
-```bash
-# Run all unit tests
-pytest tests/ -v
+The test suite has **332 tests** across three tiers (`pyproject.toml` defines the markers).
 
-# Run specific test file
+```bash
+# Default: ~318 unit tests, no external deps (~14s)
+pytest
+
+# Specific file
 pytest tests/test_models.py -v
 
-# Skip tests requiring Stockfish or live APIs
-pytest tests/ -v -k "not stockfish and not integration and not live"
+# Tier 2: integration tests requiring Stockfish
+pytest -m integration
+
+# Tier 3: live tests requiring at least one LLM API key (~$0.05/run)
+pytest -m live
+
+# Full pipeline E2E (Stockfish + LLM)
+pytest -m "integration and live"
+
+# Everything across all tiers (~5 min)
+pytest --override-ini "addopts="
 ```
+
+When adding a test that mocks a function imported locally inside another
+function, **patch the source module, not the consumer** — e.g.
+`@patch("src.coach.coach_pending")`, not the calling module's reference.
 
 ### Running the App
 
+The app is a two-server setup. Both must be running.
+
 ```bash
-# Start the backend server
+# Terminal 1: Python API backend on port 8000
 python main.py dashboard
 
-# In another terminal, start the frontend
+# Terminal 2: Next.js frontend on port 3000
 cd frontend && pnpm dev
 ```
+
+Open `http://localhost:3000` in your browser. The frontend calls back to the
+backend on port 8000 for all data.
+
+### Frontend build check
+
+Before pushing frontend changes:
+
+```bash
+cd frontend && pnpm build
+```
+
+CI runs this on Node 24 + pnpm 10 + Python 3.11/3.12.
 
 ### Code Style
 

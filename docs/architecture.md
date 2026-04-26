@@ -267,12 +267,12 @@ The `ARRAKIS_` prefix avoids collisions with other tools that use the unprefixed
 
 | Suite | What it covers |
 |---|---|
-| Unit tests | `models`, `analyzer`, `harvester`, `coach`, `patterns`, `report`, `tiers`, `export`, `scheduler`, `pipeline_state` |
+| Unit tests | `models`, `analyzer`, `harvester`, `coach`, `patterns`, `loss_openings` (v1.4.0), `trap_matcher` (v1.4.0), `hunter` (v1.4.1+), `report`, `tiers`, `export`, `scheduler`, `pipeline_state`, `dashboard_server` |
 | Integration | Full pipeline E2E (analyze → coach end-to-end on a known PGN) |
 | Stockfish integration | Specific lines (Scholar's Mate, etc.) verified against engine output |
 | Live LLM | Real API calls, marked separately, ~$0.05 / run |
 
-Tests live in `tests/`. CI runs unit + integration on Python 3.11 and 3.12, plus `pnpm build` for the frontend.
+**332 tests** total across all tiers. Tests live in `tests/`. CI runs unit + frontend build on Node 24 + pnpm 10 + Python 3.11 / 3.12.
 
 ### Patch-target rule for tests
 Functions imported locally inside another function (e.g. `from src.coach import coach_pending` inside `run_full_pipeline()`) must be patched at the **source** module — `@patch("src.coach.coach_pending")` — not at the consuming module. This trips up new tests regularly.
@@ -302,6 +302,9 @@ Functions imported locally inside another function (e.g. `from src.coach import 
 | Adding a new dashboard page | `frontend/app/[player]/<page>/page.tsx`, plus a corresponding GET endpoint in `dashboard_server.py` |
 | Database migration | `src/models.py::init_db` — add a new `ALTER TABLE` guarded by `PRAGMA table_info` |
 | Test patches not firing | Check whether the import is local-in-function; patch the **source** module |
+| Parsing PGN moves in a frontend component | Use `nav.moves` from `useChessNavigation` — chess.js handles annotations like `{[%clk ...]}` that regex doesn't (v1.4.5 lesson) |
+| Building a Lichess deep link | Use `https://lichess.org/analysis/standard/{URL-encoded FEN}` with `nav.endFen` — the `?pgn=` query format isn't honoured (v1.4.5 lesson) |
+| Suppressing browser autofill / password manager popups | Avoid `id="username"` / labels containing "username" / "user" / "email"; add `autoComplete="off"` on form + input + `data-1p-ignore` + `data-lpignore` + `data-form-type="other"` |
 
 ---
 

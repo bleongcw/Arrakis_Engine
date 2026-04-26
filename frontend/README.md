@@ -1,36 +1,90 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Arrakis Engine — Frontend
 
-## Getting Started
+Next.js 16 + React 19 + TypeScript + Tailwind CSS + shadcn/ui (Base UI primitives) +
+Recharts. The frontend half of [Arrakis Engine](../README.md).
 
-First, run the development server:
+This directory is the dashboard UI. It runs on **port 3000** in dev and calls the
+Python API backend on **port 8000** for all data. **Both servers must be running** —
+see the main [README](../README.md#two-server-setup--both-must-be-running) for the
+two-server setup.
+
+## Quick start
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
+pnpm install
 pnpm dev
-# or
-bun dev
+# → http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+In a second terminal, start the backend:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+cd ..
+python main.py dashboard
+# → API on http://localhost:8000
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Then open `http://localhost:3000` in your browser.
 
-## Learn More
+## Build
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+pnpm build       # production build
+pnpm start       # run production build
+pnpm lint        # eslint
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+CI builds against Node 24 + pnpm 10. See `.github/workflows/ci.yml`.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Project structure
 
-## Deploy on Vercel
+```
+frontend/
+├── app/
+│   ├── layout.tsx              # Root layout (header + nav + theme)
+│   ├── providers.tsx           # ThemeProvider + PlayerProvider
+│   ├── dashboard/page.tsx      # All-players overview + pipeline control
+│   ├── settings/page.tsx       # Players, Stockfish, API keys, coaching
+│   └── [player]/               # Player-scoped routes
+│       ├── games/              # List + detail + side-by-side compare
+│       ├── patterns/           # 16 charts + Self-Analysis section
+│       ├── hunt/               # Hunter Mode (opponent prep)
+│       └── reports/            # Weekly / monthly coaching reports
+├── components/
+│   ├── game-detail/            # ChessBoard, MoveControls, eval chart, coaching
+│   ├── patterns/               # 16 visualization components + Self-Analysis
+│   ├── hunter/                 # OpponentSearch, TargetedPrep
+│   ├── settings/               # Players, Analysis, ApiKeys, Coaching sections
+│   └── ui/                     # shadcn/ui primitives (Card, Button, Dialog, …)
+├── hooks/
+│   └── use-chess-navigation.ts # PGN → FENs via chess.js
+├── lib/
+│   ├── api.ts                  # Typed REST client
+│   ├── types.ts                # Shared types (PatternStats, OpponentProfile, …)
+│   └── providers.ts            # 8 LLM provider metadata (slug, name, color)
+└── public/data/
+    ├── openings.json           # 3,690-entry Lichess CC0 opening book
+    └── traps.json              # 102-entry curated beginner-trap library
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Conventions worth knowing
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- **`useChessNavigation` is the canonical move-list source.** Don't regex-parse
+  PGN bodies in components — chess.com's annotation braces (`{[%clk 0:09:55]}`)
+  poison naive parsing. Consume `nav.moves` from the hook instead. (v1.4.5
+  lesson.)
+- **Info modals use `createPortal`.** `Card` has `overflow: hidden` which clips
+  in-flow tooltips and overlays. Mirror the pattern in `components/patterns/
+  danger-zones.tsx`.
+- **`DialogClose` from Base UI renders as a `<button>`.** Wrapping a `<Button>`
+  inside it produces nested buttons (hydration error). Use the `render` prop
+  pattern instead — see `components/settings/player-form-dialog.tsx`. (v1.0.2.)
+- **Lichess analysis deep links use FEN, not PGN.** Format:
+  `https://lichess.org/analysis/standard/<URL-encoded final FEN>`. Use
+  `useChessNavigation`'s `endFen`. (v1.4.5.)
+
+## Notes
+
+This is **not the Next.js you might know from before**. v16 has breaking changes
+and conventions that may differ from older training data. When in doubt, read
+the relevant guide in `node_modules/next/dist/docs/`. See [`AGENTS.md`](AGENTS.md).

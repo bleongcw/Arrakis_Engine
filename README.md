@@ -758,15 +758,16 @@ Arrakis_Engine/
 ├── pyproject.toml         # pytest marker config (integration/live)
 ├── main.py                # CLI entry point — all commands
 ├── src/
-│   ├── models.py          # SQLite schema (5 tables) and data helpers
+│   ├── models.py          # SQLite schema (7 tables incl. opponent cache) + idempotent migrations
 │   ├── harvester.py       # Multi-platform game fetcher (Chess.com + Lichess)
 │   ├── analyzer.py        # Stockfish move-by-move analysis engine + clock extraction
-│   ├── coach.py           # LLM coaching layer (8 providers via llm_providers.py)
+│   ├── coach.py           # LLM coaching layer (configurable history depth, 8 providers)
 │   ├── llm_providers.py   # Unified LLM provider abstraction (Claude, OpenAI, Gemini, Grok, Mistral, DeepSeek, Qwen, Ollama)
 │   ├── tiers.py           # Adaptive tier system (Beginner → Expert)
-│   ├── patterns.py        # Cross-game pattern detection + LLM trend summaries
-│   ├── export.py          # JSON export for dashboard
-│   ├── dashboard_server.py # REST API server (GET + POST endpoints)
+│   ├── patterns.py        # 20 cross-game pattern metrics + Self-Analysis + LLM trend summaries
+│   ├── hunter.py          # v1.4.1+ Hunter Mode (opponent prep, accumulating PGN cache)
+│   ├── export.py          # JSON export
+│   ├── dashboard_server.py # REST API server (GET/POST/PUT/DELETE)
 │   ├── pipeline_state.py  # In-memory pipeline task state (thread-safe)
 │   ├── scheduler.py       # Automated pipeline scheduler (harvest → analyze → patterns → coach)
 │   └── report.py          # Report generator (structured JSON + markdown export)
@@ -798,12 +799,20 @@ Arrakis_Engine/
 │   │   ├── theme-toggle.tsx   # Dark/light mode toggle
 │   │   ├── pipeline-control-panel.tsx # Data Updates panel (harvest/analyze/patterns/coach)
 │   │   ├── game-detail/       # ChessBoard, EvalChart, MoveList, CoachingPanels, ComparisonSummary
-│   │   ├── patterns/          # 14 visualization components + TrendSummary + TimePressure + OpeningExplorer + RatingProgression + OpeningRepertoire
+│   │   ├── patterns/          # 16 visualization components + Self-Analysis (Fix Your Openings + Trap Patterns)
+│   │   ├── hunter/            # OpponentSearch + TargetedPrep (v1.4.1+)
+│   │   ├── settings/          # Players, Analysis, ApiKeys, Coaching sections
 │   │   └── ui/                # shadcn/ui primitives (card, table, button, etc.)
-│   ├── hooks/                 # useChessNavigation, usePipeline, useCoaching
-│   └── lib/                   # API client (api.ts), types (types.ts), providers (providers.ts), utils
+│   ├── hooks/                 # useChessNavigation (currentFen, endFen, moves), usePipeline, useCoaching
+│   ├── lib/                   # API client (api.ts), types (types.ts), providers (providers.ts), utils
+│   └── public/data/
+│       ├── openings.json      # 3,690-entry Lichess CC0 opening database
+│       └── traps.json         # 102-entry curated beginner-trap library (v1.4.0+)
+├── scripts/
+│   └── build_traps.py         # Rebuilds openings.json + traps.json from Lichess CC0
 ├── docs/
-│   └── screenshots/       # Architecture diagram and screenshots
+│   ├── architecture.md        # Tracked: contributor architecture reference
+│   └── screenshots/           # Architecture diagram and screenshots
 ├── tests/                 # Test suite (332 tests across 3 tiers)
 │   ├── conftest.py        # Shared fixtures (db, player, stockfish, llm)
 │   ├── test_models.py
@@ -817,6 +826,9 @@ Arrakis_Engine/
 │   ├── test_dashboard_server.py
 │   ├── test_llm_providers.py         # Provider registry, model resolution, dispatch
 │   ├── test_scheduler.py             # 4-step pipeline, cancel, provider passthrough
+│   ├── test_loss_openings.py         # v1.4.0 Self-Analysis aggregation
+│   ├── test_trap_matcher.py          # v1.4.0 trap library + matching + recent_game_ids
+│   ├── test_hunter.py                # v1.4.1+ Hunter Mode (cache, accumulation, reps)
 │   ├── test_analyzer_integration.py  # Stockfish integration (pytest -m integration)
 │   ├── test_coach_live.py            # LLM API live tests (pytest -m live)
 │   └── test_pipeline_e2e.py          # Full pipeline E2E (requires both)
@@ -833,7 +845,9 @@ Arrakis_Engine/
 | `games` | Game records with PGN, ratings, result, platform, ACPL, analysis/coaching status |
 | `move_analysis` | Per-move Stockfish evaluation (capped centipawn, win prob, classification, clock_seconds) |
 | `game_coaching` | LLM-generated coaching output per game (narrative, feedback, opening analysis) |
-| `player_patterns` | Aggregated pattern statistics per player per period |
+| `player_patterns` | Aggregated pattern statistics per player per period (incl. Self-Analysis from v1.4.0) |
+| `opponent_cache` (v1.4.1) | Hunter Mode profile JSON cache, 24h TTL |
+| `opponent_games` (v1.4.4) | Hunter Mode accumulating PGN cache, sliding-window pruned |
 
 ## Running Tests
 
