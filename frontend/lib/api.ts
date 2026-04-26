@@ -10,6 +10,8 @@ import type {
   SettingsData,
   AnalysisSettings,
   CoachingSettings,
+  OpponentProfile,
+  HuntPlatform,
 } from "./types";
 
 const BASE = "/api";
@@ -269,5 +271,37 @@ export async function triggerCoaching(
     body: JSON.stringify({ game_id: gameId, provider }),
   });
   if (!res.ok) throw new Error(`Coach API error: ${res.status}`);
+  return res.json();
+}
+
+// ── v1.4.2 Hunter Mode API ──────────────────────────────────────────────
+
+/** Fetch an opponent's profile (cached or live, decided server-side). */
+export async function fetchHunterProfile(
+  opponent: string,
+  platform: HuntPlatform
+): Promise<OpponentProfile> {
+  const params = new URLSearchParams({ opponent, platform });
+  return fetchJSON<OpponentProfile>(`${BASE}/hunt/profile?${params}`);
+}
+
+/** Force a fresh fetch of an opponent's profile (bypasses 24h cache). */
+export async function refreshHunterProfile(
+  opponent: string,
+  platform: HuntPlatform
+): Promise<OpponentProfile> {
+  const res = await fetch(`${BASE}/hunt/refresh`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ opponent, platform }),
+  });
+  if (!res.ok) {
+    let detail = "";
+    try {
+      const body = await res.json();
+      detail = body.error || "";
+    } catch {}
+    throw new Error(detail || `Hunter refresh failed: ${res.status}`);
+  }
   return res.json();
 }

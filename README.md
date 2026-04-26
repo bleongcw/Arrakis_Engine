@@ -644,6 +644,15 @@ Patterns are aggregated across all games per player:
 
 > **How traps are detected.** Each game's first ~20 moves are matched against the curated trap library using longest-prefix matching — the deepest signature wins. The library is shallow (≤16 plies) and explicitly curated to focus on beginner traps, not deep mainline variations. To rebuild from the latest Lichess source: `python scripts/build_traps.py`.
 
+**Hunter Mode (v1.4.1 + v1.4.2):**
+
+A separate page (`/[player]/hunt`) for opponent prep. Enter an opponent's username + platform (chess.com or lichess), and Arrakis pulls their last 3 months of public games (no Stockfish — fast even for big accounts) and shows:
+
+- **Their Weaknesses** (red) — openings the opponent loses, broken down by White / Black. These are your hunting targets.
+- **Their Strengths** (green) — openings the opponent wins. Avoid steering into these lines.
+
+Profiles are cached per `(opponent, platform)` for **24 hours** to respect the public APIs. Click **Refresh** on the prep view to force a re-fetch. Disable the feature globally by setting `features.hunter_mode: false` in `config.yaml`.
+
 ## Web Dashboard
 
 Built with Next.js 16, React 19, shadcn/ui, Tailwind CSS, and Recharts. Fully mobile-responsive (320px+). Requires Node.js 18+.

@@ -247,6 +247,48 @@ export interface LossOpeningAnalysis {
   black: LossOpeningEntry[];
 }
 
+// ── v1.4.1 / v1.4.2 Hunter Mode types ────────────────────────────────────
+
+/** A single opening entry in an opponent's profile (mirrors LossOpeningEntry
+ *  shape minus the recent_game_ids — we don't have those for opponents). */
+export interface OpponentOpeningEntry {
+  name: string;
+  total: number;
+  wins: number;
+  losses: number;
+  draws: number;
+  /** Loss rate (in `weaknesses`) or win rate (in `strengths`). */
+  rate: number;
+}
+
+export interface OpponentOpeningSplit {
+  white: OpponentOpeningEntry[];
+  black: OpponentOpeningEntry[];
+}
+
+export interface HunterMeta {
+  cached: boolean;
+  platform: "chess.com" | "lichess";
+  username: string;
+  fetched_at: string | null;
+}
+
+export interface OpponentProfile {
+  total_games: number;
+  results: { wins: number; losses: number; draws: number; win_rate: number };
+  /** Openings the opponent LOSES — the player's hunting targets. */
+  weaknesses: OpponentOpeningSplit;
+  /** Openings the opponent WINS — lines for the player to AVOID. */
+  strengths: OpponentOpeningSplit;
+  meta: HunterMeta;
+  /** Server-returned error (when the request was rejected before fetching). */
+  error?: string;
+}
+
+export type HuntPlatform = "chess.com" | "lichess";
+
+// ─────────────────────────────────────────────────────────────────────────
+
 export interface TrapEntry {
   name: string;
   eco?: string;

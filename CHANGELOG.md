@@ -4,6 +4,31 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.4.2] - 2026-04-26
+
+### Added
+- **Hunter Mode UI** — new `/[player]/hunt` page with opponent search and the targeted-prep view. Enter an opponent username + platform (chess.com or lichess), get back a White/Black-toggle view of:
+  - **Their Weaknesses** (red, "target these openings") — openings the opponent loses
+  - **Their Strengths** (green, "avoid these lines") — openings the opponent wins
+- **Hunt nav link** added to the player-scoped nav bar (between Patterns and Reports).
+- **Refresh button** on the targeted-prep view forces a re-fetch (bypasses the 24h cache from v1.4.1).
+- New typed API client functions: `fetchHunterProfile`, `refreshHunterProfile`.
+- New types in `frontend/lib/types.ts`: `OpponentProfile`, `OpponentOpeningEntry`, `OpponentOpeningSplit`, `HunterMeta`, `HuntPlatform`.
+
+### How to try it
+
+```bash
+git pull
+# Terminal 1: backend
+python main.py dashboard
+# Terminal 2: frontend
+cd frontend && pnpm dev
+# Open http://localhost:3000/<your-player>/hunt
+# Enter an opponent's username and platform → click "Hunt Mode"
+```
+
+---
+
 ## [1.4.1] - 2026-04-26
 
 ### Added

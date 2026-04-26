@@ -9,6 +9,7 @@ const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard", playerScoped: false },
   { href: "/games", label: "Games", playerScoped: true },
   { href: "/patterns", label: "Patterns", playerScoped: true },
+  { href: "/hunt", label: "Hunt", playerScoped: true },
   { href: "/reports", label: "Reports", playerScoped: true },
 ];
 

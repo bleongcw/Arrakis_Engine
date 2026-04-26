@@ -1,6 +1,6 @@
 # Arrakis Engine — Architecture
 
-*Last updated: 2026-04-26 — corresponds to v1.4.1*
+*Last updated: 2026-04-26 — corresponds to v1.4.2*
 
 This document describes the technical architecture of Arrakis Engine: how the pieces fit together, what runs where, and the design decisions behind them. It is aimed at contributors and developers reading the codebase. For end-user / setup docs, see [README.md](../README.md). For changelog, see [CHANGELOG.md](../CHANGELOG.md).
 
@@ -213,6 +213,7 @@ Next.js 16 + React 19 + TypeScript + Tailwind + shadcn/ui (built on Base UI prim
 | `/[player]/games/[id]` | Game detail (board, eval chart, coaching panels) |
 | `/[player]/games/compare` | Two boards side-by-side, synchronized navigation |
 | `/[player]/patterns` | 18 pattern components + AI coaching summary (16 charts + Self-Analysis section with Fix Your Openings & Trap Patterns) |
+| `/[player]/hunt` | (v1.4.2) Hunter Mode — opponent search + Their Weaknesses / Their Strengths view |
 | `/[player]/reports` | Period selector, time-class filter, print-to-PDF |
 | `/settings` | Players, Stockfish config, API keys, coaching settings |
 
