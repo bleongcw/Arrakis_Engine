@@ -124,6 +124,18 @@ By submitting a pull request, you agree to the following:
 - This is necessary because ArrakisEngine uses a dual-licensing model (AGPL-3.0 open source + commercial license). The CLA ensures the maintainer can continue to offer both options.
 - You confirm that you have the right to submit the contribution and that it does not violate any third-party rights.
 
+## Dual-licensing model
+
+The ArrakisEngine codebase is **dual-licensed**:
+
+1. **Public license — AGPL-3.0.** This is what you and any other user receives when you clone the repository. Under AGPL-3.0, you are free to use, modify, and redistribute the code, but if you provide a modified version as a hosted service over a network, you must release the source code of your modifications under AGPL-3.0 as well. This is the strongest copyleft license that is still OSI-approved.
+
+2. **Commercial license — held by the maintainer.** The maintainer (Bernard Leong) is the sole copyright holder of all original code in the repository, and via the CLA above, also holds a relicensing grant for all contributed code. This means the maintainer reserves the right to offer the same codebase under a separate commercial license — for example, in a closed-source commercial product (Atreides, the planned commercial version) — without releasing that product's source code.
+
+Practically, this means contributions made under the CLA may be incorporated into the commercial version of ArrakisEngine without a corresponding source release of that commercial product. Your contributions to the open-source project remain under AGPL-3.0 for everyone else who uses the open-source codebase. The commercial relicensing right is a one-way grant FROM contributors TO the maintainer; it doesn't change the terms under which the open-source version is distributed.
+
+If you have questions about how a specific contribution would be treated under the dual-licensing model — or you'd prefer to contribute only under AGPL-3.0 with no commercial relicensing — open a discussion before submitting the PR.
+
 ## Reporting Issues
 
 - Use GitHub Issues for bug reports and feature requests
