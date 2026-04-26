@@ -1,6 +1,6 @@
 # Arrakis Engine — Architecture
 
-*Last updated: 2026-04-26 — corresponds to v1.4.0*
+*Last updated: 2026-04-26 — corresponds to v1.4.1*
 
 This document describes the technical architecture of Arrakis Engine: how the pieces fit together, what runs where, and the design decisions behind them. It is aimed at contributors and developers reading the codebase. For end-user / setup docs, see [README.md](../README.md). For changelog, see [CHANGELOG.md](../CHANGELOG.md).
 
@@ -141,6 +141,12 @@ Rating-based tiers (Beginner → Elementary → Intermediate → Advanced → Ex
 - `scheduler.py` runs the full pipeline (harvest → analyze → patterns → coach) on a configurable interval as a daemon thread.
 - `pipeline_state.py` enforces single-task-at-a-time across CLI, scheduler, and dashboard so two pipelines can't fight over the SQLite lock or the Stockfish process.
 
+### `hunter.py` — opponent prep (v1.4.1)
+- `fetch_opponent_games(username, platform, lookback_months=3)` — pulls the opponent's recent public PGN from chess.com or lichess. Reuses the platform-specific helpers from `harvester.py` (`_chesscom_*`, `_lichess_*`) to avoid duplication. **No Stockfish, no DB writes** — opponent analysis would be slow and pollute the player-centric `games` table.
+- `compute_opponent_profile(games)` — same loss-rate-by-opening logic as `_compute_loss_openings` from `patterns.py`, but operates on the opponent's games. Output structure mirrors Self-Analysis: `{weaknesses: {white, black}, strengths: {white, black}, results, total_games}`.
+- `get_or_fetch_profile(...)` — cache-aware wrapper. Returns from `opponent_cache` if fresh (24h TTL), else fetches and updates the cache.
+- Feature-flagged via `features.hunter_mode` in `config.yaml` (default `true`).
+
 ### `dashboard_server.py` — REST API
 Single-process Python HTTP server. SQLite WAL mode + 30s busy timeout; returns 503 gracefully when the analyzer is holding the lock.
 
@@ -155,11 +161,13 @@ Single-process Python HTTP server. SQLite WAL mode + 30s busy timeout; returns 5
 | GET | `/api/pipeline/status` | Current pipeline task |
 | GET | `/api/settings` | Analysis config + API key status |
 | GET | `/api/schedule/status` | Scheduler state |
+| GET | `/api/hunt/profile?opponent=X&platform=Y` | (v1.4.1) Opponent profile from cache or live fetch |
 | POST | `/api/players` | Add player |
 | POST | `/api/coach` | Trigger coaching for a game |
 | POST | `/api/trend-summary` | Generate AI trend summary |
 | POST | `/api/pipeline/{harvest,analyze,patterns,run-all}` | Trigger pipeline steps |
 | POST | `/api/schedule/{toggle,interval}` | Scheduler control |
+| POST | `/api/hunt/refresh` | (v1.4.1) Force refresh of an opponent profile (bypass 24h cache) |
 | PUT | `/api/players/{id}` | Edit player |
 | PUT | `/api/settings/{analysis,api-keys}` | Update settings |
 | DELETE | `/api/players/{id}` | Soft-delete player |
@@ -179,6 +187,7 @@ Single-file SQLite. Schema migrations run via `init_db()` at startup — column 
 | `move_analysis` | game_id, move_number, side, move_played, best_move, eval_cp, swing_cp, win_prob, classification, pv_line |
 | `game_coaching` | game_id, provider, narrative, key_lesson, practical_focus, coach_notes, critical_moments_json, opening_analysis_json |
 | `player_patterns` | player_id, period_start, period_end, stats_json, trend_summary, updated_at |
+| `opponent_cache` (v1.4.1) | username, platform, profile_json, fetched_at — 24h TTL cache for Hunter Mode |
 
 ### Design decisions
 

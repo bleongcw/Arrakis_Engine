@@ -74,5 +74,13 @@ schedule:
   interval_hours: 6                    # how often (in hours) to run the pipeline
   run_on_startup: false                # if true, run immediately when the server starts
 
+features:
+  # Hunter Mode (v1.4.1+) — opponent prep view at /[player]/hunt/[opponent].
+  # When enabled, the dashboard exposes /api/hunt/* endpoints that fetch
+  # an opponent's recent public games from chess.com or lichess and
+  # compute their opening profile. Cached for 24 hours per opponent.
+  # Set to false if you want to disable opponent prep entirely.
+  hunter_mode: true
+
 database:
   path: data/chess_coach.db

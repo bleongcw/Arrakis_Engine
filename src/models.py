@@ -175,6 +175,25 @@ def _migrate(conn: sqlite3.Connection):
         conn.execute("ALTER TABLE players ADD COLUMN is_active INTEGER DEFAULT 1")
         conn.commit()
 
+    # v1.4.1 Hunter Mode: opponent_cache table for cached opponent profiles.
+    # Schema is minimal; profile data is stored as a JSON blob, similar to
+    # player_patterns.stats_json. Idempotent — safe to run on existing DBs.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS opponent_cache (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            username     TEXT NOT NULL,
+            platform     TEXT NOT NULL,
+            profile_json TEXT NOT NULL,
+            fetched_at   TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(username, platform)
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_opponent_cache_lookup "
+        "ON opponent_cache(username, platform)"
+    )
+    conn.commit()
+
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS players (

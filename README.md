@@ -791,7 +791,7 @@ Arrakis_Engine/
 │   └── lib/                   # API client (api.ts), types (types.ts), providers (providers.ts), utils
 ├── docs/
 │   └── screenshots/       # Architecture diagram and screenshots
-├── tests/                 # Test suite (285 tests across 3 tiers)
+├── tests/                 # Test suite (318 tests across 3 tiers)
 │   ├── conftest.py        # Shared fixtures (db, player, stockfish, llm)
 │   ├── test_models.py
 │   ├── test_harvester.py
@@ -824,7 +824,7 @@ Arrakis_Engine/
 
 ## Running Tests
 
-285 tests across 15 files, organized into three tiers using pytest markers. Integration and live tests are excluded by default — opt in explicitly.
+318 tests across 15 files, organized into three tiers using pytest markers. Integration and live tests are excluded by default — opt in explicitly.
 
 ### Commands
 
@@ -847,7 +847,7 @@ python -m pytest tests/ -m "integration and live" -v
 
 # Everything
 python -m pytest tests/ -m "" -v
-# → All 285 tests (~5min)
+# → All 318 tests (~5min)
 ```
 
 ### Test Coverage by Module

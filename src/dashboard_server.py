@@ -83,6 +83,8 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             self._handle_schedule_toggle(body)
         elif path == "/api/schedule/interval":
             self._handle_schedule_interval(body)
+        elif path == "/api/hunt/refresh":
+            self._handle_hunt_refresh(body)
         else:
             self._send_json({"error": "Not found"}, 404)
 
@@ -933,6 +935,8 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 data = self._handle_settings_get()
             elif path == "/api/schedule/status":
                 data = self._api_schedule_status()
+            elif path == "/api/hunt/profile":
+                data = self._api_hunt_profile(params)
             else:
                 self._send_json({"error": "Not found"}, 404)
                 return
@@ -1263,6 +1267,61 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             return
         manager.update_interval(int(hours))
         self._send_json(manager.get_state())
+
+    # ── v1.4.1 Hunter Mode handlers ─────────────────────────────────────
+
+    def _hunter_enabled(self) -> bool:
+        """Hunter Mode is on by default; disable via config:
+            features:
+              hunter_mode: false
+        """
+        features = (self.config or {}).get("features") or {}
+        return features.get("hunter_mode", True)
+
+    def _api_hunt_profile(self, params):
+        """GET /api/hunt/profile?opponent=<username>&platform=<chess.com|lichess>
+
+        Returns the opponent's profile, served from cache if fresh
+        (within 24h) or fetched live otherwise.
+        """
+        if not self._hunter_enabled():
+            return {"error": "Hunter Mode is disabled in config.yaml"}
+        opponent = (params.get("opponent") or [""])[0].strip()
+        platform = (params.get("platform") or ["chess.com"])[0].strip()
+        if not opponent:
+            return {"error": "opponent query param is required"}
+
+        from src.hunter import get_or_fetch_profile
+        try:
+            profile = get_or_fetch_profile(opponent, platform, self.db_path)
+        except ValueError as e:
+            # Unknown platform — surface as 400
+            return {"error": str(e)}
+        return profile
+
+    def _handle_hunt_refresh(self, body):
+        """POST /api/hunt/refresh — body: {opponent, platform}
+        Forces a re-fetch (bypasses the 24h cache TTL)."""
+        if not self._hunter_enabled():
+            self._send_json(
+                {"error": "Hunter Mode is disabled in config.yaml"}, 403,
+            )
+            return
+        opponent = (body or {}).get("opponent", "").strip()
+        platform = (body or {}).get("platform", "chess.com").strip()
+        if not opponent:
+            self._send_json({"error": "opponent is required"}, 400)
+            return
+
+        from src.hunter import get_or_fetch_profile
+        try:
+            profile = get_or_fetch_profile(
+                opponent, platform, self.db_path, force_refresh=True,
+            )
+        except ValueError as e:
+            self._send_json({"error": str(e)}, 400)
+            return
+        self._send_json(profile)
 
     def log_message(self, format, *args):
         """Suppress default access logs for cleaner output."""
