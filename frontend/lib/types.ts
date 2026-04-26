@@ -222,6 +222,48 @@ export interface PatternStats {
   repertoire_consistency?: unknown;
   // Time pressure
   time_pressure?: TimePressureStats | null;
+  // v1.4.0 Self-Analysis
+  loss_openings?: LossOpeningAnalysis;
+  strong_openings?: LossOpeningAnalysis;
+  trap_falls?: TrapEntry[];
+  your_arsenal?: TrapEntry[];
+}
+
+// ── v1.4.0 Self-Analysis types ────────────────────────────────────────────
+
+export interface LossOpeningEntry {
+  name: string;
+  total: number;
+  wins: number;
+  losses: number;
+  draws: number;
+  /** Loss rate (or win rate, depending on which list this entry came from). */
+  rate: number;
+  recent_game_ids: number[];
+}
+
+export interface LossOpeningAnalysis {
+  white: LossOpeningEntry[];
+  black: LossOpeningEntry[];
+}
+
+export interface TrapEntry {
+  name: string;
+  eco?: string;
+  /** How many times this trap appeared with the requested outcome
+   *  (losses for `trap_falls`, wins for `your_arsenal`). */
+  count: number;
+  /** Total games where this trap was detected, regardless of outcome. */
+  total: number;
+  wins: number;
+  losses: number;
+  draws: number;
+  /** Win rate across ALL games matching this trap (for context). */
+  win_rate: number;
+  /** Up to 5 most-recent dates where the requested outcome occurred. */
+  recent_dates: string[];
+  frequency_label: "Rare" | "Occasional" | "Frequent";
+  trend: "up" | "down" | "flat";
 }
 
 export interface ReportData {

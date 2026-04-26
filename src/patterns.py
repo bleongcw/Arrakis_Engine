@@ -14,6 +14,7 @@ import logging
 import math
 from collections import defaultdict
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import chess.pgn
 import io
@@ -21,6 +22,14 @@ import io
 from src.models import init_db
 
 logger = logging.getLogger(__name__)
+
+# Trap library — loaded lazily on first call to _load_trap_library().
+# Built once by `python scripts/build_traps.py` and vendored at the path below.
+_TRAP_LIBRARY_PATH = (
+    Path(__file__).resolve().parent.parent
+    / "frontend" / "public" / "data" / "traps.json"
+)
+_trap_library_cache: list[dict] | None = None
 
 
 def _get_opening_name(pgn_text: str) -> str:
@@ -114,6 +123,11 @@ def compute_player_patterns(player_id: int, db_path: str | None = None,
         "repertoire_consistency": _compute_repertoire_consistency(games),
         # Time pressure analysis
         "time_pressure": _compute_time_pressure(games, moves_by_game),
+        # v1.4.0 Self-Analysis
+        "loss_openings": _compute_loss_openings(games),
+        "strong_openings": _compute_strong_openings(games),
+        "trap_falls": _compute_trap_falls(games),
+        "your_arsenal": _compute_your_arsenal(games),
     }
 
     # Store patterns — preserve existing trend_summary
@@ -245,6 +259,255 @@ def _compute_opening_stats(games: list[dict]) -> dict:
         "white": _aggregate(white_games),
         "black": _aggregate(black_games),
     }
+
+
+# ── v1.4.0 Self-Analysis: loss/strong openings + trap matching ────────────
+
+
+def _load_trap_library() -> list[dict]:
+    """Load the curated trap library from frontend/public/data/traps.json.
+
+    Cached on first call. Returns [] if the file is missing (e.g. fresh
+    clone before `python scripts/build_traps.py` has been run).
+
+    Each entry: {eco, name, moves_san, moves: list[str], depth: int}.
+    Library is pre-sorted deepest-first by the build script so callers
+    iterating in order naturally pick the most-specific match.
+    """
+    global _trap_library_cache
+    if _trap_library_cache is not None:
+        return _trap_library_cache
+    if not _TRAP_LIBRARY_PATH.exists():
+        logger.warning(
+            "Trap library not found at %s — run `python scripts/build_traps.py`",
+            _TRAP_LIBRARY_PATH,
+        )
+        _trap_library_cache = []
+        return _trap_library_cache
+    try:
+        with open(_TRAP_LIBRARY_PATH, "r", encoding="utf-8") as f:
+            _trap_library_cache = json.load(f)
+        logger.info("Loaded %d trap signatures", len(_trap_library_cache))
+    except (OSError, json.JSONDecodeError) as e:
+        logger.exception("Failed to load trap library: %s", e)
+        _trap_library_cache = []
+    return _trap_library_cache
+
+
+def _extract_san_moves(pgn_text: str, max_moves: int = 30) -> list[str]:
+    """Extract a flat list of SAN moves from a PGN. max_moves is plies."""
+    if not pgn_text:
+        return []
+    try:
+        game = chess.pgn.read_game(io.StringIO(pgn_text))
+    except Exception:
+        return []
+    if game is None:
+        return []
+    moves: list[str] = []
+    node = game
+    while node.variations and len(moves) < max_moves:
+        node = node.variations[0]
+        try:
+            moves.append(node.san())
+        except Exception:
+            break
+    return moves
+
+
+def _match_trap(game_moves: list[str], trap_library: list[dict]) -> dict | None:
+    """Longest-prefix match of game_moves against the trap library.
+
+    Returns the matching trap entry (with eco, name, depth) or None.
+
+    The library is sorted deepest-first so the first match is the most-
+    specific one (e.g. matches "Halloween Gambit, Oldtimer Variation"
+    in preference to plain "Halloween Gambit" if both apply).
+    """
+    if not game_moves or not trap_library:
+        return None
+    for entry in trap_library:
+        sig = entry.get("moves") or []
+        if len(sig) > len(game_moves):
+            continue
+        if sig and game_moves[: len(sig)] == sig:
+            return entry
+    return None
+
+
+def _frequency_label(count: int) -> str:
+    """Bucket a recurrence count into the user-facing frequency vocabulary."""
+    if count >= 6:
+        return "Frequent"
+    if count >= 3:
+        return "Occasional"
+    return "Rare"
+
+
+def _aggregate_openings_by_outcome(games: list[dict], outcome: str) -> dict:
+    """Group games by opening name, split by player color, filtered to one
+    outcome ('win' or 'loss'). Used for both 'Fix Your Openings' (loss)
+    and 'Your Strengths' (win).
+
+    Returns {white: [...], black: [...]} sorted by count descending.
+    """
+    def _aggregate(game_list: list[dict]) -> list[dict]:
+        # Group all games (any outcome) by opening, then count wins/losses
+        by_opening: dict[str, dict] = defaultdict(lambda: {
+            "total": 0, "wins": 0, "losses": 0, "draws": 0,
+            "recent_game_ids": [],
+        })
+        for g in game_list:
+            name = _get_opening_name(g["pgn"])
+            entry = by_opening[name]
+            entry["total"] += 1
+            if g["result"] == "win":
+                entry["wins"] += 1
+            elif g["result"] == "loss":
+                entry["losses"] += 1
+            else:
+                entry["draws"] += 1
+            if g["result"] == outcome:
+                entry["recent_game_ids"].append(g["id"])
+
+        out = []
+        for name, e in by_opening.items():
+            outcome_count = e["wins"] if outcome == "win" else e["losses"]
+            if outcome_count == 0:
+                continue
+            # Need at least 2 games in that opening to flag a pattern
+            if e["total"] < 2:
+                continue
+            rate = round(outcome_count / e["total"] * 100, 1)
+            # Keep the most recent 5 games (input is date-ascending, so
+            # take the tail and reverse for newest-first display).
+            recent = list(reversed(e["recent_game_ids"]))[:5]
+            out.append({
+                "name": name,
+                "total": e["total"],
+                "wins": e["wins"],
+                "losses": e["losses"],
+                "draws": e["draws"],
+                "rate": rate,
+                "recent_game_ids": recent,
+            })
+        # Sort by raw outcome count first, then by rate (so 8 losses out of
+        # 10 ranks above 5 losses out of 5 if the user has a long history).
+        sort_key = (
+            (lambda x: (-x["losses"], -x["rate"]))
+            if outcome == "loss"
+            else (lambda x: (-x["wins"], -x["rate"]))
+        )
+        out.sort(key=sort_key)
+        return out[:10]
+
+    white_games = [g for g in games if g["player_color"] == "white"]
+    black_games = [g for g in games if g["player_color"] == "black"]
+    return {
+        "white": _aggregate(white_games),
+        "black": _aggregate(black_games),
+    }
+
+
+def _compute_loss_openings(games: list[dict]) -> dict:
+    """Openings where the player loses most often (split by color).
+    Drives the 'Fix Your Openings — ELO leaks' panel."""
+    return _aggregate_openings_by_outcome(games, outcome="loss")
+
+
+def _compute_strong_openings(games: list[dict]) -> dict:
+    """Openings where the player wins most often (split by color).
+    Drives the 'Your Strengths' panel."""
+    return _aggregate_openings_by_outcome(games, outcome="win")
+
+
+def _aggregate_traps_by_outcome(
+    games: list[dict],
+    outcome: str,
+    trap_library: list[dict],
+) -> list[dict]:
+    """For each game with the matching outcome, try to detect a named trap
+    from the curated library, then aggregate by trap name.
+
+    Returns a list of {name, eco, count, win_rate, recent_dates,
+    frequency_label, trend} sorted by count descending. Only traps with
+    at least 1 occurrence appear; results are capped at 8 entries.
+    """
+    if not trap_library:
+        return []
+
+    # First pass: detect a trap on every game (regardless of outcome)
+    # so we can compute a true win-rate per trap.
+    per_trap: dict[str, dict] = defaultdict(lambda: {
+        "name": None,
+        "eco": None,
+        "total": 0,         # total games that hit this trap
+        "wins": 0,
+        "losses": 0,
+        "draws": 0,
+        "outcome_dates": [],  # dates where the requested outcome occurred
+    })
+
+    for g in games:
+        moves = _extract_san_moves(g["pgn"], max_moves=20)
+        trap = _match_trap(moves, trap_library)
+        if trap is None:
+            continue
+        key = trap["name"]
+        rec = per_trap[key]
+        rec["name"] = trap["name"]
+        rec["eco"] = trap.get("eco")
+        rec["total"] += 1
+        if g["result"] == "win":
+            rec["wins"] += 1
+        elif g["result"] == "loss":
+            rec["losses"] += 1
+        else:
+            rec["draws"] += 1
+        if g["result"] == outcome and g.get("date_played"):
+            rec["outcome_dates"].append(g["date_played"])
+
+    out = []
+    for key, rec in per_trap.items():
+        outcome_count = rec["wins"] if outcome == "win" else rec["losses"]
+        if outcome_count == 0:
+            continue
+        win_rate = round(rec["wins"] / rec["total"] * 100, 1) if rec["total"] else 0
+        # Recent dates newest-first, keep top 5
+        rec["outcome_dates"].sort(reverse=True)
+        recent_dates = rec["outcome_dates"][:5]
+        out.append({
+            "name": rec["name"],
+            "eco": rec["eco"],
+            "count": outcome_count,
+            "total": rec["total"],
+            "wins": rec["wins"],
+            "losses": rec["losses"],
+            "draws": rec["draws"],
+            "win_rate": win_rate,
+            "recent_dates": recent_dates,
+            "frequency_label": _frequency_label(outcome_count),
+            # Trend is reserved for a future v1.5 enhancement (compare
+            # current period vs prior). For now, "flat" is a safe default.
+            "trend": "flat",
+        })
+    out.sort(key=lambda x: (-x["count"], x["name"]))
+    return out[:8]
+
+
+def _compute_trap_falls(games: list[dict]) -> list[dict]:
+    """Recurring named traps the player keeps LOSING to.
+    Drives the 'You Fall For — Avoid these!' panel."""
+    return _aggregate_traps_by_outcome(games, "loss", _load_trap_library())
+
+
+def _compute_your_arsenal(games: list[dict]) -> list[dict]:
+    """Recurring named traps the player keeps WINNING with.
+    Drives the 'Your Arsenal — Keep using!' panel."""
+    return _aggregate_traps_by_outcome(games, "win", _load_trap_library())
+
+
+# ──────────────────────────────────────────────────────────────────────────
 
 
 def _compute_acpl_trend(games: list[dict],

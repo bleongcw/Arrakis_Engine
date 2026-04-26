@@ -1,6 +1,6 @@
 # Arrakis Engine — Architecture
 
-*Last updated: 2026-04-26 — corresponds to v1.3.0*
+*Last updated: 2026-04-26 — corresponds to v1.4.0*
 
 This document describes the technical architecture of Arrakis Engine: how the pieces fit together, what runs where, and the design decisions behind them. It is aimed at contributors and developers reading the codebase. For end-user / setup docs, see [README.md](../README.md). For changelog, see [CHANGELOG.md](../CHANGELOG.md).
 
@@ -95,7 +95,18 @@ The backend is intentionally dependency-light — `http.server` is enough for a 
 - Resilience: exponential backoff (30s → 60s → 120s, max 5 min), 3-failure circuit breaker, 300s SDK timeout for reasoning models, interruptible sleep via `threading.Event`.
 
 ### `patterns.py` — cross-game aggregation
-Aggregates 16 metrics per player across all analyzed games. Stored as one JSON blob per player in `player_patterns.stats_json`.
+Aggregates 20 metrics per player across all analyzed games. Stored as one JSON blob per player in `player_patterns.stats_json`.
+
+The four metrics added in v1.4.0 are the **Self-Analysis** family — they answer "what should I study next?" rather than "what's true about my play?":
+
+| Metric | Backed by | What it answers |
+|---|---|---|
+| `loss_openings` | PGN opening name + outcome filter | Which openings cost you the most ELO, split by color |
+| `strong_openings` | mirror of above for wins | Which openings you should keep playing |
+| `trap_falls` | longest-prefix match against `frontend/public/data/traps.json` (curated CC0 Lichess subset) | Recurring named traps your opponents use to beat you |
+| `your_arsenal` | mirror for wins | Recurring named traps you successfully use |
+
+The trap library is built once by `python scripts/build_traps.py`, which fetches the Lichess [`chess-openings`](https://github.com/lichess-org/chess-openings) CC0 TSV data, filters to ~100 shallow named traps (≤16 plies), and writes `frontend/public/data/traps.json` and the full opening book at `frontend/public/data/openings.json`. Both files are vendored in the repo so runtime has no network dependency. Re-run when Lichess updates upstream (a few times per year).
 
 | Metric | What it answers |
 |---|---|
@@ -115,6 +126,10 @@ Aggregates 16 metrics per player across all analyzed games. Stored as one JSON b
 | Opening ACPL | Per-opening accuracy with verdict |
 | Trend summary | LLM-generated cross-game narrative |
 | Rating progression | Rating over time with moving average |
+| Loss openings (v1.4.0) | Which openings lose most often, by color |
+| Strong openings (v1.4.0) | Which openings win most often, by color |
+| Trap falls (v1.4.0) | Recurring named traps the player loses to |
+| Your arsenal (v1.4.0) | Recurring named traps the player wins with |
 
 ### `report.py` — markdown reports
 Weekly / monthly markdown reports for coaches: game-by-game summaries, ACPL trend, pattern highlights, annotated critical positions. Saved to `reports/`.
@@ -134,7 +149,7 @@ Single-process Python HTTP server. SQLite WAL mode + 30s busy timeout; returns 5
 | GET | `/api/players` | List active players with tier + stats |
 | GET | `/api/games?player=X` | Game list with filters |
 | GET | `/api/games/{id}` | Game detail with analysis + coaching |
-| GET | `/api/patterns?player=X` | All 16 pattern metrics + trend summary |
+| GET | `/api/patterns?player=X` | All 20 pattern metrics + trend summary |
 | GET | `/api/report?player=X&period=Y` | Generated report data |
 | GET | `/api/status` | Health check |
 | GET | `/api/pipeline/status` | Current pipeline task |
@@ -188,7 +203,7 @@ Next.js 16 + React 19 + TypeScript + Tailwind + shadcn/ui (built on Base UI prim
 | `/[player]/games` | Filterable games list with compare-mode checkbox |
 | `/[player]/games/[id]` | Game detail (board, eval chart, coaching panels) |
 | `/[player]/games/compare` | Two boards side-by-side, synchronized navigation |
-| `/[player]/patterns` | 16 pattern visualizations + AI coaching summary |
+| `/[player]/patterns` | 18 pattern components + AI coaching summary (16 charts + Self-Analysis section with Fix Your Openings & Trap Patterns) |
 | `/[player]/reports` | Period selector, time-class filter, print-to-PDF |
 | `/settings` | Players, Stockfish config, API keys, coaching settings |
 
@@ -262,6 +277,7 @@ Functions imported locally inside another function (e.g. `from src.coach import 
 |---|---|
 | Adding a new LLM provider | `src/llm_providers.py` (registration), `frontend/lib/providers.ts` (UI metadata) |
 | Adding a new pattern metric | `src/patterns.py` (compute), `frontend/components/patterns/*.tsx` (visualize), `frontend/app/[player]/patterns/page.tsx` (compose) |
+| Adding a new named trap | Update `TRAP_NAME_PATTERNS` in `scripts/build_traps.py`, then re-run the script to rebuild `frontend/public/data/traps.json` |
 | Adding a new pipeline step | `src/scheduler.py::run_full_pipeline`, `src/dashboard_server.py` (POST endpoint), `frontend/components/pipeline-control-panel.tsx` |
 | Changing Stockfish behavior | `src/analyzer.py` + `config.yaml` |
 | Tuning coaching prompts | `src/coach.py` (build_prompt), `src/tiers.py` (per-tier guidance) |

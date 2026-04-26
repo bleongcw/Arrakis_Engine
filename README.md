@@ -638,6 +638,12 @@ Patterns are aggregated across all games per player:
 - **Blunder Rate Under Pressure** — comparison of blunder frequency when clock is below 60s vs above 60s
 - **Time Management Score** — composite 0–100 score based on time trouble frequency and pressure-induced blunder rate
 
+**Self-Analysis (v1.4.0):**
+- **Fix Your Openings** — openings where you lose most often (Your ELO Leaks) paired with openings where you win most often (Your Strengths); split by color (White / Black) with a "Study most recent" link to the relevant game.
+- **Trap Patterns** — recognizes ~100 well-known named opening traps and groups them into "Your Arsenal" (traps you successfully use to win) and "You Fall For" (traps your opponents have used to beat you). Backed by the [Lichess `chess-openings` CC0 database](https://github.com/lichess-org/chess-openings) — covers Stafford Gambit, Elephant Gambit, Fried Liver Attack, Englund Gambit, Halloween Gambit, Cochrane, Wayward Queen Attack, Latvian Gambit, Damiano Defense, Traxler Counterattack, and more.
+
+> **How traps are detected.** Each game's first ~20 moves are matched against the curated trap library using longest-prefix matching — the deepest signature wins. The library is shallow (≤16 plies) and explicitly curated to focus on beginner traps, not deep mainline variations. To rebuild from the latest Lichess source: `python scripts/build_traps.py`.
+
 ## Web Dashboard
 
 Built with Next.js 16, React 19, shadcn/ui, Tailwind CSS, and Recharts. Fully mobile-responsive (320px+). Requires Node.js 18+.
@@ -785,7 +791,7 @@ Arrakis_Engine/
 │   └── lib/                   # API client (api.ts), types (types.ts), providers (providers.ts), utils
 ├── docs/
 │   └── screenshots/       # Architecture diagram and screenshots
-├── tests/                 # Test suite (246 tests across 3 tiers)
+├── tests/                 # Test suite (285 tests across 3 tiers)
 │   ├── conftest.py        # Shared fixtures (db, player, stockfish, llm)
 │   ├── test_models.py
 │   ├── test_harvester.py
@@ -818,7 +824,7 @@ Arrakis_Engine/
 
 ## Running Tests
 
-246 tests across 15 files, organized into three tiers using pytest markers. Integration and live tests are excluded by default — opt in explicitly.
+285 tests across 15 files, organized into three tiers using pytest markers. Integration and live tests are excluded by default — opt in explicitly.
 
 ### Commands
 
@@ -841,7 +847,7 @@ python -m pytest tests/ -m "integration and live" -v
 
 # Everything
 python -m pytest tests/ -m "" -v
-# → All 246 tests (~5min)
+# → All 285 tests (~5min)
 ```
 
 ### Test Coverage by Module

@@ -22,6 +22,8 @@ import { RepertoireConsistency } from "@/components/patterns/repertoire-consiste
 import { OpeningRepertoireTracker } from "@/components/patterns/opening-repertoire-tracker";
 import { TimePressure } from "@/components/patterns/time-pressure";
 import { TrendSummary } from "@/components/patterns/trend-summary";
+import { FixYourOpenings } from "@/components/patterns/fix-your-openings";
+import { YouFallFor } from "@/components/patterns/you-fall-for";
 import type { PatternStats, GameListItem } from "@/lib/types";
 
 export default function PatternsPage() {
@@ -241,6 +243,28 @@ export default function PatternsPage() {
       <Card>
         <CardContent className="pt-6">
           <OpeningPerformance openings={stats.openings || {}} />
+        </CardContent>
+      </Card>
+
+      {/* v1.4.0 Self-Analysis: Fix Your Openings + Trap Patterns - full width */}
+      <Card>
+        <CardContent className="pt-6">
+          <div className="mb-4">
+            <h2 className="text-lg font-semibold mb-1">Self-Analysis</h2>
+            <p className="text-sm text-muted-foreground">
+              Where you bleed ELO, what to study next, and which named traps
+              keep catching you out.
+            </p>
+          </div>
+          <FixYourOpenings
+            data={stats.loss_openings}
+            strengths={stats.strong_openings}
+            player={player}
+          />
+          <YouFallFor
+            arsenal={stats.your_arsenal}
+            falls={stats.trap_falls}
+          />
         </CardContent>
       </Card>
     </div>
