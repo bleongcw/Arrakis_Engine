@@ -15,9 +15,12 @@ build/
 .pytest_cache/
 frontend/node_modules/
 frontend/.next/
-# docs/ — most working docs are private; only architecture.md is tracked
+# docs/ — most working docs are private. Track only:
+#   - architecture.md (contributor reference)
+#   - screenshots/ (all images used by README / docs)
 docs/*
 !docs/architecture.md
+!docs/screenshots/
 .claude/
 .mcp.json
 scripts/.lichess_cache/

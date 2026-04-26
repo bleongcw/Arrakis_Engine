@@ -85,6 +85,30 @@ The name comes from Frank Herbert's *Dune* — on Arrakis, the spice must flow. 
 
 ![Patterns — Opening Explorer](docs/screenshots/Arrakis-Engine-Patterns-7.png)
 
+### Patterns — Self-Analysis: Fix Your Openings (v1.4.0)
+
+Where you bleed ELO and what to keep using. Each row shows total games, W/L/D split, and links to the most recent game so you can study it.
+
+![Patterns — Fix Your Openings](docs/screenshots/Arrakis-Engine-Fix-Your-Openings.png)
+
+### Patterns — Self-Analysis: Trap Patterns (v1.4.0 + v1.4.3)
+
+Recurring named opening traps in your games — backed by the [Lichess CC0 chess-openings library](https://github.com/lichess-org/chess-openings). Click any row to see the trap unfold on a board, jump to the games where it happened, and study the line on Lichess.
+
+![Patterns — Trap Patterns](docs/screenshots/Arrakis-Engine-Trap-Patterns.png)
+
+### Hunter Mode — Their Weaknesses & Strengths (v1.4.1+)
+
+Look up an opponent's public games on chess.com or lichess. The targeted-prep view shows openings the opponent loses (your hunting targets) and openings they win (lines to avoid).
+
+![Hunter Mode](docs/screenshots/Arrakis-Engine-Hunter-Mode.png)
+
+### Hunter Mode — Click-to-Expand with Mini-Board (v1.4.4)
+
+Click any opening row to see how the opponent actually played the line — step-through mini-board, "Game N of M" controls flipping through up to 5 representative games, annotated move list with deviations from book theory, and a "Study this position on Lichess" deep link.
+
+![Hunter Mode — Expanded](docs/screenshots/Arrakis-Engine-Trap-Patterns-Chessboard.png)
+
 ### Reports — Chess Coaching Report
 
 ![Reports](docs/screenshots/Arrakis-Engine-Reports.png)
