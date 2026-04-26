@@ -1278,6 +1278,14 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         features = (self.config or {}).get("features") or {}
         return features.get("hunter_mode", True)
 
+    def _hunter_config(self) -> dict:
+        """Pull Hunter Mode tuning knobs from config.yaml `features`."""
+        features = (self.config or {}).get("features") or {}
+        return {
+            "lookback_months": features.get("hunter_lookback_months", 6),
+            "max_games": features.get("hunter_max_games_per_opponent"),
+        }
+
     def _api_hunt_profile(self, params):
         """GET /api/hunt/profile?opponent=<username>&platform=<chess.com|lichess>
 
@@ -1292,10 +1300,14 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             return {"error": "opponent query param is required"}
 
         from src.hunter import get_or_fetch_profile
+        cfg = self._hunter_config()
         try:
-            profile = get_or_fetch_profile(opponent, platform, self.db_path)
+            profile = get_or_fetch_profile(
+                opponent, platform, self.db_path,
+                lookback_months=cfg["lookback_months"],
+                max_games=cfg["max_games"],
+            )
         except ValueError as e:
-            # Unknown platform — surface as 400
             return {"error": str(e)}
         return profile
 
@@ -1314,9 +1326,12 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             return
 
         from src.hunter import get_or_fetch_profile
+        cfg = self._hunter_config()
         try:
             profile = get_or_fetch_profile(
                 opponent, platform, self.db_path, force_refresh=True,
+                lookback_months=cfg["lookback_months"],
+                max_games=cfg["max_games"],
             )
         except ValueError as e:
             self._send_json({"error": str(e)}, 400)

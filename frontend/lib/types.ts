@@ -249,8 +249,17 @@ export interface LossOpeningAnalysis {
 
 // ── v1.4.1 / v1.4.2 Hunter Mode types ────────────────────────────────────
 
-/** A single opening entry in an opponent's profile (mirrors LossOpeningEntry
- *  shape minus the recent_game_ids — we don't have those for opponents). */
+/** A representative game for an opening — used by the v1.4.4 expand-on-click
+ *  UI to render a step-through mini-board of an actual opponent game. */
+export interface OpponentRepresentativeGame {
+  pgn: string;
+  date_played: string | null;
+  /** Opponent's color in this game ("white" or "black"). Drives board orientation. */
+  opponent_color: "white" | "black" | null;
+  game_url: string | null;
+}
+
+/** A single opening entry in an opponent's profile. */
 export interface OpponentOpeningEntry {
   name: string;
   total: number;
@@ -259,6 +268,11 @@ export interface OpponentOpeningEntry {
   draws: number;
   /** Loss rate (in `weaknesses`) or win rate (in `strengths`). */
   rate: number;
+  /** v1.4.4: ECO code (A00–E99) extracted from PGN headers. */
+  eco?: string | null;
+  /** v1.4.4: up to 5 most-recent games where the opponent had this outcome.
+   *  Drives the click-to-expand mini-board UI. */
+  representative_games?: OpponentRepresentativeGame[];
 }
 
 export interface OpponentOpeningSplit {
@@ -271,6 +285,12 @@ export interface HunterMeta {
   platform: "chess.com" | "lichess";
   username: string;
   fetched_at: string | null;
+  /** v1.4.4: total games accumulated locally for this opponent
+   *  (across all refreshes within the sliding window). May exceed
+   *  total_games if some have been pruned but the cache profile is
+   *  cached from a previous compute. Useful for the UI to show
+   *  "10 games shown · 187 accumulated" stamps. */
+  accumulated_games?: number;
 }
 
 export interface OpponentProfile {

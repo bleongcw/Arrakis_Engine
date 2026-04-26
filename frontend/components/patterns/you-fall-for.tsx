@@ -50,10 +50,14 @@ function _formatDate(d: string): string {
   return `${parseInt(day, 10)} ${monthNames[monthIdx]}`;
 }
 
-/** Build a Lichess analysis deep link with the trap's PGN pre-loaded.
- *  Lichess accepts ?pgn=<URL-encoded SAN> on the /analysis page. */
-function _lichessAnalysisUrl(movesSan: string): string {
-  return `https://lichess.org/analysis?pgn=${encodeURIComponent(movesSan)}`;
+/** Build a Lichess analysis deep link from a FEN string. The /analysis/standard/{fen}
+ *  format is the reliable deep-link path that loads a specific board position
+ *  into the Lichess analysis board (with cloud eval + opening explorer). */
+function _lichessAnalysisUrl(fen: string): string {
+  // FEN spaces are URL-safe but Lichess prefers underscores; encodeURIComponent
+  // handles either, but we keep it minimal with raw substitution.
+  const safe = fen.replace(/ /g, "_");
+  return `https://lichess.org/analysis/standard/${safe}`;
 }
 
 // ── Info modal ────────────────────────────────────────────────────────────
@@ -173,12 +177,12 @@ function TrapExpandedView({
         {libraryTrap && (
           <div>
             <a
-              href={_lichessAnalysisUrl(libraryTrap.moves_san)}
+              href={_lichessAnalysisUrl(nav.endFen)}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 hover:underline text-[11px]"
             >
-              🔍 Study this line on Lichess →
+              🔍 Study this position on Lichess →
             </a>
           </div>
         )}

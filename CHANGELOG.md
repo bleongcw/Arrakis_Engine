@@ -4,6 +4,53 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.4.4] - 2026-04-26
+
+### Added
+
+**Hunter Mode opening rows are now click-to-expand.**
+
+Click any row in **Their Weaknesses** or **Their Strengths** to see how the opponent actually played that opening. The expanded panel shows:
+
+1. **Mini chess board** with step-through controls walking through an actual game where the opponent had that outcome (most recent first).
+2. **"Game N of M" flip controls** to step through up to 5 representative games per opening.
+3. **Annotated move list** with green ✓ markers for canonical book moves and an orange `!` highlighting the move where the opponent first deviated from book theory. Below: a one-line summary of the deviation ("Deviation at move 6: opponent played Bb4, book is Bc5").
+4. **"Study this position on Lichess →"** deep link opening Lichess analysis at the trap's final position with cloud eval + opening explorer pre-loaded.
+5. **"View source ↗"** link to the original game on chess.com / lichess (when available).
+6. **Fallback:** if no actual games are cached for an opening (old profile from before v1.4.4), the board falls back to the canonical opening line from the Lichess CC0 library so the row is never empty.
+
+Same UX applied symmetrically to both Weaknesses and Strengths.
+
+**Local accumulating game cache for Hunter Mode.**
+
+New `opponent_games` SQLite table keeps per-opponent PGNs locally. Each refresh:
+- Fetches only games newer than the last cached date (faster, kinder to chess.com / lichess APIs)
+- Dedups on `game_url`
+- Prunes by sliding window (`features.hunter_lookback_months`, default 6) — old games drop off naturally
+- Optionally caps total games per opponent (`features.hunter_max_games_per_opponent`)
+- Recomputes the profile from the accumulated set
+
+Profile UI now shows "X games · Y accumulated" in the header so you can see the underlying cache size.
+
+### Fixed
+- **Lichess deep link in Trap Patterns** now actually pre-loads the position. The previous `?pgn=...` query format wasn't honoured by Lichess. Switched to the documented `/analysis/standard/{FEN}` URL format using a new `endFen` value exposed by the `useChessNavigation` hook. Same fix benefits the Hunter Mode opening rows.
+
+### Schema
+- New `opponent_games` table — idempotent migration via `init_db()`. Indexes on `(username, platform)` and `(username, platform, date_played DESC)`.
+- New config flags in `config.yaml`:
+  - `features.hunter_lookback_months: 6`
+  - `features.hunter_max_games_per_opponent: null`
+- `useChessNavigation` hook now returns `endFen` and `fens` (the raw FEN array) in addition to `currentFen`. Backward-compatible — existing callers ignore the new fields.
+
+### Tests
+- 10 new tests in `tests/test_hunter.py` covering accumulation (first-call insert, dedup on game_url, sliding window prune, max-games cap, NULL-date defensive keep) + representative games (newest-first, 5-cap, ECO propagation, outcome filtering) + meta `accumulated_games` counter.
+- Backend test count: 308 → 318.
+
+### Migration note
+First time you refresh an opponent profile after upgrading, Hunter Mode will fetch the full lookback window (6 months by default). Subsequent refreshes are incremental — only new games since the last fetch.
+
+---
+
 ## [1.4.3] - 2026-04-26
 
 ### Added

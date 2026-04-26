@@ -255,6 +255,208 @@ class MockResp:
         pass
 
 
+# ── v1.4.4: accumulating cache + representative games ────────────────────
+
+
+def _enriched_g(
+    game_url: str,
+    color: str,
+    result: str,
+    opening: str = "Italian Game",
+    date: str = "2026-04-01",
+    eco: str = "C50",
+):
+    """Build a game dict in the v1.4.4 enriched shape returned by
+    fetch_opponent_games (with game_url + date_played + eco)."""
+    return {
+        "pgn": (
+            f'[White "w"]\n[Black "b"]\n[Opening "{opening}"]\n'
+            f'[ECO "{eco}"]\n[Date "{date.replace("-", ".")}"]\n'
+            '\n1. e4 e5 *'
+        ),
+        "player_color": color,
+        "result": result,
+        "game_url": game_url,
+        "date_played": date,
+        "opening_name": opening,
+        "eco": eco,
+    }
+
+
+class TestAccumulateOpponentGames:
+    """v1.4.4: accumulate_opponent_games merges new fetched games into
+    a persistent opponent_games cache rather than replacing snapshot."""
+
+    @patch("src.hunter.fetch_opponent_games")
+    def test_first_call_inserts_all(self, mock_fetch, db_path):
+        from src.hunter import accumulate_opponent_games
+        mock_fetch.return_value = [
+            _enriched_g(f"https://chess.com/g/{i}", "white", "loss",
+                        date=f"2026-04-{i+1:02d}")
+            for i in range(3)
+        ]
+        out = accumulate_opponent_games("OpX", "chess.com", db_path)
+        assert len(out) == 3
+
+    @patch("src.hunter.fetch_opponent_games")
+    def test_second_call_dedups_on_game_url(self, mock_fetch, db_path):
+        """If the second fetch returns games we already have (same URL),
+        they are NOT duplicated — only new ones are added."""
+        from src.hunter import accumulate_opponent_games
+        # First batch: games 0, 1, 2
+        mock_fetch.return_value = [
+            _enriched_g(f"https://chess.com/g/{i}", "white", "loss",
+                        date=f"2026-04-{i+1:02d}")
+            for i in range(3)
+        ]
+        accumulate_opponent_games("OpX", "chess.com", db_path)
+
+        # Second batch: games 1, 2, 3, 4 (1 and 2 are dups; 3 and 4 are new)
+        mock_fetch.return_value = [
+            _enriched_g(f"https://chess.com/g/{i}", "white", "loss",
+                        date=f"2026-04-{i+1:02d}")
+            for i in range(1, 5)
+        ]
+        out = accumulate_opponent_games("OpX", "chess.com", db_path)
+        # Should now have 5 distinct games (0,1,2,3,4) — not 7
+        assert len(out) == 5
+
+    @patch("src.hunter.fetch_opponent_games")
+    def test_sliding_window_prunes_old(self, mock_fetch, db_path):
+        """Games older than lookback_months are pruned on each fetch."""
+        from src.hunter import accumulate_opponent_games
+        # Insert one ancient game (1 year ago)
+        mock_fetch.return_value = [
+            _enriched_g("https://chess.com/g/old", "white", "loss",
+                        date="2025-01-01"),
+            _enriched_g("https://chess.com/g/new", "white", "loss",
+                        date="2026-04-01"),
+        ]
+        out = accumulate_opponent_games("OpX", "chess.com", db_path,
+                                         lookback_months=6)
+        # Only the recent one should survive; 2025-01-01 is > 6 months old
+        assert len(out) == 1
+        assert out[0]["game_url"] == "https://chess.com/g/new"
+
+    @patch("src.hunter.fetch_opponent_games")
+    def test_max_games_cap_prunes_excess(self, mock_fetch, db_path):
+        """When max_games is set, oldest games above the cap are pruned."""
+        from src.hunter import accumulate_opponent_games
+        mock_fetch.return_value = [
+            _enriched_g(f"https://chess.com/g/{i}", "white", "loss",
+                        date=f"2026-04-{i+1:02d}")
+            for i in range(10)
+        ]
+        out = accumulate_opponent_games("OpX", "chess.com", db_path,
+                                         max_games=3)
+        assert len(out) == 3
+        # Top-3 should be the most recent (dates 8, 9, 10 → games 7, 8, 9)
+        urls = [g["game_url"] for g in out]
+        assert "https://chess.com/g/9" in urls
+        assert "https://chess.com/g/8" in urls
+        assert "https://chess.com/g/7" in urls
+        assert "https://chess.com/g/0" not in urls
+
+    @patch("src.hunter.fetch_opponent_games")
+    def test_keeps_null_dated_games(self, mock_fetch, db_path):
+        """Games with no date_played must NOT be pruned by the sliding
+        window — we don't know they're old, so we keep them."""
+        from src.hunter import accumulate_opponent_games
+        # Game has no date — defensive: should NOT be pruned
+        mock_fetch.return_value = [
+            {
+                "pgn": '[White "w"]\n[Black "b"]\n\n1. e4 *',
+                "player_color": "white",
+                "result": "loss",
+                "game_url": "https://chess.com/g/nodate",
+                "date_played": None,
+                "opening_name": "Unknown",
+                "eco": None,
+            }
+        ]
+        out = accumulate_opponent_games("OpX", "chess.com", db_path,
+                                         lookback_months=6)
+        assert len(out) == 1
+
+
+class TestRepresentativeGamesInProfile:
+    """v1.4.4: each opening entry should carry up to 5 representative PGNs
+    so the UI can render the click-to-expand mini-board."""
+
+    def test_reps_populated_newest_first(self):
+        from src.hunter import compute_opponent_profile
+        # 3 losses in the same opening, different dates
+        games = [
+            _enriched_g(f"https://chess.com/g/{i}", "white", "loss",
+                        date=f"2026-04-{i:02d}")
+            for i in range(1, 4)
+        ]
+        profile = compute_opponent_profile(games)
+        weak = profile["weaknesses"]["white"][0]
+        reps = weak["representative_games"]
+        assert len(reps) == 3
+        # Newest first
+        assert reps[0]["date_played"] == "2026-04-03"
+        assert reps[1]["date_played"] == "2026-04-02"
+        assert reps[2]["date_played"] == "2026-04-01"
+
+    def test_reps_capped_at_five(self):
+        from src.hunter import compute_opponent_profile, MAX_REPS_PER_OPENING
+        games = [
+            _enriched_g(f"https://chess.com/g/{i}", "white", "loss",
+                        date=f"2026-04-{i:02d}")
+            for i in range(1, 9)
+        ]
+        profile = compute_opponent_profile(games)
+        reps = profile["weaknesses"]["white"][0]["representative_games"]
+        assert len(reps) == MAX_REPS_PER_OPENING == 5
+
+    def test_eco_propagated(self):
+        from src.hunter import compute_opponent_profile
+        games = [
+            _enriched_g(f"https://chess.com/g/{i}", "white", "loss",
+                        date=f"2026-04-{i:02d}", eco="C57")
+            for i in range(1, 3)
+        ]
+        profile = compute_opponent_profile(games)
+        weak = profile["weaknesses"]["white"][0]
+        assert weak["eco"] == "C57"
+
+    def test_only_outcome_games_in_reps(self):
+        """A loss should only show losing games as reps; not wins/draws."""
+        from src.hunter import compute_opponent_profile
+        games = [
+            _enriched_g("https://chess.com/g/1", "white", "loss",
+                        date="2026-04-03"),
+            _enriched_g("https://chess.com/g/2", "white", "loss",
+                        date="2026-04-02"),
+            _enriched_g("https://chess.com/g/3", "white", "win",
+                        date="2026-04-04"),  # newest but a WIN
+        ]
+        profile = compute_opponent_profile(games)
+        weak_reps = profile["weaknesses"]["white"][0]["representative_games"]
+        # Only the 2 losses, in newest-first order
+        assert len(weak_reps) == 2
+        assert weak_reps[0]["date_played"] == "2026-04-03"
+        assert all(rg["pgn"] for rg in weak_reps)
+
+
+class TestAccumulatedGamesInMeta:
+    """v1.4.4: profile.meta.accumulated_games tracks the underlying
+    opponent_games cache size, separate from the profile's filtered total."""
+
+    @patch("src.hunter.fetch_opponent_games")
+    def test_meta_includes_accumulated_count(self, mock_fetch, db_path):
+        from src.hunter import get_or_fetch_profile
+        mock_fetch.return_value = [
+            _enriched_g(f"https://chess.com/g/{i}", "white", "loss",
+                        date=f"2026-04-{i+1:02d}")
+            for i in range(5)
+        ]
+        profile = get_or_fetch_profile("OpX", "chess.com", db_path)
+        assert profile["meta"]["accumulated_games"] == 5
+
+
 # ── get_or_fetch_profile end-to-end ──────────────────────────────────────
 
 

@@ -1,6 +1,6 @@
 # Arrakis Engine — Architecture
 
-*Last updated: 2026-04-26 — corresponds to v1.4.3*
+*Last updated: 2026-04-26 — corresponds to v1.4.4*
 
 This document describes the technical architecture of Arrakis Engine: how the pieces fit together, what runs where, and the design decisions behind them. It is aimed at contributors and developers reading the codebase. For end-user / setup docs, see [README.md](../README.md). For changelog, see [CHANGELOG.md](../CHANGELOG.md).
 
@@ -141,11 +141,18 @@ Rating-based tiers (Beginner → Elementary → Intermediate → Advanced → Ex
 - `scheduler.py` runs the full pipeline (harvest → analyze → patterns → coach) on a configurable interval as a daemon thread.
 - `pipeline_state.py` enforces single-task-at-a-time across CLI, scheduler, and dashboard so two pipelines can't fight over the SQLite lock or the Stockfish process.
 
-### `hunter.py` — opponent prep (v1.4.1)
-- `fetch_opponent_games(username, platform, lookback_months=3)` — pulls the opponent's recent public PGN from chess.com or lichess. Reuses the platform-specific helpers from `harvester.py` (`_chesscom_*`, `_lichess_*`) to avoid duplication. **No Stockfish, no DB writes** — opponent analysis would be slow and pollute the player-centric `games` table.
-- `compute_opponent_profile(games)` — same loss-rate-by-opening logic as `_compute_loss_openings` from `patterns.py`, but operates on the opponent's games. Output structure mirrors Self-Analysis: `{weaknesses: {white, black}, strengths: {white, black}, results, total_games}`.
-- `get_or_fetch_profile(...)` — cache-aware wrapper. Returns from `opponent_cache` if fresh (24h TTL), else fetches and updates the cache.
-- Feature-flagged via `features.hunter_mode` in `config.yaml` (default `true`).
+### `hunter.py` — opponent prep (v1.4.1, v1.4.4 accumulating cache)
+Two-layer cache:
+
+1. **`opponent_games` (v1.4.4)** — accumulating local PGN cache. Each fetch is incremental: pulls only games newer than the last cached `date_played`, dedups on `game_url`. Pruned by sliding window (`hunter_lookback_months`, default 6 months) and an optional hard cap (`hunter_max_games_per_opponent`). Source of truth for opponent history.
+2. **`opponent_cache`** — recomputed profile JSON, 24h TTL. Hit on every page load; rebuilt only when stale or refresh is forced.
+
+Key functions:
+- `fetch_opponent_games(username, platform, lookback_months=6)` — pulls fresh PGN from chess.com or lichess. **No Stockfish, no DB writes to the player-centric `games` table.**
+- `accumulate_opponent_games(...)` — orchestrates fetch-since-last + insert + prune. Returns the full accumulated set.
+- `compute_opponent_profile(games)` — aggregates by opening + color and includes up to `MAX_REPS_PER_OPENING=5` representative PGNs per `(opening, outcome)` so the UI can render mini-board step-through. Mirrors `_compute_loss_openings` from `patterns.py`.
+- `get_or_fetch_profile(...)` — public entry point. Cache-aware; returns profile + `meta` block with `cached`, `accumulated_games`, `fetched_at`, `platform`, `username`.
+- Feature-flagged via `features.hunter_mode` (default `true`).
 
 ### `dashboard_server.py` — REST API
 Single-process Python HTTP server. SQLite WAL mode + 30s busy timeout; returns 503 gracefully when the analyzer is holding the lock.
@@ -187,7 +194,8 @@ Single-file SQLite. Schema migrations run via `init_db()` at startup — column 
 | `move_analysis` | game_id, move_number, side, move_played, best_move, eval_cp, swing_cp, win_prob, classification, pv_line |
 | `game_coaching` | game_id, provider, narrative, key_lesson, practical_focus, coach_notes, critical_moments_json, opening_analysis_json |
 | `player_patterns` | player_id, period_start, period_end, stats_json, trend_summary, updated_at |
-| `opponent_cache` (v1.4.1) | username, platform, profile_json, fetched_at — 24h TTL cache for Hunter Mode |
+| `opponent_cache` (v1.4.1) | username, platform, profile_json, fetched_at — 24h TTL cache for Hunter Mode profile JSON |
+| `opponent_games` (v1.4.4) | username, platform, game_url, pgn, player_color, result, opening_name, eco, date_played, fetched_at — accumulating local PGN cache for Hunter Mode (sliding window + optional cap) |
 
 ### Design decisions
 

@@ -1,14 +1,48 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useMemo } from "react";
+import { ChessBoard } from "@/components/game-detail/chess-board";
+import { MoveControls } from "@/components/game-detail/move-controls";
+import { useChessNavigation } from "@/hooks/use-chess-navigation";
 import type {
   OpponentProfile,
   OpponentOpeningEntry,
+  OpponentRepresentativeGame,
 } from "@/lib/types";
+
+// ── Opening library — fetched once for canonical-line lookup + deviation
+//    highlighting. Cached at module scope for the lifetime of the page.
+
+interface LibraryOpening {
+  eco: string;
+  name: string;
+  /** PGN move text, e.g. "1. e4 e5 2. Nf3 Nc6". */
+  moves: string;
+}
+
+let _libraryCache: LibraryOpening[] | null = null;
+let _libraryPromise: Promise<LibraryOpening[]> | null = null;
+
+function loadOpeningLibrary(): Promise<LibraryOpening[]> {
+  if (_libraryCache) return Promise.resolve(_libraryCache);
+  if (_libraryPromise) return _libraryPromise;
+  _libraryPromise = fetch("/data/openings.json")
+    .then((r) => r.json() as Promise<LibraryOpening[]>)
+    .then((data) => {
+      _libraryCache = data;
+      return data;
+    })
+    .catch(() => {
+      _libraryCache = [];
+      return [];
+    });
+  return _libraryPromise;
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────
 
 function _formatDate(d: string | null): string {
   if (!d) return "—";
-  // Accept "YYYY-MM-DD HH:MM:SS" or ISO
   const datePart = d.split(" ")[0];
   const parts = datePart.split("-");
   if (parts.length !== 3) return d;
@@ -19,12 +53,309 @@ function _formatDate(d: string | null): string {
   return `${parseInt(day, 10)} ${monthNames[monthIdx]} ${y}`;
 }
 
+/** Lichess analysis deep link from a FEN. */
+function _lichessAnalysisUrl(fen: string): string {
+  return `https://lichess.org/analysis/standard/${fen.replace(/ /g, "_")}`;
+}
+
+/** Strip move-number prefixes from a SAN PGN move string and return a flat
+ *  array of moves. "1. e4 e5 2. Nf3" -> ["e4", "e5", "Nf3"]. */
+function parseMoveText(moveText: string): string[] {
+  return moveText
+    .replace(/\d+\./g, " ")
+    .replace(/(1-0|0-1|1\/2-1\/2|\*)/g, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+/** Look up the canonical opening line for a given opening name from the
+ *  Lichess library. Returns the deepest matching entry by name (longest
+ *  name match) so "Italian Game: Two Knights Defense" beats "Italian Game". */
+function findCanonicalLine(
+  openingName: string,
+  library: LibraryOpening[],
+): LibraryOpening | null {
+  if (!openingName || library.length === 0) return null;
+  // Exact match first
+  const exact = library.find((e) => e.name === openingName);
+  if (exact) return exact;
+  // Fuzzy: pick the longest name that the opening name STARTS WITH (or vice versa)
+  let best: LibraryOpening | null = null;
+  for (const e of library) {
+    if (openingName.startsWith(e.name) || e.name.startsWith(openingName)) {
+      if (!best || e.name.length > best.name.length) best = e;
+    }
+  }
+  return best;
+}
+
+/** Return the ply index (0-based) where two move lists first differ.
+ *  Returns -1 if `gameMoves` matches `bookMoves` for the entire shared length. */
+function findDeviationIndex(
+  gameMoves: string[],
+  bookMoves: string[],
+): number {
+  const len = Math.min(gameMoves.length, bookMoves.length);
+  for (let i = 0; i < len; i++) {
+    if (gameMoves[i] !== bookMoves[i]) return i;
+  }
+  return -1;
+}
+
+// ── Annotated move list with deviation highlight ─────────────────────────
+
+function AnnotatedMoves({
+  pgn,
+  canonical,
+}: {
+  pgn: string;
+  canonical: LibraryOpening | null;
+}) {
+  // Extract just the SAN moves from the game PGN (drop headers + tags).
+  // chess.js can give us the move history but here we lift moves directly
+  // from the PGN body for simplicity and to keep this purely declarative.
+  const gameMoves = useMemo(() => {
+    // Pull body after the last ']' (end of headers) or use whole string
+    const lastBracket = pgn.lastIndexOf("]");
+    const body = lastBracket >= 0 ? pgn.slice(lastBracket + 1) : pgn;
+    return parseMoveText(body);
+  }, [pgn]);
+
+  const bookMoves = useMemo(
+    () => (canonical ? parseMoveText(canonical.moves) : []),
+    [canonical],
+  );
+
+  const deviationIdx = useMemo(
+    () => (bookMoves.length > 0 ? findDeviationIndex(gameMoves, bookMoves) : -1),
+    [gameMoves, bookMoves],
+  );
+
+  // Cap displayed moves to keep the panel readable. Show enough to cover
+  // the deviation point + a few more, max 24 plies (~12 moves).
+  const cap = Math.min(gameMoves.length, Math.max(deviationIdx + 6, 16));
+  const visible = gameMoves.slice(0, cap);
+
+  const parts: React.ReactNode[] = [];
+  let moveNum = 1;
+  for (let i = 0; i < visible.length; i++) {
+    const isWhiteMove = i % 2 === 0;
+    if (isWhiteMove) {
+      parts.push(
+        <span key={`num-${moveNum}`} className="text-muted-foreground">
+          {moveNum}.
+        </span>,
+      );
+    }
+    const inBook = i < bookMoves.length && visible[i] === bookMoves[i];
+    const isDeviation = deviationIdx >= 0 && i === deviationIdx;
+    parts.push(
+      <span
+        key={`m-${i}`}
+        className={
+          isDeviation
+            ? "text-orange-500 font-bold"
+            : inBook
+              ? "text-emerald-600 dark:text-emerald-400"
+              : ""
+        }
+        title={
+          isDeviation && i < bookMoves.length
+            ? `Deviation — book move was ${bookMoves[i]}`
+            : inBook
+              ? "Book move"
+              : undefined
+        }
+      >
+        {isDeviation && (
+          <span className="text-orange-400 text-[10px] align-super mr-0.5">!</span>
+        )}
+        {inBook && (
+          <span className="text-emerald-400 text-[10px] align-super mr-0.5">{"✓"}</span>
+        )}
+        {visible[i]}
+      </span>,
+    );
+    parts.push(<span key={`s-${i}`}> </span>);
+    if (!isWhiteMove) moveNum++;
+  }
+
+  return (
+    <div className="text-[11px] font-mono leading-relaxed bg-muted/40 p-2 rounded">
+      {parts}
+      {gameMoves.length > cap && (
+        <span className="text-muted-foreground"> …</span>
+      )}
+      {deviationIdx >= 0 && deviationIdx < bookMoves.length && (
+        <p className="text-[10px] text-orange-500 mt-1 font-sans">
+          Deviation at move {Math.floor(deviationIdx / 2) + 1}: opponent
+          played <span className="font-mono font-bold">{gameMoves[deviationIdx]}</span>
+          , book is <span className="font-mono font-bold">{bookMoves[deviationIdx]}</span>
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ── Expanded view: mini-board + game flip + annotated moves + Lichess ──
+
+function OpeningExpandedView({
+  entry,
+  library,
+}: {
+  entry: OpponentOpeningEntry;
+  library: LibraryOpening[];
+}) {
+  const reps = entry.representative_games || [];
+  const [repIdx, setRepIdx] = useState(0);
+  // Reset rep index whenever the entry identity changes (e.g. user toggles
+  // White/Black tab and a different opening enters this row's slot).
+  useEffect(() => {
+    setRepIdx(0);
+  }, [entry.name, entry.eco, reps.length]);
+
+  // Choose what to render on the board: actual rep PGN if available,
+  // else canonical line as a fallback.
+  const canonical = useMemo(
+    () => findCanonicalLine(entry.name, library),
+    [entry.name, library],
+  );
+  const currentRep: OpponentRepresentativeGame | null =
+    reps[repIdx] ?? null;
+  const fallbackPgn = canonical?.moves ?? "";
+  const boardPgn = currentRep?.pgn ?? fallbackPgn;
+  const orientation = (currentRep?.opponent_color as "white" | "black") || "white";
+  const nav = useChessNavigation(boardPgn, orientation);
+
+  if (!boardPgn) {
+    return (
+      <div className="border-t border-border/50 mt-3 pt-3">
+        <p className="text-xs text-muted-foreground italic">
+          No game data available for this opening.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="border-t border-border/50 mt-3 pt-3 px-1 grid grid-cols-1 md:grid-cols-[260px_1fr] gap-4">
+      {/* Left: mini-board */}
+      <div>
+        <ChessBoard
+          position={nav.currentFen}
+          orientation={nav.boardOrientation}
+          maxWidth={260}
+        />
+        <MoveControls
+          onStart={nav.goToStart}
+          onBack={nav.goBack}
+          onForward={nav.goForward}
+          onEnd={nav.goToEnd}
+        />
+        <p className="text-[10px] text-muted-foreground text-center mt-1">
+          Move {nav.moveIndex + 1} of {nav.totalMoves}
+        </p>
+      </div>
+
+      {/* Right: game flip + annotated moves + Lichess link */}
+      <div className="space-y-3 text-xs">
+        {/* Game flip controls — only when we have actual rep games */}
+        {reps.length > 0 && (
+          <div>
+            <div className="flex items-center justify-between gap-2 mb-1">
+              <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">
+                Game {repIdx + 1} of {reps.length}
+              </span>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setRepIdx((i) => Math.max(0, i - 1))}
+                  disabled={repIdx === 0}
+                  className="px-2 py-0.5 text-[11px] rounded border bg-background disabled:opacity-40"
+                  aria-label="Previous representative game"
+                >
+                  ← Prev
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setRepIdx((i) => Math.min(reps.length - 1, i + 1))
+                  }
+                  disabled={repIdx >= reps.length - 1}
+                  className="px-2 py-0.5 text-[11px] rounded border bg-background disabled:opacity-40"
+                  aria-label="Next representative game"
+                >
+                  Next →
+                </button>
+              </div>
+            </div>
+            {currentRep && (
+              <p className="text-[10px] text-muted-foreground">
+                {_formatDate(currentRep.date_played)}
+                {currentRep.opponent_color
+                  ? ` · opponent played ${currentRep.opponent_color}`
+                  : ""}
+                {currentRep.game_url && (
+                  <>
+                    {" · "}
+                    <a
+                      href={currentRep.game_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-600 dark:text-blue-400 hover:underline"
+                    >
+                      view source ↗
+                    </a>
+                  </>
+                )}
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Annotated move list with deviation highlight */}
+        <div>
+          <h5 className="font-semibold text-muted-foreground uppercase tracking-wider text-[10px] mb-1">
+            {reps.length > 0 ? "How the game went" : "Canonical line (no game data)"}
+          </h5>
+          <AnnotatedMoves pgn={boardPgn} canonical={canonical} />
+          {reps.length === 0 && (
+            <p className="text-[10px] text-muted-foreground mt-1 italic">
+              Refresh this profile to fetch actual games for this opening.
+            </p>
+          )}
+        </div>
+
+        {/* Lichess link */}
+        <div>
+          <a
+            href={_lichessAnalysisUrl(nav.endFen)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 hover:underline text-[11px]"
+          >
+            🔍 Study this position on Lichess →
+          </a>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Single row ────────────────────────────────────────────────────────────
+
 function OpeningRow({
   entry,
   variant,
+  expanded,
+  onToggle,
+  library,
 }: {
   entry: OpponentOpeningEntry;
   variant: "weakness" | "strength";
+  expanded: boolean;
+  onToggle: () => void;
+  library: LibraryOpening[];
 }) {
   const colorClass =
     variant === "weakness"
@@ -38,9 +369,19 @@ function OpeningRow({
 
   return (
     <div className="border rounded-lg bg-card p-3">
-      <div className="flex items-start justify-between gap-3">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="w-full text-left flex items-start justify-between gap-3 cursor-pointer group"
+        aria-expanded={expanded}
+      >
         <div className="min-w-0 flex-1">
-          <div className="text-sm font-medium truncate" title={entry.name}>
+          <div className="text-sm font-medium truncate group-hover:underline" title={entry.name}>
+            {entry.eco && (
+              <span className="inline-block text-[10px] font-mono text-muted-foreground bg-muted px-1.5 py-0.5 rounded mr-2 align-middle">
+                {entry.eco}
+              </span>
+            )}
             {entry.name}
           </div>
           <div className="text-xs text-muted-foreground mt-0.5">
@@ -50,22 +391,33 @@ function OpeningRow({
               : ` · ${entry.wins}W / ${entry.losses}L / ${entry.draws}D`}
           </div>
         </div>
-        <div className="text-right shrink-0">
-          <div className={`text-lg font-bold ${colorClass}`}>{entry.rate}%</div>
-          <div className="text-[10px] text-muted-foreground uppercase tracking-wider">
-            {label}
+        <div className="text-right shrink-0 flex items-center gap-2">
+          <div>
+            <div className={`text-lg font-bold ${colorClass}`}>{entry.rate}%</div>
+            <div className="text-[10px] text-muted-foreground uppercase tracking-wider">
+              {label}
+            </div>
           </div>
+          <span
+            className={`text-muted-foreground transition-transform ${expanded ? "rotate-180" : ""}`}
+            aria-hidden="true"
+          >
+            ▾
+          </span>
         </div>
-      </div>
+      </button>
       <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden mt-2">
         <div
           className={`h-full ${barClass} transition-all duration-500`}
           style={{ width: `${Math.min(entry.rate, 100)}%` }}
         />
       </div>
+      {expanded && <OpeningExpandedView entry={entry} library={library} />}
     </div>
   );
 }
+
+// ── Main component ────────────────────────────────────────────────────────
 
 interface TargetedPrepProps {
   profile: OpponentProfile;
@@ -79,11 +431,28 @@ export function TargetedPrep({
   refreshing = false,
 }: TargetedPrepProps) {
   const [color, setColor] = useState<"white" | "black">("white");
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [library, setLibrary] = useState<LibraryOpening[]>([]);
+
+  useEffect(() => {
+    loadOpeningLibrary().then(setLibrary);
+  }, []);
+
+  // Reset expansion whenever the player switches White/Black tabs so
+  // a click in one tab doesn't appear "open" in the other.
+  useEffect(() => {
+    setExpanded(null);
+  }, [color]);
 
   const weaknesses = profile.weaknesses[color] || [];
   const strengths = profile.strengths[color] || [];
   const empty = weaknesses.length === 0 && strengths.length === 0;
   const hasGames = profile.total_games > 0;
+  const accumulated = profile.meta.accumulated_games;
+
+  const toggle = (key: string) => {
+    setExpanded((cur) => (cur === key ? null : key));
+  };
 
   return (
     <div className="border rounded-lg bg-muted/30 p-4 space-y-4">
@@ -103,6 +472,11 @@ export function TargetedPrep({
               <span className="font-medium">
                 {profile.results.win_rate}% win rate
               </span>
+              {typeof accumulated === "number" && accumulated !== profile.total_games && (
+                <span className="ml-2 text-[10px] uppercase tracking-wider">
+                  ({accumulated} accumulated)
+                </span>
+              )}
             </p>
           ) : (
             <p className="text-xs text-muted-foreground mt-1">
@@ -116,7 +490,6 @@ export function TargetedPrep({
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {/* Color toggle */}
           <div className="flex rounded-md border bg-background p-0.5 text-xs">
             <button
               type="button"
@@ -149,7 +522,7 @@ export function TargetedPrep({
         <p className="text-sm text-muted-foreground text-center py-6">
           No public games found for{" "}
           <strong>{profile.meta.username}</strong> on{" "}
-          <strong>{profile.meta.platform}</strong> in the last 3 months.
+          <strong>{profile.meta.platform}</strong> in the lookback window.
           Check the username spelling and platform, then try again.
         </p>
       ) : empty ? (
@@ -158,61 +531,80 @@ export function TargetedPrep({
           appears in 2+ games yet — try the other color.
         </p>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Weaknesses — what they LOSE = our hunting targets */}
-          <div>
-            <div className="flex items-center gap-2 mb-2">
-              <span className="text-xs font-semibold text-red-500 dark:text-red-400 uppercase tracking-wider">
-                Their Weaknesses
-              </span>
-              <span className="text-[10px] text-muted-foreground">
-                target these openings
-              </span>
-            </div>
-            {weaknesses.length === 0 ? (
-              <p className="text-xs text-muted-foreground italic py-4">
-                No recurring losing openings as {color}.
-              </p>
-            ) : (
-              <div className="space-y-2">
-                {weaknesses.map((entry) => (
-                  <OpeningRow
-                    key={entry.name}
-                    entry={entry}
-                    variant="weakness"
-                  />
-                ))}
+        <>
+          <p className="text-xs text-muted-foreground -mt-1">
+            <strong>Click any row</strong> to see how the opponent played the line —
+            actual games (not just averages), with deviations from book theory
+            highlighted in orange.
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Weaknesses */}
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-xs font-semibold text-red-500 dark:text-red-400 uppercase tracking-wider">
+                  Their Weaknesses
+                </span>
+                <span className="text-[10px] text-muted-foreground">
+                  target these openings
+                </span>
               </div>
-            )}
-          </div>
+              {weaknesses.length === 0 ? (
+                <p className="text-xs text-muted-foreground italic py-4">
+                  No recurring losing openings as {color}.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {weaknesses.map((entry) => {
+                    const key = `weakness|${entry.name}`;
+                    return (
+                      <OpeningRow
+                        key={key}
+                        entry={entry}
+                        variant="weakness"
+                        expanded={expanded === key}
+                        onToggle={() => toggle(key)}
+                        library={library}
+                      />
+                    );
+                  })}
+                </div>
+              )}
+            </div>
 
-          {/* Strengths — what they WIN = avoid these lines */}
-          <div>
-            <div className="flex items-center gap-2 mb-2">
-              <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">
-                Their Strengths
-              </span>
-              <span className="text-[10px] text-muted-foreground">
-                avoid these lines
-              </span>
-            </div>
-            {strengths.length === 0 ? (
-              <p className="text-xs text-muted-foreground italic py-4">
-                No standout winning openings as {color}.
-              </p>
-            ) : (
-              <div className="space-y-2">
-                {strengths.map((entry) => (
-                  <OpeningRow
-                    key={entry.name}
-                    entry={entry}
-                    variant="strength"
-                  />
-                ))}
+            {/* Strengths */}
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">
+                  Their Strengths
+                </span>
+                <span className="text-[10px] text-muted-foreground">
+                  avoid these lines
+                </span>
               </div>
-            )}
+              {strengths.length === 0 ? (
+                <p className="text-xs text-muted-foreground italic py-4">
+                  No standout winning openings as {color}.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {strengths.map((entry) => {
+                    const key = `strength|${entry.name}`;
+                    return (
+                      <OpeningRow
+                        key={key}
+                        entry={entry}
+                        variant="strength"
+                        expanded={expanded === key}
+                        onToggle={() => toggle(key)}
+                        library={library}
+                      />
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
-        </div>
+        </>
       )}
     </div>
   );

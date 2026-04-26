@@ -82,5 +82,16 @@ features:
   # Set to false if you want to disable opponent prep entirely.
   hunter_mode: true
 
+  # Sliding window for opponent game history (v1.4.4+). Games older than
+  # `hunter_lookback_months` are pruned on each fetch, so the profile
+  # always reflects "the last N months of play" — no stale data.
+  hunter_lookback_months: 6
+
+  # Optional hard cap on accumulated games per opponent (v1.4.4+).
+  # If set, the oldest games above the cap are pruned even if they fall
+  # within the lookback window. Leave null for no cap.
+  # Disk cost is ~3 KB per stored game (raw PGN).
+  hunter_max_games_per_opponent: null
+
 database:
   path: data/chess_coach.db

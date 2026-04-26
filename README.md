@@ -644,14 +644,18 @@ Patterns are aggregated across all games per player:
 
 > **How traps are detected.** Each game's first ~20 moves are matched against the curated trap library using longest-prefix matching — the deepest signature wins. The library is shallow (≤16 plies) and explicitly curated to focus on beginner traps, not deep mainline variations. To rebuild from the latest Lichess source: `python scripts/build_traps.py`.
 
-**Hunter Mode (v1.4.1 + v1.4.2):**
+**Hunter Mode (v1.4.1 + v1.4.2 + v1.4.4):**
 
-A separate page (`/[player]/hunt`) for opponent prep. Enter an opponent's username + platform (chess.com or lichess), and Arrakis pulls their last 3 months of public games (no Stockfish — fast even for big accounts) and shows:
+A separate page (`/[player]/hunt`) for opponent prep. Enter an opponent's username + platform (chess.com or lichess), and Arrakis pulls their last 6 months of public games (no Stockfish — fast even for big accounts) and shows:
 
 - **Their Weaknesses** (red) — openings the opponent loses, broken down by White / Black. These are your hunting targets.
 - **Their Strengths** (green) — openings the opponent wins. Avoid steering into these lines.
 
-Profiles are cached per `(opponent, platform)` for **24 hours** to respect the public APIs. Click **Refresh** on the prep view to force a re-fetch. Disable the feature globally by setting `features.hunter_mode: false` in `config.yaml`.
+**Click any row** to see how the opponent actually played that opening: a step-through mini-board of an actual game, "Game N of 5" controls to flip through up to 5 representative games, an annotated move list with the opponent's deviation from book theory highlighted in orange, and a "Study this position on Lichess →" deep link.
+
+**Local accumulating cache (v1.4.4):** Each refresh fetches only games newer than the last cached date — much faster on subsequent lookups, and your opponent history persists across sessions. Sliding window (default 6 months) prunes naturally; optional hard cap available. See `features.hunter_lookback_months` and `features.hunter_max_games_per_opponent` in `config.yaml`.
+
+Profile JSON is cached per `(opponent, platform)` for **24 hours**. Click **Refresh** on the prep view to force a re-fetch. Disable the feature globally by setting `features.hunter_mode: false` in `config.yaml`.
 
 ## Web Dashboard
 
@@ -800,7 +804,7 @@ Arrakis_Engine/
 │   └── lib/                   # API client (api.ts), types (types.ts), providers (providers.ts), utils
 ├── docs/
 │   └── screenshots/       # Architecture diagram and screenshots
-├── tests/                 # Test suite (322 tests across 3 tiers)
+├── tests/                 # Test suite (332 tests across 3 tiers)
 │   ├── conftest.py        # Shared fixtures (db, player, stockfish, llm)
 │   ├── test_models.py
 │   ├── test_harvester.py
@@ -833,7 +837,7 @@ Arrakis_Engine/
 
 ## Running Tests
 
-322 tests across 15 files, organized into three tiers using pytest markers. Integration and live tests are excluded by default — opt in explicitly.
+332 tests across 15 files, organized into three tiers using pytest markers. Integration and live tests are excluded by default — opt in explicitly.
 
 ### Commands
 
@@ -856,7 +860,7 @@ python -m pytest tests/ -m "integration and live" -v
 
 # Everything
 python -m pytest tests/ -m "" -v
-# → All 322 tests (~5min)
+# → All 332 tests (~5min)
 ```
 
 ### Test Coverage by Module

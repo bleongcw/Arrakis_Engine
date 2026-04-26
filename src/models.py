@@ -192,6 +192,38 @@ def _migrate(conn: sqlite3.Connection):
         "CREATE INDEX IF NOT EXISTS idx_opponent_cache_lookup "
         "ON opponent_cache(username, platform)"
     )
+
+    # v1.4.4: opponent_games — accumulating local cache of opponent PGNs.
+    # Used to (a) avoid re-fetching games we already have on each refresh
+    # (fetch-since-last-known-date), (b) survive past chess.com/lichess
+    # rate limits, and (c) provide representative PGNs for the "expand a
+    # weakness opening row" UI. Pruned to a sliding window per
+    # `features.hunter_lookback_months` and an optional hard cap per
+    # `features.hunter_max_games_per_opponent`.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS opponent_games (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            username     TEXT NOT NULL,
+            platform     TEXT NOT NULL,
+            game_url     TEXT,
+            pgn          TEXT NOT NULL,
+            player_color TEXT,
+            result       TEXT,
+            opening_name TEXT,
+            eco          TEXT,
+            date_played  TEXT,
+            fetched_at   TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(username, platform, game_url)
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_opponent_games_lookup "
+        "ON opponent_games(username, platform)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_opponent_games_date "
+        "ON opponent_games(username, platform, date_played DESC)"
+    )
     conn.commit()
 
 

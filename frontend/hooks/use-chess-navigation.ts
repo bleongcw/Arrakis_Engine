@@ -85,11 +85,18 @@ export function useChessNavigation(pgn: string, playerColor: "white" | "black") 
     return () => window.removeEventListener("keydown", handler);
   }, [goBack, goForward, goToStart, goToEnd]);
 
+  // Final position FEN — useful for deep links to external analysis sites
+  // (e.g. Lichess /analysis/standard/{fen}). Stable regardless of where the
+  // user is in the step-through.
+  const endFen = fens[fens.length - 1] || fens[0];
+
   return {
     currentFen,
+    endFen,
     moveIndex,
     totalMoves: moves.length,
     moves,
+    fens,
     goToStart,
     goToEnd,
     goForward,
