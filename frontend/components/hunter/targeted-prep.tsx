@@ -68,22 +68,59 @@ function parseMoveText(moveText: string): string[] {
     .filter(Boolean);
 }
 
+/** Normalize an opening name for fuzzy comparison. Strips punctuation,
+ *  apostrophes, hyphens, colons, commas, periods (and the special "..."
+ *  used by chess.com to denote black-move continuations); lowercases;
+ *  collapses internal whitespace. After normalization,
+ *  "Caro-Kann Defense: Advance, Short Variation" and
+ *  "Caro Kann Defense Advance Short Variation" become identical. */
+function _normalizeOpeningName(name: string): string {
+  return name
+    .replace(/\.{3}/g, " ")     // chess.com "...e6" continuation marker
+    .replace(/[:,'""\-.]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
 /** Look up the canonical opening line for a given opening name from the
  *  Lichess library. Returns the deepest matching entry by name (longest
- *  name match) so "Italian Game: Two Knights Defense" beats "Italian Game". */
+ *  name match) so "Italian Game: Two Knights Defense" beats "Italian Game".
+ *
+ *  Matching strategy (in order):
+ *  1. Exact match on raw name.
+ *  2. Exact match on normalized name (handles punctuation differences
+ *     between chess.com's verbose names and Lichess's canonical form).
+ *  3. Fuzzy: longest entry whose normalized name is a prefix of the
+ *     game's normalized name (or vice versa). Picks the longest match
+ *     to prefer specific variations over generic openings.
+ */
 function findCanonicalLine(
   openingName: string,
   library: LibraryOpening[],
 ): LibraryOpening | null {
   if (!openingName || library.length === 0) return null;
-  // Exact match first
+
+  // 1. Exact match on raw name
   const exact = library.find((e) => e.name === openingName);
   if (exact) return exact;
-  // Fuzzy: pick the longest name that the opening name STARTS WITH (or vice versa)
+
+  // 2 & 3. Normalize and find best prefix match
+  const target = _normalizeOpeningName(openingName);
+  if (!target) return null;
+
   let best: LibraryOpening | null = null;
+  let bestLen = 0;
   for (const e of library) {
-    if (openingName.startsWith(e.name) || e.name.startsWith(openingName)) {
-      if (!best || e.name.length > best.name.length) best = e;
+    const candidate = _normalizeOpeningName(e.name);
+    if (!candidate) continue;
+    if (candidate === target) return e;  // exact normalized match wins immediately
+    if (target.startsWith(candidate) || candidate.startsWith(target)) {
+      const matchLen = Math.min(candidate.length, target.length);
+      if (matchLen > bestLen) {
+        best = e;
+        bestLen = matchLen;
+      }
     }
   }
   return best;
@@ -105,22 +142,16 @@ function findDeviationIndex(
 // ── Annotated move list with deviation highlight ─────────────────────────
 
 function AnnotatedMoves({
-  pgn,
+  gameMoves,
   canonical,
 }: {
-  pgn: string;
+  /** The actual SAN moves from the game, already parsed by chess.js (via
+   *  useChessNavigation in the parent). Pre-parsed because chess.com PGNs
+   *  contain clock annotations like `{[%clk 0:09:55]}` that broke the
+   *  earlier regex parser; chess.js handles them correctly. */
+  gameMoves: string[];
   canonical: LibraryOpening | null;
 }) {
-  // Extract just the SAN moves from the game PGN (drop headers + tags).
-  // chess.js can give us the move history but here we lift moves directly
-  // from the PGN body for simplicity and to keep this purely declarative.
-  const gameMoves = useMemo(() => {
-    // Pull body after the last ']' (end of headers) or use whole string
-    const lastBracket = pgn.lastIndexOf("]");
-    const body = lastBracket >= 0 ? pgn.slice(lastBracket + 1) : pgn;
-    return parseMoveText(body);
-  }, [pgn]);
-
   const bookMoves = useMemo(
     () => (canonical ? parseMoveText(canonical.moves) : []),
     [canonical],
@@ -318,7 +349,7 @@ function OpeningExpandedView({
           <h5 className="font-semibold text-muted-foreground uppercase tracking-wider text-[10px] mb-1">
             {reps.length > 0 ? "How the game went" : "Canonical line (no game data)"}
           </h5>
-          <AnnotatedMoves pgn={boardPgn} canonical={canonical} />
+          <AnnotatedMoves gameMoves={nav.moves} canonical={canonical} />
           {reps.length === 0 && (
             <p className="text-[10px] text-muted-foreground mt-1 italic">
               Refresh this profile to fetch actual games for this opening.

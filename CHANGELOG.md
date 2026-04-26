@@ -4,6 +4,18 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.4.5] - 2026-04-26
+
+### Fixed
+- **Hunt Mode "How the game went" panel was empty.** Chess.com PGNs include per-move clock annotations like `{[%clk 0:09:55]}` between every move. The annotated-move-list parser used a simple regex that didn't strip these, leaving the first parsed token as a stray `}`. The mini-board still rendered correctly (chess.js handles annotations), but the move list shown next to it was just `1.}`. Switched the annotated move list to consume `nav.moves` from `useChessNavigation` directly — chess.js does the heavy lifting and produces clean SAN, removing ~10 lines of fragile regex.
+- **Canonical-line lookup missed openings whose names use different punctuation between chess.com and Lichess.** Chess.com calls it "Caro Kann Defense Advance Short Variation with 4 Nf3...e6"; Lichess calls it "Caro-Kann Defense: Advance Variation, Short Variation". The previous `findCanonicalLine` matcher only did `startsWith` on raw names — so it failed. New `_normalizeOpeningName` helper strips colons/commas/hyphens/apostrophes/dots, lowercases, and collapses whitespace before comparing. Both names now match. Returns the longest match to prefer specific variations over generic openings.
+- **Hunt Mode opponent input was triggering iCloud Keychain / 1Password / LastPass autofill.** The label "Opponent username" plus `id="opponent"` looked enough like a credential field that Safari surfaced "Open Passwords App" on focus. Renamed the label to "Opponent handle", changed `id` and `name` to `opponent-handle`, added `data-1p-ignore`, `data-lpignore`, `data-form-type="other"`, and `autoComplete="off"` on both the form and input. Combined effect: no password manager dropdown.
+
+### Changed
+- `useChessNavigation` hook is now the canonical source for parsed game moves. The Hunt Mode `AnnotatedMoves` component takes `gameMoves: string[]` directly instead of re-parsing the raw PGN with regex.
+
+---
+
 ## [1.4.4] - 2026-04-26
 
 ### Added

@@ -38,20 +38,32 @@ export function OpponentSearch({
   return (
     <form
       onSubmit={handleSubmit}
+      // autoComplete="off" on the form helps Safari + Firefox treat
+      // contained inputs as non-credential. Combined with non-credential
+      // label/id/name and password-manager opt-out attributes below,
+      // suppresses the iCloud Keychain / 1Password / LastPass dropdowns
+      // that otherwise appear on this field.
+      autoComplete="off"
       className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-end"
     >
       <div className="flex-1 space-y-1">
-        <label htmlFor="opponent" className="text-xs font-medium text-muted-foreground">
-          Opponent username
+        <label htmlFor="opponent-handle" className="text-xs font-medium text-muted-foreground">
+          Opponent handle
         </label>
         <Input
-          id="opponent"
+          id="opponent-handle"
+          name="opponent-handle"
+          type="text"
           value={opponent}
           onChange={(e) => setOpponent(e.target.value)}
           placeholder="e.g. MagnusCarlsen"
           autoComplete="off"
           spellCheck={false}
           disabled={loading}
+          // Password-manager opt-out hints
+          data-1p-ignore="true"
+          data-lpignore="true"
+          data-form-type="other"
         />
       </div>
       <div className="space-y-1">
