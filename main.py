@@ -9,6 +9,7 @@ import argparse
 import logging
 import os
 import sys
+import time
 
 import yaml
 from dotenv import load_dotenv
@@ -181,12 +182,127 @@ def cmd_report(args, config):
 
 
 def cmd_dashboard(args, config):
-    """Launch the live dashboard server with API endpoints."""
+    """Launch the live dashboard server with API endpoints (API-only mode).
+
+    For the unified backend + frontend experience, see `cmd_serve`.
+    """
     db_path = config["database"]["path"]
     port = args.port or 8000
 
     from src.dashboard_server import run_dashboard
     run_dashboard(db_path=db_path, port=port, config=config, static_dir="dashboard")
+
+
+def cmd_serve(args, config):
+    """Launch BOTH the API backend AND the Next.js frontend with one command.
+
+    v1.5.0 — the recommended end-user entry point. Spawns `pnpm dev` as a
+    child process group, waits for it to be ready, prints a unified banner,
+    then runs the API server in the foreground. Ctrl+C stops both cleanly.
+
+    Pre-flight checks: `pnpm` resolvable, `frontend/node_modules` exists.
+    Use `--install` to auto-run `pnpm install --frozen-lockfile` first.
+    """
+    import threading
+
+    from src.dev_runner import (
+        DevRunnerError,
+        check_node_modules,
+        find_pnpm,
+        print_unified_banner,
+        run_pnpm_install,
+        spawn_frontend,
+        tail_with_prefix,
+        terminate_process_group,
+        wait_for_ready,
+    )
+
+    db_path = config["database"]["path"]
+    api_port = args.port or 8000
+    frontend_port_arg = getattr(args, "frontend_port", None)
+
+    # Pre-flight: pnpm + node_modules
+    try:
+        pnpm_cmd = find_pnpm()
+    except DevRunnerError as e:
+        print(f"❌ {e}")
+        return 1
+
+    if not check_node_modules("frontend"):
+        if getattr(args, "install", False):
+            print("\U0001f4e6 Running `pnpm install --frozen-lockfile`...")
+            try:
+                run_pnpm_install(pnpm_cmd, "frontend")
+            except DevRunnerError as e:
+                print(f"❌ {e}")
+                return 1
+        else:
+            print(
+                "❌ frontend/node_modules not found. Run `cd frontend && pnpm install` "
+                "first, or pass --install to do it automatically."
+            )
+            return 1
+
+    # Start the backend in a background thread so we can spawn + wait for the
+    # frontend, then keep the main thread free to handle Ctrl+C cleanly.
+    from src.dashboard_server import run_dashboard
+    backend_thread = threading.Thread(
+        target=run_dashboard,
+        kwargs={
+            "db_path": db_path,
+            "port": api_port,
+            "config": config,
+            "static_dir": "dashboard",
+            "api_only_banner": False,   # we'll print the unified banner ourselves
+        },
+        daemon=True,
+        name="api-backend",
+    )
+    backend_thread.start()
+
+    # Spawn the frontend
+    print("\U0001f680 Starting Arrakis Engine — backend + frontend...")
+    print("   (frontend output is prefixed with [frontend])")
+    proc = spawn_frontend(pnpm_cmd, "frontend", port=frontend_port_arg)
+    ready_event = threading.Event()
+    detected_port: dict = {"port": frontend_port_arg or 3000}
+    tail_with_prefix(proc, "[frontend]", ready_event, detected_port)
+
+    ready = wait_for_ready(ready_event, proc, timeout_s=60.0)
+    if not ready:
+        print("❌ Frontend failed to become ready. Exiting.")
+        terminate_process_group(proc)
+        return 1
+
+    # Both servers up — print the unified banner.
+    sched_config = config.get("schedule", {})
+    sched_status = "enabled" if sched_config.get("enabled") else "disabled"
+    interval = sched_config.get("interval_hours", 6)
+    print_unified_banner(
+        api_port=api_port,
+        frontend_port=detected_port["port"],
+        db_path=db_path,
+        sched_status=sched_status,
+        interval_hours=interval,
+    )
+
+    # Block until the user hits Ctrl+C or the frontend dies.
+    try:
+        while True:
+            if proc.poll() is not None:
+                print("⚠️ Frontend process exited unexpectedly. Stopping backend.")
+                break
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        print("\n\U0001f6d1 Stopping both servers...")
+    finally:
+        terminate_process_group(proc)
+        # Backend is daemon-thread; terminating the process exits it.
+        # The scheduler stop is handled inside run_dashboard's KeyboardInterrupt
+        # path which won't fire here (different thread). So we exit the process
+        # cleanly via os._exit after a brief grace period.
+        print("Both servers stopped.")
+    return 0
 
 
 def cmd_fide_update(args, config):
@@ -370,8 +486,20 @@ def main():
     report_parser.add_argument("--output", help="Output directory (default: reports/)")
 
     # dashboard
-    dashboard_parser = subparsers.add_parser("dashboard", help="Launch local dashboard server")
+    dashboard_parser = subparsers.add_parser("dashboard", help="Launch local dashboard server (API only)")
     dashboard_parser.add_argument("--port", type=int, default=8000, help="Port (default: 8000)")
+
+    # serve (v1.5.0) — launches API + frontend together
+    serve_parser = subparsers.add_parser(
+        "serve",
+        help="Launch API + Next.js frontend together (recommended for end users)",
+    )
+    serve_parser.add_argument("--port", type=int, default=8000,
+                              help="API backend port (default: 8000)")
+    serve_parser.add_argument("--frontend-port", type=int, default=None,
+                              help="Frontend port (default: Next.js picks 3000)")
+    serve_parser.add_argument("--install", action="store_true",
+                              help="Run `pnpm install` first if node_modules is missing")
 
     # fide-update
     fide_parser = subparsers.add_parser("fide-update", help="Update FIDE rating for a player")
@@ -419,6 +547,10 @@ def main():
         cmd_report(args, config)
     elif args.command == "dashboard":
         cmd_dashboard(args, config)
+    elif args.command == "serve":
+        rc = cmd_serve(args, config)
+        if rc:
+            sys.exit(rc)
     elif args.command == "fide-update":
         cmd_fide_update(args, config)
     elif args.command == "backfill-clocks":

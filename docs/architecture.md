@@ -1,6 +1,6 @@
 # Arrakis Engine — Architecture
 
-*Last updated: 2026-04-26 — corresponds to v1.4.5*
+*Last updated: 2026-04-26 — corresponds to v1.5.0*
 
 This document describes the technical architecture of Arrakis Engine: how the pieces fit together, what runs where, and the design decisions behind them. It is aimed at contributors and developers reading the codebase. For end-user / setup docs, see [README.md](../README.md). For changelog, see [CHANGELOG.md](../CHANGELOG.md).
 
@@ -141,6 +141,30 @@ Rating-based tiers (Beginner → Elementary → Intermediate → Advanced → Ex
 - `scheduler.py` runs the full pipeline (harvest → analyze → patterns → coach) on a configurable interval as a daemon thread.
 - `pipeline_state.py` enforces single-task-at-a-time across CLI, scheduler, and dashboard so two pipelines can't fight over the SQLite lock or the Stockfish process.
 
+### `dev_runner.py` — `serve` orchestration (v1.5.0)
+Owns the subprocess plumbing for `python main.py serve`. Used only by the
+`cmd_serve` orchestrator in `main.py`; nothing else in the backend imports it.
+
+- `find_pnpm()` — resolves `pnpm` directly or via `corepack pnpm`; raises
+  `DevRunnerError` with an actionable message otherwise.
+- `check_node_modules(cwd)` — bool guard; explicit error rather than auto-install.
+- `spawn_frontend(pnpm_cmd, cwd, port)` — `subprocess.Popen` with `start_new_session=True`
+  on POSIX and `CREATE_NEW_PROCESS_GROUP` on Windows. Stdout / stderr merged on a
+  single PIPE for the tail thread.
+- `tail_with_prefix(proc, prefix, ready_event, port_holder)` — daemon thread
+  reads stdout line-by-line, prepends `[frontend]`, and matches the Next.js
+  ready line via `NEXTJS_READY_PATTERN`. Sets the event + writes the detected
+  port (handles auto-bump when 3000 is taken).
+- `wait_for_ready(event, proc, timeout_s)` — blocks until ready, process dies,
+  or timeout.
+- `terminate_process_group(proc, grace_s)` — SIGTERM the whole process group,
+  wait `grace_s` seconds, escalate to SIGKILL. Whole-group is essential because
+  `pnpm dev` itself spawns Next.js workers that don't inherit signals from a
+  bare pid kill.
+- `print_unified_banner(...)` — the v1.5.0 single-banner format showing both
+  URLs in one place. The `dashboard` command keeps its older verbose two-terminal
+  banner (with a `serve`-discovery hint appended).
+
 ### `hunter.py` — opponent prep (v1.4.1, v1.4.4 accumulating cache)
 Two-layer cache:
 
@@ -272,7 +296,7 @@ The `ARRAKIS_` prefix avoids collisions with other tools that use the unprefixed
 | Stockfish integration | Specific lines (Scholar's Mate, etc.) verified against engine output |
 | Live LLM | Real API calls, marked separately, ~$0.05 / run |
 
-**332 tests** total across all tiers. Tests live in `tests/`. CI runs unit + frontend build on Node 24 + pnpm 10 + Python 3.11 / 3.12.
+**362 tests** total across all tiers. Tests live in `tests/`. CI runs unit + frontend build on Node 24 + pnpm 10 + Python 3.11 / 3.12.
 
 ### Patch-target rule for tests
 Functions imported locally inside another function (e.g. `from src.coach import coach_pending` inside `run_full_pipeline()`) must be patched at the **source** module — `@patch("src.coach.coach_pending")` — not at the consuming module. This trips up new tests regularly.
@@ -286,6 +310,7 @@ Functions imported locally inside another function (e.g. `from src.coach import 
 - **The pipeline lock is global.** Only one harvest / analyze / pattern / coach task runs at a time. If you trigger one from the dashboard and another from CLI, the second blocks until the first releases.
 - **Reports are markdown first, HTML second.** Backend writes markdown to `reports/`. The `/[player]/reports` page renders structured HTML from the API. PDF export is `window.print()` with print-optimized CSS — no headless Chrome.
 - **CI runs on Node 24 + pnpm 10.** The lockfile is `lockfileVersion: 9.0` which requires pnpm 10. `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24` is set in the workflow to silence Node-20 deprecation warnings.
+- **Subprocess model for `serve` (v1.5.0).** The `serve` command runs the API server in the main thread (after starting it in a daemon thread to free Ctrl+C handling) and spawns `pnpm dev` as a child in its own process group. A daemon tail thread reads the child's merged stdout/stderr, prefixes lines with `[frontend]`, and watches for the Next.js ready line to capture the actual port. Ctrl+C → SIGTERM the process group → wait 5 s → SIGKILL on overstay. Whole-group signalling is essential because `pnpm dev` itself spawns Next.js workers that don't inherit signals from a bare-pid kill.
 
 ---
 

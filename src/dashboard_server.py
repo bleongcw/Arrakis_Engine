@@ -1345,8 +1345,16 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
 
 
 def run_dashboard(db_path: str, port: int = 8000, config: dict | None = None,
-                  static_dir: str = "dashboard"):
-    """Start the live dashboard server."""
+                  static_dir: str = "dashboard",
+                  api_only_banner: bool = True):
+    """Start the live dashboard server.
+
+    `api_only_banner` controls the startup banner:
+      - True (default, used by `dashboard` command) — print the verbose
+        two-terminal message + the v1.5.0 hint about `serve`.
+      - False (used by `serve` command) — suppress this banner; the caller
+        will print the unified version once the frontend is also ready.
+    """
     global _scheduler_manager
     config = config or {}
 
@@ -1362,24 +1370,29 @@ def run_dashboard(db_path: str, port: int = 8000, config: dict | None = None,
     handler = partial(DashboardHandler, directory=static_dir, db_path=db_path,
                       config=config)
     with http.server.HTTPServer(("", port), handler) as httpd:
-        sched_config = config.get("schedule", {})
-        sched_status = "enabled" if sched_config.get("enabled") else "disabled"
-        interval = sched_config.get("interval_hours", 6)
+        if api_only_banner:
+            sched_config = config.get("schedule", {})
+            sched_status = "enabled" if sched_config.get("enabled") else "disabled"
+            interval = sched_config.get("interval_hours", 6)
 
-        print(f"\U0001f3f0 Arrakis Engine API running at http://localhost:{port}")
-        print(f"\U0001f4ca Live data from: {db_path}")
-        print(f"\U0001f552 Auto-updates: {sched_status} (every {interval}h)")
-        print("")
-        print("\U0001f4cd Open the dashboard UI in a SECOND terminal:")
-        print("     cd frontend && pnpm dev")
-        print(f"     → then open http://localhost:3000 in your browser")
-        print("")
-        print("   (This terminal serves the API only. The Next.js frontend on")
-        print(f"    port 3000 calls back here on port {port} for data.)")
-        print("")
-        print("Press Ctrl+C to stop.\n")
+            print(f"\U0001f3f0 Arrakis Engine API running at http://localhost:{port}")
+            print(f"\U0001f4ca Live data from: {db_path}")
+            print(f"\U0001f552 Auto-updates: {sched_status} (every {interval}h)")
+            print("")
+            print("\U0001f4cd Open the dashboard UI in a SECOND terminal:")
+            print("     cd frontend && pnpm dev")
+            print(f"     → then open http://localhost:3000 in your browser")
+            print("")
+            print("   (This terminal serves the API only. The Next.js frontend on")
+            print(f"    port 3000 calls back here on port {port} for data.)")
+            print("")
+            print("\U0001f4a1 New in v1.5.0: `python main.py serve` starts both backend +")
+            print("   frontend with one command (and a single unified banner).")
+            print("")
+            print("Press Ctrl+C to stop.\n")
         try:
             httpd.serve_forever()
         except KeyboardInterrupt:
             _scheduler_manager.stop()
-            print("\nDashboard stopped.")
+            if api_only_banner:
+                print("\nDashboard stopped.")

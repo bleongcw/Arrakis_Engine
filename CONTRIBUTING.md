@@ -31,7 +31,7 @@ Thank you for your interest in contributing to ArrakisEngine! This document prov
 
 ### Running Tests
 
-The test suite has **332 tests** across three tiers (`pyproject.toml` defines the markers).
+The test suite has **362 tests** across three tiers (`pyproject.toml` defines the markers).
 
 ```bash
 # Default: ~318 unit tests, no external deps (~14s)
@@ -59,7 +59,20 @@ function, **patch the source module, not the consumer** — e.g.
 
 ### Running the App
 
-The app is a two-server setup. Both must be running.
+**Single-command (recommended for end-user-style testing):**
+
+```bash
+python main.py serve
+```
+
+This spawns both backend (port 8000) and frontend (port 3000) together,
+prints a unified banner with both URLs, and Ctrl+C stops both cleanly. The
+frontend's stdout is prefixed with `[frontend]` so Next.js compile errors
+remain readable inline with backend logs. Pass `--install` if you haven't
+run `pnpm install` yet.
+
+**Manual two-terminal mode** is useful when developing — independent terminals
+keep each server's hot-reload output visually separate:
 
 ```bash
 # Terminal 1: Python API backend on port 8000

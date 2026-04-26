@@ -4,6 +4,67 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.5.0] - 2026-04-26
+
+### Added
+- **`python main.py serve`** — single command that starts both the API backend
+  AND the Next.js frontend together. Spawns `pnpm dev` as a subprocess in its
+  own process group, waits for the Next.js ready line, and prints a **unified
+  banner** with both URLs in one place:
+
+  ```
+  🏰 Arrakis Engine running
+
+     📡 Frontend UI:    http://localhost:3000   ← open this
+     🔌 API backend:    http://localhost:8000
+     📊 Live data from: data/chess_coach.db
+     🕒 Auto-updates:   disabled (every 6h)
+
+  Press Ctrl+C to stop both servers.
+  ```
+
+  Frontend output is line-prefixed with `[frontend]` so Next.js compile errors
+  and hot-reload notifications stay legible. **Ctrl+C stops both servers
+  cleanly** — SIGTERM to the frontend process group, then SIGKILL after a 5s
+  grace period if it overstays.
+
+  Recommended end-user entry point. The existing `python main.py dashboard`
+  command still works for API-only setups (custom frontends, debugging,
+  scripted pipelines) — its banner now includes a one-line hint pointing at
+  `serve` for discoverability.
+
+- **`src/dev_runner.py`** — new helper module owning the subprocess
+  orchestration: `find_pnpm` (resolves direct `pnpm` or `corepack pnpm`),
+  `check_node_modules`, `spawn_frontend`, `tail_with_prefix` (parses Next.js
+  ready line + auto-detects the actual port when 3000 is taken),
+  `terminate_process_group` (SIGTERM → wait → SIGKILL), `print_unified_banner`.
+
+- Optional flags on `serve`:
+  - `--port N` — backend port (default 8000)
+  - `--frontend-port N` — passes through to `pnpm dev`. Omit to let Next.js
+    auto-pick (handles port-3000-already-in-use gracefully)
+  - `--install` — run `pnpm install --frozen-lockfile` first if
+    `frontend/node_modules` is missing. Off by default — explicit beats
+    surprising downloads.
+
+- 30 new tests in `tests/test_dev_runner.py` covering pnpm resolution,
+  node_modules detection, subprocess argv building, output prefixing + ready-line
+  regex on multiple Next.js banner formats, wait-for-ready timeout / process-die
+  handling, and SIGTERM-then-SIGKILL teardown.
+
+### Changed
+- `src/dashboard_server.py::run_dashboard` now accepts `api_only_banner: bool`
+  (default `True`). The `dashboard` command keeps its verbose two-terminal
+  banner with the new `serve` hint appended; `serve` passes `False` to
+  suppress that banner and prints its own unified version.
+- Backend test count: 318 → 348.
+
+### Migration
+None required. `python main.py dashboard` works exactly as before, with one
+extra banner line pointing at `serve`. New users should start with `serve`.
+
+---
+
 ## [1.4.5] - 2026-04-26
 
 ### Fixed

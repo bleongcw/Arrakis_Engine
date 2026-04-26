@@ -5,7 +5,7 @@ Local Python app that pulls games from Chess.com and Lichess, runs Stockfish ana
 and uses reasoning LLMs to generate age-appropriate coaching insights with
 pattern tracking over time. Inspired by Eleanor, Evan, and Estella.
 
-Current release: **v1.4.5** (2026-04-26). See `CHANGELOG.md` for history.
+Current release: **v1.5.0** (2026-04-26). See `CHANGELOG.md` for history.
 
 ## Architecture
 - Python 3.11+, SQLite (WAL mode), local Stockfish on Apple Silicon
@@ -85,6 +85,7 @@ ArrakisEngine/
 │   ├── tiers.py               # Adaptive tier system (rating-based)
 │   ├── scheduler.py           # Auto-pipeline daemon
 │   ├── pipeline_state.py      # Single-task lock across CLI/scheduler/dashboard
+│   ├── dev_runner.py          # v1.5.0 — `serve` subprocess orchestration
 │   ├── report.py              # Report generator
 │   ├── export.py              # Data export utilities
 │   └── dashboard_server.py    # SQLite REST API (GET/POST/PUT/DELETE)
@@ -183,7 +184,7 @@ highlighting against canonical book theory, and "Study on Lichess" deep link.
 
 ## Testing
 
-**332 tests** across 15 test files, organized into three tiers via pytest markers
+**362 tests** across 16 test files, organized into three tiers via pytest markers
 (see `pyproject.toml`).
 
 ### Running Tests
@@ -213,6 +214,7 @@ All external dependencies mocked. No Stockfish or API keys needed.
 | test_dashboard_server.py | ~18 | API endpoints + client-disconnect handling (v1.3.1) |
 | test_scheduler.py | ~10 | Pipeline orchestration |
 | test_export.py | ~7 | JSON export, edge cases |
+| test_dev_runner.py (v1.5.0) | 30 | `serve` orchestration: pnpm resolution, subprocess argv, Next.js ready-line parsing, SIGTERM→SIGKILL teardown |
 
 ### Tier 2: Integration Tests (`pytest -m integration`)
 Requires Stockfish binary. Uses Scholar's Mate for fast deterministic analysis.
@@ -242,7 +244,18 @@ module — `@patch("src.coach.coach_pending")` — not at the consuming module.
 
 ## Two-Server Setup
 
-This is intentional and easy to miss on first run. **Both servers must run.**
+The app runs as two cooperating servers. Two ways to start:
+
+**Recommended (v1.5.0+) — single command:**
+```bash
+python main.py serve
+```
+Spawns both servers, prints a unified banner, Ctrl+C stops both. See
+`src/dev_runner.py` for the orchestration. Optional flags: `--port` (backend),
+`--frontend-port` (frontend), `--install` (auto-runs `pnpm install` if
+`node_modules` is missing).
+
+**Manual two-terminal mode** (for hot-reload visibility on each side):
 
 | | Port | Start with |
 |---|---|---|

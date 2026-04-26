@@ -153,16 +153,41 @@ For LLM coaching, create a `.env` file with at least one API key (see [Configure
 python main.py run-all
 ```
 
-### Two-server setup — both must be running
+### Recommended: one command launches both servers (v1.5.0+)
 
-Arrakis runs as two cooperating servers. **You need to start both — one in each terminal.**
+```bash
+# 6. Install frontend dependencies (one time only)
+cd frontend && pnpm install && cd ..
+
+# 7. Start both servers with a single command
+python main.py serve
+```
+
+You'll see a unified banner like this:
+
+```
+🏰 Arrakis Engine running
+
+   📡 Frontend UI:    http://localhost:3000   ← open this
+   🔌 API backend:    http://localhost:8000
+   📊 Live data from: data/chess_coach.db
+   🕒 Auto-updates:   disabled (every 6h)
+
+Press Ctrl+C to stop both servers.
+```
+
+**Open `http://localhost:3000` in your browser** — that's the dashboard. Hit Ctrl+C in the terminal to stop both servers cleanly.
+
+> **What `serve` does under the hood.** The Python API backend runs on port 8000. The Next.js frontend is launched as a child process on port 3000 (with output prefixed `[frontend]` so it stays scannable). Both are stopped together when you Ctrl+C. The `--install` flag will run `pnpm install` for you if you skipped step 6.
+
+### Manual two-terminal mode (advanced)
+
+If you want hot-reload visibility on each server independently — useful when developing — you can still run the two halves manually:
 
 | | What runs | Port | Start with |
 |---|---|---|---|
 | **Terminal 1** | Python API backend (SQLite, Stockfish, LLM coaching) | `8000` | `python main.py dashboard` |
-| **Terminal 2** | Next.js frontend (the dashboard UI) | `3000` | `cd frontend && pnpm install && pnpm dev` |
-
-**Open `http://localhost:3000` in your browser** — that's the dashboard. The frontend on port 3000 calls the backend on port 8000 for all data, so both must be running.
+| **Terminal 2** | Next.js frontend (the dashboard UI) | `3000` | `cd frontend && pnpm dev` |
 
 > **Why two servers?** The backend is a minimal Python `http.server` that exposes the database over REST. The frontend is a Next.js app that provides the rich UI. Splitting them lets the frontend hot-reload while you develop, and keeps the backend dependency-light.
 
@@ -354,7 +379,8 @@ database:
 | `python main.py patterns` | Compute cross-game pattern statistics |
 | `python main.py export-json` | Export database to JSON for the web dashboard |
 | `python main.py report` | Generate Markdown coaching reports |
-| `python main.py dashboard` | Launch the local web dashboard |
+| `python main.py serve` | **(v1.5.0)** Launch backend + frontend together (recommended for end users; supports `--port`, `--frontend-port`, `--install`) |
+| `python main.py dashboard` | Launch only the API backend (use `serve` for the full app) |
 | `python main.py fide-update` | Update a player's FIDE rating |
 | `python main.py backfill-clocks` | Backfill clock data from PGN annotations for existing games |
 | `python main.py run-all` | Run the full pipeline end-to-end |
@@ -813,7 +839,7 @@ Arrakis_Engine/
 ├── docs/
 │   ├── architecture.md        # Tracked: contributor architecture reference
 │   └── screenshots/           # Architecture diagram and screenshots
-├── tests/                 # Test suite (332 tests across 3 tiers)
+├── tests/                 # Test suite (362 tests across 3 tiers)
 │   ├── conftest.py        # Shared fixtures (db, player, stockfish, llm)
 │   ├── test_models.py
 │   ├── test_harvester.py
@@ -851,7 +877,7 @@ Arrakis_Engine/
 
 ## Running Tests
 
-332 tests across 15 files, organized into three tiers using pytest markers. Integration and live tests are excluded by default — opt in explicitly.
+362 tests across 15 files, organized into three tiers using pytest markers. Integration and live tests are excluded by default — opt in explicitly.
 
 ### Commands
 
@@ -874,7 +900,7 @@ python -m pytest tests/ -m "integration and live" -v
 
 # Everything
 python -m pytest tests/ -m "" -v
-# → All 332 tests (~5min)
+# → All 362 tests (~5min)
 ```
 
 ### Test Coverage by Module
