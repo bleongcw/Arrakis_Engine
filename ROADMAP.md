@@ -1,6 +1,6 @@
 # Arrakis Engine Roadmap
 
-*Updated 2026-04-26 — current release v1.4.5*
+*Updated 2026-04-26 — current release v1.5.0*
 
 This is the public-facing roadmap. The full release history is in
 [CHANGELOG.md](CHANGELOG.md); architectural details are in
@@ -40,6 +40,19 @@ provider.
   orange.
 - **Local accumulating PGN cache (v1.4.4)** — opponent games persist locally
   across refreshes; sliding window default 6 months; optional hard cap.
+
+### Single-command serve (v1.5.0, 2026-04-26)
+- **`python main.py serve`** — one command launches both backend (port 8000)
+  AND Next.js frontend (port 3000) together. Spawns `pnpm dev` in its own
+  process group, waits for the Next.js ready line, prints a unified banner
+  with both URLs, and Ctrl+C stops both servers cleanly (SIGTERM → 5s grace
+  → SIGKILL on the whole process group).
+- Frontend stdout is line-prefixed with `[frontend]` so compile errors stay
+  legible inline.
+- Existing `dashboard` command kept (API-only mode for custom frontends,
+  debugging, scripted pipelines), now with a hint pointing at `serve`.
+- Optional flags: `--port`, `--frontend-port`, `--install`.
+- New `src/dev_runner.py` module + 30 tests covering the orchestration.
 
 ### Polish & bug fixes
 - v1.0.1, v1.0.2 — UI fixes (opening explorer, dialog hydration)

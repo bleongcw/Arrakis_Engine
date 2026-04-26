@@ -124,7 +124,7 @@ ArrakisEngine/
 │   └── screenshots/           # Architecture diagram + UI screenshots
 ├── data/
 │   └── chess_coach.db         # SQLite database (auto-created, gitignored)
-├── tests/                     # pytest suite (332 tests across 3 tiers)
+├── tests/                     # pytest suite (362 tests across 3 tiers)
 └── reports/                   # Generated coach reports (gitignored)
 ```
 
@@ -193,7 +193,7 @@ pytest                                  # ~318 unit tests (~14s, no deps)
 pytest -m integration                   # Stockfish tests (requires binary)
 pytest -m live                          # LLM API tests (~$0.05)
 pytest -m "integration and live"        # Full pipeline E2E
-pytest --override-ini "addopts="        # All 332 tests across all tiers
+pytest --override-ini "addopts="        # All 362 tests across all tiers
 ```
 
 ### Tier 1: Unit Tests (default)
