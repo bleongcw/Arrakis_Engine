@@ -704,7 +704,7 @@ cd frontend && pnpm install && pnpm dev
 - **Rating Progression Chart** — interactive line chart showing rating over time with result-colored dots (green win / red loss / amber draw), time class filter (all/rapid/blitz/bullet/daily), 10-game moving average trend line, and info modal
 - **Opening Repertoire Tracker** — ECO distribution bar chart, sortable opening table with win rate and trend indicators (improving/declining/stable), All/White/Black filter tabs, and focus areas panel highlighting openings that need work
 - Opening Win Rate table (split by All / White / Black) with **interactive Opening Explorer** — click any opening to expand a chessboard showing the opening position with step-through move controls, plus a linked list of all games using that opening; board orientation flips on the Black tab
-- **Opening Book Integration** — ECO code and opening name badge, moves annotated with green checkmarks (matches book theory) and orange markers (deviations), with "Book move: X" vs "Player played: Y" callouts; expanded to 438 ECO entries (A00-E99) with deeper variations
+- **Opening Book Integration** — ECO code and opening name badge, moves annotated with green checkmarks (matches book theory) and orange markers (deviations), with "Book move: X" vs "Player played: Y" callouts; backed by the full [Lichess `chess-openings`](https://github.com/lichess-org/chess-openings) CC0 dataset (3,690 named openings A00–E99)
 - Info modals (ⓘ) with educational explanations for every pattern component
 
 ### Reports
@@ -956,9 +956,10 @@ SQLite only allows one writer at a time. Stop the analyzer before running harves
 This project wouldn't exist without the generous work of others:
 
 - **Chess coaches and parents** who tested early versions, stress-tested the pipeline with real game data, and gave invaluable feedback on what makes coaching advice actually useful for young players.
-- **The Stockfish team** — the open-source chess engine that powers all analysis in this project. Decades of engineering distilled into a single binary.
-- **python-chess** by Niklas Fiekas — the library that makes PGN parsing and board manipulation effortless in Python.
-- **Lichess** — for the opening book data (438 ECO entries) and the win probability formula that the entire chess community relies on.
+- **[Stockfish](https://github.com/official-stockfish/Stockfish)** ([official-stockfish/Stockfish](https://github.com/official-stockfish/Stockfish), GPL-3.0) — the open-source chess engine that powers all per-move analysis in this project. Decades of engineering distilled into a single binary.
+- **[python-chess](https://github.com/niklasf/python-chess)** by Niklas Fiekas (GPL-3.0) — the library that makes PGN parsing and board manipulation effortless in Python.
+- **[Lichess `chess-openings`](https://github.com/lichess-org/chess-openings)** ([lichess-org/chess-openings](https://github.com/lichess-org/chess-openings), CC0 / Public Domain) — the curated opening database (3,690 named openings) that backs both `frontend/public/data/openings.json` and the trap-detection library at `frontend/public/data/traps.json`. Without this dataset, named-trap detection (Stafford, Fried Liver, Englund, Halloween, etc.) would not be possible.
+- **Lichess** — for the win probability formula and the [PGN export API](https://lichess.org/api) that powers Lichess game harvesting and Hunter Mode.
 - **Next.js, shadcn/ui, and Recharts** — the frontend stack that made the dashboard possible.
 - **The reasoning model ecosystem** — Anthropic, OpenAI, Google, xAI, Mistral, DeepSeek, Alibaba (Qwen), and the Ollama project — for building the AI models that turn raw analysis into real coaching.
 
