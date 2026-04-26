@@ -264,6 +264,7 @@ export default function PatternsPage() {
           <YouFallFor
             arsenal={stats.your_arsenal}
             falls={stats.trap_falls}
+            player={player}
           />
         </CardContent>
       </Card>

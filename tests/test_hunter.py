@@ -218,6 +218,43 @@ class TestFetchDispatch:
         assert len(out) == 1
 
 
+class TestUsernameLowercasing:
+    """v1.4.3: chess.com's API requires lowercase usernames in the URL path —
+    mixed-case names return a 301 that requests follows, but at the cost of
+    an extra round-trip. Both fetchers normalize input to lowercase up front.
+    """
+
+    @patch("src.hunter._chesscom_get_archive_urls")
+    def test_chesscom_lowercases_mixed_case_username(self, mock_archives):
+        from src.hunter import _fetch_chesscom_opponent_games
+        mock_archives.return_value = []  # short-circuit after archive list
+        _fetch_chesscom_opponent_games("Cyborg_warrior", lookback_months=1)
+        # Assert the archive helper was called with the lowercased username
+        mock_archives.assert_called_once_with("cyborg_warrior")
+
+    @patch("requests.get")
+    def test_lichess_lowercases_mixed_case_username(self, mock_get):
+        from src.hunter import _fetch_lichess_opponent_games
+        # `requests` is imported lazily inside the function, so we patch
+        # the underlying requests.get and inspect what URL it was called with.
+        mock_resp = MockResp("")
+        mock_get.return_value = mock_resp
+        _fetch_lichess_opponent_games("DrNykterstein", lookback_months=1)
+        called_url = mock_get.call_args[0][0]
+        assert "drnykterstein" in called_url
+        assert "DrNykterstein" not in called_url
+
+
+class MockResp:
+    """Minimal stand-in for requests.Response — only what
+    _fetch_lichess_opponent_games actually touches."""
+    def __init__(self, text: str):
+        self.text = text
+
+    def raise_for_status(self):
+        pass
+
+
 # ── get_or_fetch_profile end-to-end ──────────────────────────────────────
 
 

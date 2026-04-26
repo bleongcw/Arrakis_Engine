@@ -4,6 +4,31 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.4.3] - 2026-04-26
+
+### Added
+- **Click-to-expand on every trap row** in the Patterns → Self-Analysis → Trap Patterns section. Each row now opens an inline detail view with three things:
+  1. **Mini chess board** with step-through controls (⏮ ◀ ▶ ⏭) playing the trap's signature moves so the player can SEE how it unfolds. Reuses the existing `ChessBoard` + `useChessNavigation` + `MoveControls` components.
+  2. **"Recent games where this happened"** — clickable links to `/<player>/games/<id>` for the actual games where the player fell into (or won with) the trap.
+  3. **"Study this line on Lichess →"** deep link to `lichess.org/analysis` with the trap's PGN pre-loaded for deeper study with Lichess's own opening explorer + cloud eval.
+- All three apply symmetrically to **Your Arsenal** (traps you win with) and **You Fall For** (traps that beat you).
+
+### Fixed
+- **Hunter Mode 404 for mixed-case usernames** — chess.com's API requires lowercase usernames in the URL path; mixed-case names returned a 301 that worked but cost an extra round-trip. Both `_fetch_chesscom_opponent_games` and `_fetch_lichess_opponent_games` now lowercase the input username up front. The user-facing fix: opponents like `Cyborg_warrior` resolve correctly on first try.
+
+### Changed
+- `src/patterns.py::_aggregate_traps_by_outcome` now tracks `recent_game_ids` (up to 5, newest-first) alongside `recent_dates`. Required for the trap-row links to work. **After upgrading, run `python main.py patterns` once** to repopulate `stats_json` with the new field.
+- Backend test count: 304 → 308 (+4 new tests covering trap `recent_game_ids` and username lowercasing).
+
+### Migration note
+The new trap-row expansion only renders when:
+1. You've re-run `python main.py patterns` (or hit "Insights" in the dashboard) after upgrading, AND
+2. You have at least one named trap detected in your games.
+
+Without (1), the trap rows still render the v1.4.0 summary but expansion shows "trap library entry not loaded" because `recent_game_ids` is missing from the cached stats.
+
+---
+
 ## [1.4.2] - 2026-04-26
 
 ### Added

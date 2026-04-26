@@ -64,7 +64,12 @@ def _fetch_chesscom_opponent_games(
 
     Each dict: {pgn, color, result, opening_name}, where color and result
     are from the OPPONENT's perspective (we are computing their profile).
+
+    Note: chess.com's API requires lowercase usernames in the URL path —
+    mixed-case names return a 301 redirect that `requests` follows but
+    that wastes a round-trip. We normalize up front.
     """
+    username = username.lower()
     games: list[dict] = []
     try:
         archive_urls = _chesscom_get_archive_urls(username)
@@ -106,9 +111,15 @@ def _fetch_chesscom_opponent_games(
 def _fetch_lichess_opponent_games(
     username: str, lookback_months: int
 ) -> list[dict]:
-    """Pull the opponent's recent lichess games. Same dict shape as chess.com."""
+    """Pull the opponent's recent lichess games. Same dict shape as chess.com.
+
+    Lowercased for consistency with the chess.com path. Both side-detection
+    helpers in harvester.py do `.lower()` on both sides of the comparison
+    so this is safe.
+    """
     import requests
 
+    username = username.lower()
     cutoff = datetime.now() - timedelta(days=lookback_months * 30)
     since_ms = int(cutoff.timestamp() * 1000)
 

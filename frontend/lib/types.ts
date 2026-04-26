@@ -304,6 +304,10 @@ export interface TrapEntry {
   win_rate: number;
   /** Up to 5 most-recent dates where the requested outcome occurred. */
   recent_dates: string[];
+  /** v1.4.3: up to 5 most-recent game IDs where the requested outcome
+   *  occurred, newest-first. Used to link from a trap row back to the
+   *  full game detail page. */
+  recent_game_ids?: number[];
   frequency_label: "Rare" | "Occasional" | "Frequent";
   trend: "up" | "down" | "flat";
 }

@@ -204,6 +204,25 @@ class TestComputeTrapFalls:
         assert entry["wins"] == 0
         assert entry["losses"] == 3
 
+    def test_recent_game_ids_populated_newest_first(self):
+        """v1.4.3: trap entries must include recent_game_ids so the UI can
+        link from the trap row back to the actual game where it happened."""
+        stafford_moves = ["e4", "e5", "Nf3", "Nf6", "Nxe5", "Nc6"]
+        # Game IDs increase with date; _g uses date "2026-04-{id:02d}"
+        games = [_g(i + 1, "white", "loss", stafford_moves) for i in range(3)]
+        out = _compute_trap_falls(games)
+        entry = out[0]
+        assert "recent_game_ids" in entry
+        assert entry["recent_game_ids"] == [3, 2, 1], (
+            "recent_game_ids must be newest-first"
+        )
+
+    def test_recent_game_ids_capped_at_5(self):
+        stafford_moves = ["e4", "e5", "Nf3", "Nf6", "Nxe5", "Nc6"]
+        games = [_g(i + 1, "white", "loss", stafford_moves) for i in range(8)]
+        out = _compute_trap_falls(games)
+        assert len(out[0]["recent_game_ids"]) == 5
+
     def test_wins_excluded_from_falls(self):
         stafford_moves = ["e4", "e5", "Nf3", "Nf6", "Nxe5", "Nc6"]
         games = [_g(1, "white", "win", stafford_moves)]

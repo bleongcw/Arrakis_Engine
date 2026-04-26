@@ -430,8 +430,13 @@ def _aggregate_traps_by_outcome(
     from the curated library, then aggregate by trap name.
 
     Returns a list of {name, eco, count, win_rate, recent_dates,
-    frequency_label, trend} sorted by count descending. Only traps with
-    at least 1 occurrence appear; results are capped at 8 entries.
+    recent_game_ids, frequency_label, trend} sorted by count descending.
+    Only traps with at least 1 occurrence appear; results are capped at 8.
+
+    `recent_game_ids` (added in v1.4.3) lists up to 5 game IDs where the
+    requested outcome happened, newest-first — so the UI can link the
+    player back to the actual game where they fell into (or won with)
+    the trap.
     """
     if not trap_library:
         return []
@@ -445,7 +450,7 @@ def _aggregate_traps_by_outcome(
         "wins": 0,
         "losses": 0,
         "draws": 0,
-        "outcome_dates": [],  # dates where the requested outcome occurred
+        "outcome_events": [],  # (date, game_id) pairs where requested outcome happened
     })
 
     for g in games:
@@ -464,8 +469,12 @@ def _aggregate_traps_by_outcome(
             rec["losses"] += 1
         else:
             rec["draws"] += 1
-        if g["result"] == outcome and g.get("date_played"):
-            rec["outcome_dates"].append(g["date_played"])
+        if g["result"] == outcome:
+            # Track (date, id) pair so we can sort newest-first while still
+            # carrying the game_id forward for the UI link.
+            rec["outcome_events"].append(
+                (g.get("date_played") or "", g.get("id"))
+            )
 
     out = []
     for key, rec in per_trap.items():
@@ -473,9 +482,11 @@ def _aggregate_traps_by_outcome(
         if outcome_count == 0:
             continue
         win_rate = round(rec["wins"] / rec["total"] * 100, 1) if rec["total"] else 0
-        # Recent dates newest-first, keep top 5
-        rec["outcome_dates"].sort(reverse=True)
-        recent_dates = rec["outcome_dates"][:5]
+        # Sort events newest-first; keep top 5
+        rec["outcome_events"].sort(key=lambda x: x[0], reverse=True)
+        top = rec["outcome_events"][:5]
+        recent_dates = [d for (d, _gid) in top if d]
+        recent_game_ids = [gid for (_d, gid) in top if gid is not None]
         out.append({
             "name": rec["name"],
             "eco": rec["eco"],
@@ -486,6 +497,7 @@ def _aggregate_traps_by_outcome(
             "draws": rec["draws"],
             "win_rate": win_rate,
             "recent_dates": recent_dates,
+            "recent_game_ids": recent_game_ids,
             "frequency_label": _frequency_label(outcome_count),
             # Trend is reserved for a future v1.5 enhancement (compare
             # current period vs prior). For now, "flat" is a safe default.
