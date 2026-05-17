@@ -1,8 +1,8 @@
 # Session State — Frontend Test Infrastructure + Helper Sweep
 
 **Started:** 2026-05-17
-**Plan file:** `/Users/bernardleong/.claude/plans/can-you-help-me-golden-walrus.md` (full plan, approved)
-**Branch:** `main` (no feature branch cut yet)
+**Plan file:** `/Users/bernardleong/.claude/plans/arrakis-chess-refactor.md` (full plan, approved)
+**Branch:** `arrakis-chess-refactor` (cut from `main` at `4e76b80`)
 **Status:** Phase 1 complete; Phases 2–6 pending.
 
 ---
@@ -128,6 +128,6 @@ Placed before `build` so CI fails fast on test regressions.
 - Pause-and-confirm style. The user explicitly said "Phase 1 only" rather than executing the full plan at once. Default to phase-scoped execution with check-ins between phases.
 - Wanted a plan drafted before any execution; appreciated the upfront exploration that surfaced the parseMoveText drift.
 
-**The approved plan was edited by the user** before approval. The file at `/Users/bernardleong/.claude/plans/can-you-help-me-golden-walrus.md` reflects the final approved version. Diff against this STATE.md if anything seems off.
+**The approved plan was edited by the user** before approval. The file at `/Users/bernardleong/.claude/plans/arrakis-chess-refactor.md` reflects the final approved version (renamed from the auto-generated `can-you-help-me-golden-walrus.md`). Diff against this STATE.md if anything seems off.
 
 **Nothing committed yet.** All Phase 1 changes are uncommitted in the working tree. Next git action requires explicit user authorization per their preference (and per the safety protocol — they have not authorized commits).
