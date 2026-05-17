@@ -25,3 +25,6 @@ docs/*
 .mcp.json
 scripts/.lichess_cache/
 scripts/__pycache__/
+# Pre-v1.0 dashboard artefacts — superseded by frontend/; pending decision on deletion
+/dashboard/
+/dashboard-legacy/
