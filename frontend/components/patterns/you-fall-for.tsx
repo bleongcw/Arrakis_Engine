@@ -6,6 +6,7 @@ import Link from "next/link";
 import { ChessBoard } from "@/components/game-detail/chess-board";
 import { MoveControls } from "@/components/game-detail/move-controls";
 import { useChessNavigation } from "@/hooks/use-chess-navigation";
+import { lichessAnalysisUrl } from "@/lib/chess/lichess";
 import type { TrapEntry } from "@/lib/types";
 
 // ── Trap library — fetched once and cached at module scope ───────────────
@@ -48,16 +49,6 @@ function _formatDate(d: string): string {
   const monthIdx = parseInt(m, 10) - 1;
   if (monthIdx < 0 || monthIdx > 11) return d;
   return `${parseInt(day, 10)} ${monthNames[monthIdx]}`;
-}
-
-/** Build a Lichess analysis deep link from a FEN string. The /analysis/standard/{fen}
- *  format is the reliable deep-link path that loads a specific board position
- *  into the Lichess analysis board (with cloud eval + opening explorer). */
-function _lichessAnalysisUrl(fen: string): string {
-  // FEN spaces are URL-safe but Lichess prefers underscores; encodeURIComponent
-  // handles either, but we keep it minimal with raw substitution.
-  const safe = fen.replace(/ /g, "_");
-  return `https://lichess.org/analysis/standard/${safe}`;
 }
 
 // ── Info modal ────────────────────────────────────────────────────────────
@@ -177,7 +168,7 @@ function TrapExpandedView({
         {libraryTrap && (
           <div>
             <a
-              href={_lichessAnalysisUrl(nav.endFen)}
+              href={lichessAnalysisUrl(nav.endFen)}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 hover:underline text-[11px]"
