@@ -4,6 +4,13 @@ import { useState, useEffect, useMemo } from "react";
 import { ChessBoard } from "@/components/game-detail/chess-board";
 import { MoveControls } from "@/components/game-detail/move-controls";
 import { useChessNavigation } from "@/hooks/use-chess-navigation";
+import { parseMoveText } from "@/lib/chess/pgn";
+import {
+  findCanonicalLine,
+  findDeviationIndex,
+  type LibraryOpening,
+} from "@/lib/chess/openings";
+import { lichessAnalysisUrl } from "@/lib/chess/lichess";
 import type {
   OpponentProfile,
   OpponentOpeningEntry,
@@ -12,13 +19,6 @@ import type {
 
 // ── Opening library — fetched once for canonical-line lookup + deviation
 //    highlighting. Cached at module scope for the lifetime of the page.
-
-interface LibraryOpening {
-  eco: string;
-  name: string;
-  /** PGN move text, e.g. "1. e4 e5 2. Nf3 Nc6". */
-  moves: string;
-}
 
 let _libraryCache: LibraryOpening[] | null = null;
 let _libraryPromise: Promise<LibraryOpening[]> | null = null;
@@ -51,92 +51,6 @@ function _formatDate(d: string | null): string {
   const monthIdx = parseInt(m, 10) - 1;
   if (monthIdx < 0 || monthIdx > 11) return d;
   return `${parseInt(day, 10)} ${monthNames[monthIdx]} ${y}`;
-}
-
-/** Lichess analysis deep link from a FEN. */
-function _lichessAnalysisUrl(fen: string): string {
-  return `https://lichess.org/analysis/standard/${fen.replace(/ /g, "_")}`;
-}
-
-/** Strip move-number prefixes from a SAN PGN move string and return a flat
- *  array of moves. "1. e4 e5 2. Nf3" -> ["e4", "e5", "Nf3"]. */
-function parseMoveText(moveText: string): string[] {
-  return moveText
-    .replace(/\d+\./g, " ")
-    .replace(/(1-0|0-1|1\/2-1\/2|\*)/g, " ")
-    .split(/\s+/)
-    .filter(Boolean);
-}
-
-/** Normalize an opening name for fuzzy comparison. Strips punctuation,
- *  apostrophes, hyphens, colons, commas, periods (and the special "..."
- *  used by chess.com to denote black-move continuations); lowercases;
- *  collapses internal whitespace. After normalization,
- *  "Caro-Kann Defense: Advance, Short Variation" and
- *  "Caro Kann Defense Advance Short Variation" become identical. */
-function _normalizeOpeningName(name: string): string {
-  return name
-    .replace(/\.{3}/g, " ")     // chess.com "...e6" continuation marker
-    .replace(/[:,'""\-.]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .toLowerCase();
-}
-
-/** Look up the canonical opening line for a given opening name from the
- *  Lichess library. Returns the deepest matching entry by name (longest
- *  name match) so "Italian Game: Two Knights Defense" beats "Italian Game".
- *
- *  Matching strategy (in order):
- *  1. Exact match on raw name.
- *  2. Exact match on normalized name (handles punctuation differences
- *     between chess.com's verbose names and Lichess's canonical form).
- *  3. Fuzzy: longest entry whose normalized name is a prefix of the
- *     game's normalized name (or vice versa). Picks the longest match
- *     to prefer specific variations over generic openings.
- */
-function findCanonicalLine(
-  openingName: string,
-  library: LibraryOpening[],
-): LibraryOpening | null {
-  if (!openingName || library.length === 0) return null;
-
-  // 1. Exact match on raw name
-  const exact = library.find((e) => e.name === openingName);
-  if (exact) return exact;
-
-  // 2 & 3. Normalize and find best prefix match
-  const target = _normalizeOpeningName(openingName);
-  if (!target) return null;
-
-  let best: LibraryOpening | null = null;
-  let bestLen = 0;
-  for (const e of library) {
-    const candidate = _normalizeOpeningName(e.name);
-    if (!candidate) continue;
-    if (candidate === target) return e;  // exact normalized match wins immediately
-    if (target.startsWith(candidate) || candidate.startsWith(target)) {
-      const matchLen = Math.min(candidate.length, target.length);
-      if (matchLen > bestLen) {
-        best = e;
-        bestLen = matchLen;
-      }
-    }
-  }
-  return best;
-}
-
-/** Return the ply index (0-based) where two move lists first differ.
- *  Returns -1 if `gameMoves` matches `bookMoves` for the entire shared length. */
-function findDeviationIndex(
-  gameMoves: string[],
-  bookMoves: string[],
-): number {
-  const len = Math.min(gameMoves.length, bookMoves.length);
-  for (let i = 0; i < len; i++) {
-    if (gameMoves[i] !== bookMoves[i]) return i;
-  }
-  return -1;
 }
 
 // ── Annotated move list with deviation highlight ─────────────────────────
@@ -360,7 +274,7 @@ function OpeningExpandedView({
         {/* Lichess link */}
         <div>
           <a
-            href={_lichessAnalysisUrl(nav.endFen)}
+            href={lichessAnalysisUrl(nav.endFen)}
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 hover:underline text-[11px]"

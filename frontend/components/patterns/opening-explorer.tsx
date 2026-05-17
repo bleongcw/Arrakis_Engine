@@ -6,6 +6,7 @@ import { ChessBoard } from "@/components/game-detail/chess-board";
 import { MoveControls } from "@/components/game-detail/move-controls";
 import { useChessNavigation } from "@/hooks/use-chess-navigation";
 import { Badge } from "@/components/ui/badge";
+import { parseMoveText } from "@/lib/chess/pgn";
 import type { OpeningGameEntry, OpeningBookEntry } from "@/lib/types";
 
 interface OpeningExplorerProps {
@@ -21,14 +22,6 @@ const RESULT_BADGE: Record<string, { variant: "default" | "destructive" | "secon
   loss: { variant: "destructive", label: "L" },
   draw: { variant: "secondary", label: "D" },
 };
-
-function parseMoveText(moveText: string): string[] {
-  // Parse "1.e4 e5 2.Nf3 Nc6" into ["e4", "e5", "Nf3", "Nc6"]
-  return moveText
-    .replace(/\d+\./g, " ")
-    .split(/\s+/)
-    .filter(Boolean);
-}
 
 function findBookMatch(
   openingMoves: string,
