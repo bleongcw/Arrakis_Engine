@@ -31,7 +31,10 @@ Thank you for your interest in contributing to ArrakisEngine! This document prov
 
 ### Running Tests
 
-The test suite has **362 tests** across three tiers (`pyproject.toml` defines the markers).
+**428 tests total**: 362 backend (pytest, three tiers via `pyproject.toml`
+markers) + 66 frontend (Vitest, v1.6.0+).
+
+**Backend (pytest):**
 
 ```bash
 # Default: ~318 unit tests, no external deps (~14s)
@@ -56,6 +59,19 @@ pytest --override-ini "addopts="
 When adding a test that mocks a function imported locally inside another
 function, **patch the source module, not the consumer** — e.g.
 `@patch("src.coach.coach_pending")`, not the calling module's reference.
+
+**Frontend (Vitest, v1.6.0+):**
+
+```bash
+cd frontend
+pnpm test:run       # single-shot — what CI runs
+pnpm test           # watch mode while developing
+```
+
+66 tests covering the shared chess helpers (`lib/chess/`), the
+`use-chess-navigation` hook (including the v1.4.5 clock-comment leak
+guard), and three component smoke suites. Sub-second full run. CI runs
+`pnpm test:run` automatically between install and build.
 
 ### Running the App
 
@@ -90,7 +106,9 @@ backend on port 8000 for all data.
 Before pushing frontend changes:
 
 ```bash
-cd frontend && pnpm build
+cd frontend
+pnpm test:run    # v1.6.0+ — Vitest gate; CI runs this before build
+pnpm build
 ```
 
 CI runs this on Node 24 + pnpm 10 + Python 3.11/3.12.

@@ -854,7 +854,13 @@ Arrakis_Engine/
 │   │   ├── settings/          # Players, Analysis, ApiKeys, Coaching sections
 │   │   └── ui/                # shadcn/ui primitives (card, table, button, etc.)
 │   ├── hooks/                 # useChessNavigation (currentFen, endFen, moves), usePipeline, useCoaching
+│   │   └── __tests__/         # (v1.6.0) Vitest specs for use-chess-navigation (clock-comment guard, boundaries)
 │   ├── lib/                   # API client (api.ts), types (types.ts), providers (providers.ts), utils
+│   │   └── chess/             # (v1.6.0) Shared chess helpers: parseMoveText, lichessAnalysisUrl, opening matching
+│   │       └── __tests__/     # Helper unit tests (incl. v1.4.5 Lichess-URL regression lock)
+│   ├── components/**/__tests__/  # (v1.6.0) Component smoke + interaction tests (targeted-prep, you-fall-for, opening-explorer)
+│   ├── vitest.config.ts       # (v1.6.0) Vitest harness (jsdom + Testing Library)
+│   ├── vitest.setup.ts        # (v1.6.0) Global mocks: next/navigation, next/link
 │   └── public/data/
 │       ├── openings.json      # 3,690-entry Lichess CC0 opening database
 │       └── traps.json         # 102-entry curated beginner-trap library (v1.4.0+)
@@ -863,7 +869,7 @@ Arrakis_Engine/
 ├── docs/
 │   ├── architecture.md        # Tracked: contributor architecture reference
 │   └── screenshots/           # Architecture diagram and screenshots
-├── tests/                 # Test suite (362 tests across 3 tiers)
+├── tests/                 # Backend test suite (362 tests across 3 tiers)
 │   ├── conftest.py        # Shared fixtures (db, player, stockfish, llm)
 │   ├── test_models.py
 │   ├── test_harvester.py
@@ -901,7 +907,7 @@ Arrakis_Engine/
 
 ## Running Tests
 
-362 tests across 15 files, organized into three tiers using pytest markers. Integration and live tests are excluded by default — opt in explicitly.
+**428 tests total** — 362 backend (pytest) + 66 frontend (Vitest). Backend tests are organized into three tiers using pytest markers; integration and live tests are excluded by default. Frontend tests run sub-second and cover the chess helper library, the `use-chess-navigation` hook, and three component smoke suites.
 
 ### Commands
 
@@ -966,6 +972,28 @@ The `llm_provider` fixture checks for `ARRAKIS_ANTHROPIC_API_KEY` first, falls b
 | File | Tests | Coverage |
 |------|-------|---------|
 | `test_pipeline_e2e.py` | 1 | Insert game → Stockfish analysis → LLM coaching → verify complete status, move rows, and valid coaching JSON |
+
+### Frontend tests (Vitest, v1.6.0+)
+
+**66 tests across 7 files**, sub-second full run. No external dependencies; jsdom + Testing Library + `@testing-library/jest-dom`.
+
+```bash
+cd frontend
+pnpm test:run       # single-shot (used by CI)
+pnpm test           # watch mode
+```
+
+| File | Tests | Coverage |
+|---|---|---|
+| `lib/chess/__tests__/pgn.test.ts` | 11 | `parseMoveText` — numeric prefixes, result markers (`1-0`/`0-1`/`1/2-1/2`/`*`), whitespace, empty input |
+| `lib/chess/__tests__/openings.test.ts` | 18 | `normalizeOpeningName` (ellipsis, punctuation, whitespace), `findCanonicalLine` (exact / normalized / longest-prefix matching), `findDeviationIndex` (first-diff index, `-1` sentinel) |
+| `lib/chess/__tests__/lichess.test.ts` | 6 | **v1.4.5 regression lock** — `/analysis/standard/{FEN}` form, forbids `?pgn=` and `?fen=` |
+| `hooks/__tests__/use-chess-navigation.test.ts` | 17 | Empty / invalid PGN safety, **v1.4.5 clock-comment leak guard** (`{[%clk ...]}` must not leak into moves), FEN-length invariant, boundary navigation, board orientation, keyboard handler with input/textarea focus guard |
+| `components/hunter/__tests__/targeted-prep.test.tsx` | 5 | Opponent header + weakness row, click-to-expand mounts mini-board, Lichess URL form, Refresh callback, empty-state |
+| `components/patterns/__tests__/you-fall-for.test.tsx` | 4 | Trap rows render, expansion shows recent-game links to `/<player>/games/<id>`, Lichess URL form, empty-state |
+| `components/patterns/__tests__/opening-explorer.test.tsx` | 5 | Game-list links, SAN move rendering via `parseMoveText`, ECO badge after book fetch, mini-board mount, W/L/D badges |
+
+CI runs `pnpm test:run` automatically between install and build on every push and PR (see `.github/workflows/ci.yml`).
 
 ## Troubleshooting
 

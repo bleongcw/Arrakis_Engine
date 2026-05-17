@@ -1,6 +1,6 @@
 # Arrakis Engine — Architecture
 
-*Last updated: 2026-04-26 — corresponds to v1.5.0*
+*Last updated: 2026-05-18 — corresponds to v1.6.0*
 
 This document describes the technical architecture of Arrakis Engine: how the pieces fit together, what runs where, and the design decisions behind them. It is aimed at contributors and developers reading the codebase. For end-user / setup docs, see [README.md](../README.md). For changelog, see [CHANGELOG.md](../CHANGELOG.md).
 
@@ -57,7 +57,7 @@ The same pipeline can be triggered three ways:
 | Backend HTTP | Python `http.server` (stdlib) — no FastAPI / Flask dependency |
 | Frontend | Next.js 16, React 19, TypeScript, Tailwind CSS, shadcn/ui (Base UI primitives) |
 | Charts | Recharts |
-| Tests | pytest |
+| Tests | pytest (backend) + Vitest + Testing Library (frontend, v1.6.0+) |
 
 The backend is intentionally dependency-light — `http.server` is enough for a single-user local app and avoids pulling in a web framework.
 
@@ -256,6 +256,7 @@ Next.js 16 + React 19 + TypeScript + Tailwind + shadcn/ui (built on Base UI prim
 - **Provider metadata** — `frontend/lib/providers.ts` is the single source for the 8-provider list (slug, display name, group, color). Used by every provider selector.
 - **API client** — `frontend/lib/api.ts` is the typed wrapper around the backend REST endpoints.
 - **Pipeline hook** — `frontend/hooks/use-pipeline.ts` owns pipeline state (running step, progress, cancel) and is shared between the dashboard control panel and the per-game coaching button.
+- **Chess helpers (v1.6.0)** — `frontend/lib/chess/` is the canonical home for shared chess utilities: `parseMoveText` (PGN tokenization), `lichessAnalysisUrl` (deep link builder; see v1.4.5 lesson), `normalizeOpeningName` / `findCanonicalLine` / `findDeviationIndex` (Lichess book matching). Three components import from here (`hunter/targeted-prep`, `patterns/opening-explorer`, `patterns/you-fall-for`); previously they each carried near-duplicate copies, which is what hid the v1.4.5 regressions until they were noticed in production.
 
 ### UI primitives
 
@@ -289,14 +290,30 @@ The `ARRAKIS_` prefix avoids collisions with other tools that use the unprefixed
 
 ## 7. Testing
 
+**428 tests total** — 362 backend (pytest) + 66 frontend (Vitest, v1.6.0+).
+
+### Backend (`tests/`)
+
 | Suite | What it covers |
 |---|---|
-| Unit tests | `models`, `analyzer`, `harvester`, `coach`, `patterns`, `loss_openings` (v1.4.0), `trap_matcher` (v1.4.0), `hunter` (v1.4.1+), `report`, `tiers`, `export`, `scheduler`, `pipeline_state`, `dashboard_server` |
+| Unit tests | `models`, `analyzer`, `harvester`, `coach`, `patterns`, `loss_openings` (v1.4.0), `trap_matcher` (v1.4.0), `hunter` (v1.4.1+), `report`, `tiers`, `export`, `scheduler`, `pipeline_state`, `dashboard_server`, `dev_runner` (v1.5.0) |
 | Integration | Full pipeline E2E (analyze → coach end-to-end on a known PGN) |
 | Stockfish integration | Specific lines (Scholar's Mate, etc.) verified against engine output |
 | Live LLM | Real API calls, marked separately, ~$0.05 / run |
 
-**362 tests** total across all tiers. Tests live in `tests/`. CI runs unit + frontend build on Node 24 + pnpm 10 + Python 3.11 / 3.12.
+### Frontend (`frontend/.../__tests__/`, v1.6.0+)
+
+| Suite | What it covers |
+|---|---|
+| `lib/chess/__tests__/` | Helper unit tests — `parseMoveText`, `normalizeOpeningName`, `findCanonicalLine`, `findDeviationIndex`, `lichessAnalysisUrl`. **`lichess.test.ts` is the load-bearing v1.4.5 regression lock**: forbids the `?pgn=` URL form. |
+| `hooks/__tests__/use-chess-navigation.test.ts` | Empty/invalid PGN safety, **v1.4.5 clock-comment leak guard** (`{[%clk ...]}` must not leak into the moves array), FEN-array length invariant, boundary navigation, keyboard handler focus guard. |
+| `components/**/__tests__/` | Component smoke + interaction tests for `targeted-prep`, `you-fall-for`, `opening-explorer`. Each asserts the rendered Lichess URL is `/analysis/standard/` form. |
+
+Vitest runs sub-second. Setup mocks `next/navigation` and `next/link` globally (`frontend/vitest.setup.ts`) so component tests render without the Next runtime.
+
+### CI
+
+CI runs backend pytest unit tests, frontend Vitest (`pnpm test:run`), and frontend `pnpm build` on Node 24 + pnpm 10 + Python 3.11 / 3.12. The frontend test step gates the build — regressions fail fast.
 
 ### Patch-target rule for tests
 Functions imported locally inside another function (e.g. `from src.coach import coach_pending` inside `run_full_pipeline()`) must be patched at the **source** module — `@patch("src.coach.coach_pending")` — not at the consuming module. This trips up new tests regularly.

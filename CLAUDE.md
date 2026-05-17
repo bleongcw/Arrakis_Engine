@@ -5,7 +5,7 @@ Local Python app that pulls games from Chess.com and Lichess, runs Stockfish ana
 and uses reasoning LLMs to generate age-appropriate coaching insights with
 pattern tracking over time. Inspired by Eleanor, Evan, and Estella.
 
-Current release: **v1.5.0** (2026-04-26). See `CHANGELOG.md` for history.
+Current release: **v1.6.0** (2026-05-18). See `CHANGELOG.md` for history.
 
 ## Architecture
 - Python 3.11+, SQLite (WAL mode), local Stockfish on Apple Silicon
@@ -111,7 +111,13 @@ ArrakisEngine/
 │   │   ├── settings/          # Players, Stockfish, API keys, Coaching sections
 │   │   └── ui/                # shadcn/ui primitives (Base UI under the hood)
 │   ├── hooks/                 # useChessNavigation (returns currentFen, endFen, moves)
+│   │   └── __tests__/         # v1.6.0 — Vitest specs (clock-comment guard, boundaries)
 │   ├── lib/                   # API client, types, providers metadata
+│   │   └── chess/             # v1.6.0 — shared chess helpers (parseMoveText, lichessAnalysisUrl, opening matching)
+│   │       └── __tests__/     # Helper unit tests (incl. v1.4.5 Lichess-URL lock)
+│   ├── components/**/__tests__/  # v1.6.0 — component smoke + interaction tests (targeted-prep, you-fall-for, opening-explorer)
+│   ├── vitest.config.ts       # v1.6.0 — Vitest harness (jsdom + Testing Library)
+│   ├── vitest.setup.ts        # v1.6.0 — global mocks (next/navigation, next/link)
 │   └── public/data/
 │       ├── openings.json      # 3,690-entry Lichess CC0 opening database
 │       └── traps.json         # 102-entry curated beginner-trap library
@@ -124,7 +130,7 @@ ArrakisEngine/
 │   └── screenshots/           # Architecture diagram + UI screenshots
 ├── data/
 │   └── chess_coach.db         # SQLite database (auto-created, gitignored)
-├── tests/                     # pytest suite (362 tests across 3 tiers)
+├── tests/                     # Backend pytest suite (362 tests across 3 tiers)
 └── reports/                   # Generated coach reports (gitignored)
 ```
 
@@ -184,16 +190,21 @@ highlighting against canonical book theory, and "Study on Lichess" deep link.
 
 ## Testing
 
-**362 tests** across 16 test files, organized into three tiers via pytest markers
-(see `pyproject.toml`).
+**428 tests total** — 362 backend (pytest, 16 test files, three tiers via
+`pyproject.toml` markers) + 66 frontend (Vitest, 7 test files, sub-second).
 
 ### Running Tests
 ```bash
+# Backend (pytest)
 pytest                                  # ~318 unit tests (~14s, no deps)
 pytest -m integration                   # Stockfish tests (requires binary)
 pytest -m live                          # LLM API tests (~$0.05)
 pytest -m "integration and live"        # Full pipeline E2E
-pytest --override-ini "addopts="        # All 362 tests across all tiers
+pytest --override-ini "addopts="        # All 362 backend tests across all tiers
+
+# Frontend (Vitest, v1.6.0+)
+cd frontend && pnpm test:run            # 66 tests, sub-second — what CI runs
+cd frontend && pnpm test                # watch mode
 ```
 
 ### Tier 1: Unit Tests (default)
@@ -222,6 +233,22 @@ Requires Stockfish binary. Uses Scholar's Mate for fast deterministic analysis.
 ### Tier 3: Live Tests (`pytest -m live`)
 Requires at least one cloud API key. Uses whichever is available.
 
+### Frontend tests (Vitest, v1.6.0+)
+Sub-second full run. No external deps; jsdom + Testing Library + `@testing-library/jest-dom`.
+
+| File | Tests | What it covers |
+|---|---|---|
+| lib/chess/__tests__/pgn.test.ts | 11 | `parseMoveText` — prefixes, result markers, whitespace |
+| lib/chess/__tests__/openings.test.ts | 18 | `normalizeOpeningName`, `findCanonicalLine` (exact/normalized/longest-prefix), `findDeviationIndex` |
+| lib/chess/__tests__/lichess.test.ts | 6 | v1.4.5 regression lock — `/analysis/standard/{FEN}` form, forbids `?pgn=` |
+| hooks/__tests__/use-chess-navigation.test.ts | 17 | Empty/invalid PGN safety, v1.4.5 clock-comment leak guard, FEN-length invariant, boundary nav, board orientation, keyboard handler with focus guard |
+| components/hunter/__tests__/targeted-prep.test.tsx | 5 | Opponent header, click-to-expand mini-board, Lichess URL form, Refresh callback, empty-state |
+| components/patterns/__tests__/you-fall-for.test.tsx | 4 | Trap rows, recent-game links to `/<player>/games/<id>`, Lichess URL form, empty-state |
+| components/patterns/__tests__/opening-explorer.test.tsx | 5 | Game-list links, SAN via parseMoveText, ECO badge after book fetch, mini-board mount |
+
+CI runs `pnpm test:run` between install and build in the frontend job
+(`.github/workflows/ci.yml`), so test regressions fail fast before build.
+
 ### Patch-target rule
 Functions imported locally inside another function (e.g. `from src.coach import
 coach_pending` inside `run_full_pipeline()`) must be patched at the **source**
@@ -240,7 +267,13 @@ module — `@patch("src.coach.coach_pending")` — not at the consuming module.
   with `DialogClose`. (v1.0.2 lesson)
 - **Portal-based info modals** — escapes `Card overflow:hidden` clipping. (v1.0.1)
 - **Lichess deep link format** — use `/analysis/standard/{FEN}`, not `?pgn=`.
-  (v1.4.5 lesson)
+  (v1.4.5 lesson; locked in by `frontend/lib/chess/__tests__/lichess.test.ts`
+  + assertions in all three component tests as of v1.6.0)
+- **Shared chess helpers live in `frontend/lib/chess/`** (v1.6.0) — `parseMoveText`,
+  `lichessAnalysisUrl`, `normalizeOpeningName`, `findCanonicalLine`,
+  `findDeviationIndex`, `LibraryOpening`. Import from there instead of
+  copying into a component; the previous duplication is what hid the
+  v1.4.5 regressions for as long as it did.
 
 ## Two-Server Setup
 

@@ -4,6 +4,60 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.6.0] - 2026-05-18
+
+A developer-quality release: no new user-facing features, but the frontend
+finally has the same kind of test safety net the backend has had since v1.0.0.
+
+### Added
+- **Frontend test infrastructure** — Vitest + jsdom + Testing Library
+  harness wired into the `frontend/` workspace. **66 frontend tests across
+  7 files**, sub-second full run.
+  - `lib/chess/{pgn,openings,lichess}.ts` — 35 unit tests covering helper
+    behaviour, normalisation edge cases, and the load-bearing v1.4.5
+    Lichess URL form (`/analysis/standard/{FEN}`; the `?pgn=` form is
+    explicitly forbidden by `lichess.test.ts`).
+  - `hooks/__tests__/use-chess-navigation.test.ts` — 17 tests, including
+    the v1.4.5 clock-comment leak guard (chess.com `{[%clk ...]}`
+    annotations must not leak into the moves array), FEN-array length
+    invariant, boundary navigation, board orientation, and the
+    keyboard handler's input/textarea focus guard.
+  - Three component smoke + interaction tests:
+    `components/hunter/__tests__/targeted-prep.test.tsx` (5 tests),
+    `components/patterns/__tests__/you-fall-for.test.tsx` (4 tests),
+    `components/patterns/__tests__/opening-explorer.test.tsx` (5 tests).
+- **`frontend/lib/chess/`** — shared chess helpers extracted from three
+  components that had been carrying near-duplicate copies:
+  - `pgn.ts` → `parseMoveText`
+  - `openings.ts` → `normalizeOpeningName`, `findCanonicalLine`,
+    `findDeviationIndex`, and the `LibraryOpening` interface
+  - `lichess.ts` → `lichessAnalysisUrl`
+- **CI gate on frontend tests** — `.github/workflows/ci.yml` now runs
+  `pnpm test:run` between `pnpm install --frozen-lockfile` and `pnpm build`
+  in the frontend job so test regressions fail fast before the production
+  build.
+- **v1.4.5 regression locks at three layers** — helper (`lichess.test.ts`
+  asserts the URL form), hook (`use-chess-navigation.test.ts` asserts no
+  clock-comment leak), and component (all three component tests assert the
+  `/analysis/standard/` form on the rendered `<a>`).
+
+### Changed
+- `components/hunter/targeted-prep.tsx` (−94 net lines),
+  `components/patterns/opening-explorer.tsx`, and
+  `components/patterns/you-fall-for.tsx` now import from `lib/chess/`
+  instead of defining local helpers. Behaviour is byte-for-byte preserved;
+  `opening-explorer.tsx`'s `parseMoveText` now also strips PGN result
+  markers (`1-0` / `0-1` / `1/2-1/2` / `*`), which is additive — canonical
+  book lines don't carry them.
+- `frontend/vitest.setup.ts` gains a global `next/link` mock (async factory
+  + dynamic React import to dodge ESM hoisting) so component tests can
+  render `<Link>` without the Next runtime.
+- Total project test count: **362 backend + 66 frontend = 428 tests**.
+
+### Removed
+- `STATE.md` — session-handoff file for the in-progress refactor; the work
+  it tracked has shipped, so the file is no longer load-bearing.
+
 ## [1.5.0] - 2026-04-26
 
 ### Added

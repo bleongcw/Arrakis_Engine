@@ -1,6 +1,6 @@
 # Arrakis Engine Roadmap
 
-*Updated 2026-04-26 — current release v1.5.0*
+*Updated 2026-05-18 — current release v1.6.0*
 
 This is the public-facing roadmap. The full release history is in
 [CHANGELOG.md](CHANGELOG.md); architectural details are in
@@ -53,6 +53,25 @@ provider.
   debugging, scripted pipelines), now with a hint pointing at `serve`.
 - Optional flags: `--port`, `--frontend-port`, `--install`.
 - New `src/dev_runner.py` module + 30 tests covering the orchestration.
+
+### Frontend test infrastructure (v1.6.0, 2026-05-18)
+- **Vitest harness** — jsdom + Testing Library + `@testing-library/jest-dom`
+  matchers wired into the `frontend/` workspace. **66 frontend tests
+  across 7 files**, sub-second full run.
+- **Chess helper sweep** — `parseMoveText`, `lichessAnalysisUrl`, and the
+  opening-matching helpers (`normalizeOpeningName`, `findCanonicalLine`,
+  `findDeviationIndex`, `LibraryOpening`) extracted from three components
+  into `frontend/lib/chess/`. Three component callers (`targeted-prep`,
+  `opening-explorer`, `you-fall-for`) now import from the shared module.
+- **v1.4.5 regression locks** at three layers:
+  - Helper-level: `lichess.test.ts` asserts the
+    `/analysis/standard/{FEN}` URL form and forbids the `?pgn=` form.
+  - Hook-level: `use-chess-navigation.test.ts` asserts chess.com
+    `{[%clk ...]}` annotations never leak into the moves array.
+  - Component-level: all three component tests assert the same Lichess
+    URL form on the actual rendered `<a>`.
+- **CI gate** — `.github/workflows/ci.yml` runs `pnpm test:run` between
+  install and build in the frontend job so regressions fail fast.
 
 ### Polish & bug fixes
 - v1.0.1, v1.0.2 — UI fixes (opening explorer, dialog hydration)
