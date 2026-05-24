@@ -1,6 +1,6 @@
 # Arrakis Engine — Architecture
 
-*Last updated: 2026-05-18 — corresponds to v1.6.0*
+*Last updated: 2026-05-25 — corresponds to v1.8.0*
 
 This document describes the technical architecture of Arrakis Engine: how the pieces fit together, what runs where, and the design decisions behind them. It is aimed at contributors and developers reading the codebase. For end-user / setup docs, see [README.md](../README.md). For changelog, see [CHANGELOG.md](../CHANGELOG.md).
 
@@ -75,7 +75,7 @@ The backend is intentionally dependency-light — `http.server` is enough for a 
 ### `analyzer.py` — Stockfish engine layer
 - Replays each PGN move-by-move against a local Stockfish process via `python-chess`.
 - Per move it stores `eval_cp`, `swing_cp`, `win_prob`, `best_move`, `pv_line`, and a classification.
-- **ACPL capping at ±1000 cp** matches the Lichess / chess.com convention so that mating sequences don't dominate average centipawn loss.
+- **ACPL capping at ±1000 cp + played-best-zero rule** (v1.7.1, extended in v1.7.4): per-move centipawn loss caps both the raw eval AND the resulting loss at `EVAL_CAP=1000`. If the played move equals the engine's #1 best move (`move_played == best_move`), loss is recorded as 0 — Lichess convention. This avoids the mate-transition bug where checkmate-delivering moves like `Qxf7#` would otherwise register as 2000cp losses (Stockfish encodes mate as ±30000 internally). v1.7.4 extracted the formula into a single helper `_per_move_player_loss()` in `patterns.py` and applied it across all 6 cross-game ACPL widgets that previously inlined the broken formula. Backfill via `python main.py backfill-acpl --force` after upgrading.
 - Move classifications:
   - Excellent: `< 30 cp` loss
   - Good: `< 50 cp`
@@ -86,16 +86,19 @@ The backend is intentionally dependency-light — `http.server` is enough for a 
 - Configurable depth (22), threads (6), hash (512 MB), and per-move time limit.
 
 ### `coach.py` + `llm_providers.py` — LLM coaching layer
-- `llm_providers.py` is the unified abstraction for **8 providers**: Anthropic, OpenAI, Google, xAI, Mistral, DeepSeek, Qwen, and Ollama. Each provider is registered with its SDK type, default model, API key env var, and request shape.
-- `coach.py` builds the prompt from Stockfish data + recent coaching history, sends it through the provider abstraction, and stores the structured output in `game_coaching`.
+- `llm_providers.py` is the unified abstraction for **8 providers**: Anthropic, OpenAI, Google, xAI, Mistral, DeepSeek, Qwen, and Ollama. Each provider is registered with its SDK type, default model, API key env var, and request shape. Current default reasoning models (v1.7.0): Claude Opus 4.7 (`claude-opus-4-7`), GPT-5.5 Pro (`gpt-5.5-pro-2026-04-23`), Gemini 2.5 Pro.
+- `coach.py` builds the prompt from Stockfish data + recent coaching history + the player's measured 30-day trajectory (v1.8.0), sends it through the provider abstraction, and stores the structured output in `game_coaching`.
 - **Reasoning models are required.** The system enforces this — non-reasoning models produce shallow, generic coaching that misses tactics. See [`ROADMAP.md`](../ROADMAP.md) (root, not the gitignored one) for the full rationale.
-- Coaching output is structured: narrative, key lesson, practical focus, critical moments, opening analysis, coach notes — for two audiences (child-facing, coach-facing).
-- **Coaching history injection**: a configurable number of recent coached games' lessons are fed into the prompt so the LLM doesn't repeat itself and can build on prior advice. Default is 5 (range 1–20) via the `coaching_history_count` setting in `config.yaml` or the `--history N` CLI flag. Each history game adds ~500 prompt tokens — see the README "Coaching History Depth" section for per-provider guidance.
+- Coaching output is structured: narrative, key lesson, practical focus, critical moments, opening analysis, coach notes, and a personal `player_feedback` letter — for two audiences (child-facing, coach-facing).
+- **Coaching history injection** (v1.7.0): a configurable number of recent coached games' lessons are fed into the prompt so the LLM doesn't repeat itself and can build on prior advice. Default is 5 (range 1–20) via the `coaching_history_count` setting in `config.yaml` or the `--history N` CLI flag. Each history game adds ~500 prompt tokens — see the README "Coaching History Depth" section for per-provider guidance.
+- **Player trajectory injection** (v1.8.0): in addition to history, the per-game prompt now includes a structured `## Player Trajectory (last 30 days)` block built by `patterns.py::build_trajectory_block`. The block surfaces 6–8 measured cross-game signals (weakest/strongest phase ACPL, tactical miss rate, endgame conversion, ACPL trend direction over 4 weekly buckets, comeback/collapse rates, repertoire focus) plus a synthesized headline. ~200–250 tokens. Gated by `coaching_trajectory_enabled: true` (default ON); the CLI `--no-trajectory` flag overrides per-run for A/B comparison. When the player has no `player_patterns` row yet, the block is silently skipped.
+- **Auto-refresh of player_patterns** (v1.8.0): `_maybe_refresh_patterns()` calls `compute_player_patterns(player_id)` (pure-Python, no LLM, ~3–5s per player on a full DB) before coaching if the patterns row is >7 days old OR if completed games exist beyond the row's `period_end`. Means trajectory is always reasonably fresh without the user having to remember `python main.py patterns`. Never auto-calls `generate_trend_summary()` — that's a paid LLM round-trip.
 - **Game-type detection** classifies games into 10 archetypes (tactical battle, comeback, collapse, positional grind, miniature, etc.) and tailors the prompt accordingly.
+- **Coaching meta diagnostics** (v1.7.0, extended in v1.8.0): every coached game stores `coaching_meta_json` capturing history depth, prompt size, model, and trajectory state (`trajectory_injected`, `trajectory_age_days`, `trajectory_weakest_phase`, `trajectory_trend_direction`, `trajectory_tokens_estimate`). The frontend renders these as small badges on the coaching panel so the user can verify what the LLM actually saw.
 - Resilience: exponential backoff (30s → 60s → 120s, max 5 min), 3-failure circuit breaker, 300s SDK timeout for reasoning models, interruptible sleep via `threading.Event`.
 
 ### `patterns.py` — cross-game aggregation
-Aggregates 20 metrics per player across all analyzed games. Stored as one JSON blob per player in `player_patterns.stats_json`.
+Aggregates 20+ metrics per player across all analyzed games. Stored as one JSON blob per player in `player_patterns.stats_json`. Also exposes `build_trajectory_block(conn, player_id)` (v1.8.0) which extracts a structured 6–8-fact snapshot of the player's measured trajectory for injection into the per-game coaching prompt; see `coach.py` above.
 
 The four metrics added in v1.4.0 are the **Self-Analysis** family — they answer "what should I study next?" rather than "what's true about my play?":
 
@@ -216,7 +219,7 @@ Single-file SQLite. Schema migrations run via `init_db()` at startup — column 
 | `players` | username, display_name, age, rating, fide_id, fide_rating, lichess_username, is_active |
 | `games` | player_id, game_url, pgn, player_color, ratings, result, time_class, platform, analysis_status, coaching_status, date_played |
 | `move_analysis` | game_id, move_number, side, move_played, best_move, eval_cp, swing_cp, win_prob, classification, pv_line |
-| `game_coaching` | game_id, provider, narrative, key_lesson, practical_focus, coach_notes, critical_moments_json, opening_analysis_json |
+| `game_coaching` | game_id, provider, narrative, key_lesson, practical_focus, coach_notes, player_feedback, critical_moments_json, opening_analysis_json, **coaching_meta_json** (v1.7.0; v1.8.0 adds trajectory_injected / trajectory_age_days / trajectory_weakest_phase / trajectory_trend_direction / trajectory_tokens_estimate) |
 | `player_patterns` | player_id, period_start, period_end, stats_json, trend_summary, updated_at |
 | `opponent_cache` (v1.4.1) | username, platform, profile_json, fetched_at — 24h TTL cache for Hunter Mode profile JSON |
 | `opponent_games` (v1.4.4) | username, platform, game_url, pgn, player_color, result, opening_name, eco, date_played, fetched_at — accumulating local PGN cache for Hunter Mode (sliding window + optional cap) |
@@ -270,7 +273,7 @@ shadcn/ui components live in `frontend/components/ui/`. They wrap Base UI primit
 ## 6. Configuration
 
 ### `config.yaml`
-Engine and runtime config — Stockfish path / depth / threads / hash, lookback period, coaching provider, coaching tone / detail level / focus areas / `coaching_history_count`, schedule interval, database path. Player list is **not** stored here (DB is the source of truth). Coaching settings can be edited live via the Settings page (`PUT /api/settings/coaching`) which writes back to `config.yaml`.
+Engine and runtime config — Stockfish path / depth / threads / hash, lookback period, coaching provider, coaching tone / detail level / focus areas / `coaching_history_count` / `coaching_trajectory_enabled` (v1.8.0, default true), schedule interval, database path. Player list is **not** stored here (DB is the source of truth). Coaching settings can be edited live via the Settings page (`PUT /api/settings/coaching`) which writes back to `config.yaml`.
 
 ### Environment variables
 ```
@@ -290,7 +293,7 @@ The `ARRAKIS_` prefix avoids collisions with other tools that use the unprefixed
 
 ## 7. Testing
 
-**428 tests total** — 362 backend (pytest) + 66 frontend (Vitest, v1.6.0+).
+**460 tests total** — 384 backend (pytest) + 76 frontend (Vitest, v1.6.0+). Counts as of v1.8.0; see CHANGELOG for per-release deltas.
 
 ### Backend (`tests/`)
 
@@ -340,7 +343,8 @@ Functions imported locally inside another function (e.g. `from src.coach import 
 | Adding a new named trap | Update `TRAP_NAME_PATTERNS` in `scripts/build_traps.py`, then re-run the script to rebuild `frontend/public/data/traps.json` |
 | Adding a new pipeline step | `src/scheduler.py::run_full_pipeline`, `src/dashboard_server.py` (POST endpoint), `frontend/components/pipeline-control-panel.tsx` |
 | Changing Stockfish behavior | `src/analyzer.py` + `config.yaml` |
-| Tuning coaching prompts | `src/coach.py` (build_prompt), `src/tiers.py` (per-tier guidance) |
+| Tuning coaching prompts | `src/coach.py` (`GAME_COACHING_PROMPT`), `src/tiers.py` (per-tier guidance), `src/patterns.py::build_trajectory_block` (v1.8.0 trajectory snapshot) |
+| Verifying what the LLM actually saw | `python main.py coach <id> --dump-prompt /tmp/` (v1.6.0+); A/B with `--no-trajectory` (v1.8.0+) |
 | Adding a new dashboard page | `frontend/app/[player]/<page>/page.tsx`, plus a corresponding GET endpoint in `dashboard_server.py` |
 | Database migration | `src/models.py::init_db` — add a new `ALTER TABLE` guarded by `PRAGMA table_info` |
 | Test patches not firing | Check whether the import is local-in-function; patch the **source** module |
