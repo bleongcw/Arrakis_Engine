@@ -169,3 +169,95 @@ describe("RatingProgressionChart — platform splitting (v1.7.2)", () => {
     expect(container.firstChild).toBeNull();
   });
 });
+
+describe("RatingProgressionChart — time-class smart default (v1.7.3)", () => {
+  it("defaults to the most-played time class instead of 'All'", () => {
+    // 8 rapid games + 3 daily games → default should be 'rapid', not 'All'
+    const games = [
+      ...Array.from({ length: 8 }, (_, i) =>
+        makeGame({
+          id: i + 1,
+          date_played: `2026-04-${String(i + 1).padStart(2, "0")}`,
+          time_class: "rapid",
+          player_rating: 1100,
+        }),
+      ),
+      ...Array.from({ length: 3 }, (_, i) =>
+        makeGame({
+          id: 100 + i,
+          date_played: `2026-04-${String(i + 15).padStart(2, "0")}`,
+          time_class: "daily",
+          player_rating: 600,  // daily pool — much lower
+        }),
+      ),
+    ];
+    render(<RatingProgressionChart games={games} />);
+
+    const rapidBtn = screen.getByRole("button", { name: /^Rapid$/i });
+    expect(rapidBtn.className).toMatch(/bg-primary/);
+    // 'All' should NOT be the active default
+    const allBtn = screen.queryByRole("button", { name: /All/i });
+    if (allBtn) {
+      expect(allBtn.className).not.toMatch(/bg-primary/);
+    }
+  });
+
+  it("hides chips for time classes the player has no games in", () => {
+    // Only rapid games → only "Rapid" chip should appear (no bullet/blitz/daily)
+    const games = Array.from({ length: 5 }, (_, i) =>
+      makeGame({
+        id: i + 1,
+        date_played: `2026-04-0${i + 1}`,
+        time_class: "rapid",
+      }),
+    );
+    render(<RatingProgressionChart games={games} />);
+
+    expect(screen.getByRole("button", { name: /^Rapid$/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Bullet$/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Blitz$/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Daily$/i })).toBeNull();
+  });
+
+  it("hides the 'All' chip when the player has only one time class", () => {
+    const games = Array.from({ length: 5 }, (_, i) =>
+      makeGame({
+        id: i + 1,
+        date_played: `2026-04-0${i + 1}`,
+        time_class: "rapid",
+      }),
+    );
+    render(<RatingProgressionChart games={games} />);
+
+    // Only one time class → 'All' would be a duplicate, so it's hidden
+    expect(screen.queryByRole("button", { name: /All/i })).toBeNull();
+  });
+
+  it("shows the 'All' chip with a warning marker when multiple time classes exist", () => {
+    const games = [
+      ...Array.from({ length: 5 }, (_, i) =>
+        makeGame({
+          id: i + 1,
+          date_played: `2026-04-0${i + 1}`,
+          time_class: "rapid",
+        }),
+      ),
+      ...Array.from({ length: 3 }, (_, i) =>
+        makeGame({
+          id: 100 + i,
+          date_played: `2026-04-1${i}`,
+          time_class: "daily",
+          player_rating: 600,
+        }),
+      ),
+    ];
+    render(<RatingProgressionChart games={games} />);
+
+    // 'All' chip is present and contains the warning glyph (⚠)
+    const allBtn = screen.getByRole("button", { name: /All/i });
+    expect(allBtn).toBeInTheDocument();
+    expect(allBtn.textContent).toContain("⚠");
+    // The warning explanation is in the title attribute
+    expect(allBtn.getAttribute("title")).toMatch(/mixes rating pools/i);
+  });
+});

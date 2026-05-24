@@ -111,13 +111,21 @@ function RatingInfoModal({ onClose }: { onClose: () => void }) {
         </p>
 
         <h5 className="font-semibold text-xs text-zinc-800 dark:text-zinc-200 mb-1">
-          Why per platform?
+          Why per platform &amp; time class?
         </h5>
-        <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-3">
+        <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-2">
           chess.com (Elo) and lichess (Glicko-2) use different rating
           systems &mdash; lichess typically runs 100&ndash;300 points higher
-          for the same player strength. Each chart has its own Y-axis so the
-          numbers aren&apos;t misleadingly mixed.
+          for the same player strength. Each platform chart has its own
+          Y-axis so the numbers aren&apos;t misleadingly mixed.
+        </p>
+        <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-3">
+          Each platform also runs <strong>separate rating pools per time
+          control</strong> &mdash; rapid Elo &ne; daily Elo &ne; blitz Elo.
+          The chart defaults to your most-played time control. The &ldquo;All&rdquo;
+          chip is marked with &#x26A0; because mixing pools on one line
+          produces misleading dips when games from different controls
+          interleave on the timeline.
         </p>
 
         <p className="text-xs font-semibold text-blue-600 dark:text-blue-400">
@@ -280,7 +288,6 @@ function SinglePlatformChart({
 
 export function RatingProgressionChart({ games }: RatingProgressionChartProps) {
   const [showInfo, setShowInfo] = useState(false);
-  const [timeClass, setTimeClass] = useState<string>("all");
 
   // Detect which platforms the player has rated games on, and which has more.
   // We only count rated games (player_rating != null) because the chart can't
@@ -305,6 +312,56 @@ export function RatingProgressionChart({ games }: RatingProgressionChartProps) {
   }, [games]);
 
   const showPlatformToggle = availablePlatforms.length > 1;
+
+  // v1.7.3: chess.com / lichess run independent rating pools per time
+  // control (rapid Elo ≠ daily Elo ≠ blitz Elo). The "All" view mixes pools
+  // and produces misleading dips when a player switches time controls.
+  // Default to the most-played time class instead.
+  const { availableTimeClasses, mostPlayedTimeClass } = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const g of games) {
+      if (g.player_rating == null || !g.time_class) continue;
+      counts[g.time_class] = (counts[g.time_class] || 0) + 1;
+    }
+    // Preserve the canonical chip order from TIME_CLASSES (minus "all")
+    const available = TIME_CLASSES.filter(
+      (tc) => tc !== "all" && counts[tc] > 0,
+    );
+    let mostPlayed: string | null = null;
+    let mostPlayedCount = 0;
+    for (const [tc, n] of Object.entries(counts)) {
+      if (n > mostPlayedCount) {
+        mostPlayed = tc;
+        mostPlayedCount = n;
+      }
+    }
+    return {
+      availableTimeClasses: available,
+      mostPlayedTimeClass: mostPlayed,
+    };
+  }, [games]);
+
+  // Show the "All" chip only when the player has more than one time class
+  // (otherwise it's just a duplicate of the single class shown).
+  const showAllTimeClassChip = availableTimeClasses.length > 1;
+
+  // Default time-class selection. "All" used to be the default; v1.7.3
+  // changed it to most-played to avoid mixing rating pools on the trend
+  // line. Falls back to "all" only when we can't determine a winner
+  // (no rated games at all — the component early-returns null below).
+  const [timeClass, setTimeClass] = useState<string>(
+    mostPlayedTimeClass ?? "all",
+  );
+
+  // Reset selection if the games prop changes such that the current
+  // selection is no longer valid (e.g. user switches players).
+  useEffect(() => {
+    if (timeClass === "all") return;
+    if (!availableTimeClasses.includes(timeClass as any)) {
+      setTimeClass(mostPlayedTimeClass ?? "all");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [availableTimeClasses.join(","), mostPlayedTimeClass]);
 
   // Default platform selection: most-played when both exist, the single
   // available platform otherwise. Stable across re-renders unless the
@@ -349,9 +406,12 @@ export function RatingProgressionChart({ games }: RatingProgressionChartProps) {
 
       {showInfo && <RatingInfoModal onClose={() => setShowInfo(false)} />}
 
-      {/* Time class filter (shared across visible charts) */}
-      <div className="flex gap-1 mb-3 flex-wrap">
-        {TIME_CLASSES.map((tc) => (
+      {/* Time class filter (shared across visible charts) — v1.7.3:
+          only renders chips for time classes the player has actual rated
+          games in. "All" is conditional + marked with a warning marker
+          since mixing rating pools is misleading. */}
+      <div className="flex gap-1 mb-3 flex-wrap items-center">
+        {availableTimeClasses.map((tc) => (
           <button
             key={tc}
             onClick={() => setTimeClass(tc)}
@@ -361,9 +421,24 @@ export function RatingProgressionChart({ games }: RatingProgressionChartProps) {
                 : "bg-muted text-muted-foreground hover:bg-muted/80"
             }`}
           >
-            {tc === "all" ? "All" : tc.charAt(0).toUpperCase() + tc.slice(1)}
+            {tc.charAt(0).toUpperCase() + tc.slice(1)}
           </button>
         ))}
+        {showAllTimeClassChip && (
+          <button
+            type="button"
+            onClick={() => setTimeClass("all")}
+            title="Mixes rating pools across time controls — each pool has its own Elo. The trend line can dip when a different time control's game lands on the timeline. Pick a single time control for an accurate trend."
+            className={`px-3 py-1 rounded-full text-xs font-medium transition-colors inline-flex items-center gap-1 ${
+              timeClass === "all"
+                ? "bg-primary text-primary-foreground"
+                : "bg-muted text-muted-foreground hover:bg-muted/80"
+            }`}
+          >
+            <span>All</span>
+            <span aria-hidden="true" className="text-amber-500 text-[10px]">⚠</span>
+          </button>
+        )}
       </div>
 
       {/* Platform toggle (v1.7.2): only rendered when the player has games

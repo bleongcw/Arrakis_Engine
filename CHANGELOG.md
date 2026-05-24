@@ -4,6 +4,50 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.7.3] - 2026-05-24
+
+### Changed
+- **Rating Progression chart no longer mixes time-control rating pools
+  by default.** Bernard spotted suspicious sudden dips in the chart —
+  the rating would drop from ~1200 to ~400 for a single game and snap
+  back. Not data errors: chess.com (and lichess) run **independent Elo
+  pools per time control**. Evan plays mostly rapid (509 games, ratings
+  ~1100) but occasionally daily (52 games, ratings ~400-800), so when
+  a daily game landed on the timeline between rapid games, the
+  combined trend line plunged.
+
+  Same class of bug v1.7.2 fixed for chess.com vs lichess (different
+  rating systems on the same axis) — just one layer deeper. The fix
+  mirrors v1.7.2's pattern:
+
+  - **Default to the most-played time class**, not "All". For Evan that's
+    rapid; clean trend with no dips.
+  - **Hide chips for time classes the player has zero games in.** A
+    pure-rapid player no longer sees Bullet / Blitz / Daily chips that
+    do nothing when clicked.
+  - **The "All" chip is only shown when multiple time classes exist**,
+    and it now carries a ⚠ marker. Hovering shows: "Mixes rating pools
+    across time controls — each pool has its own Elo. The trend line
+    can dip when a different time control's game lands on the timeline.
+    Pick a single time control for an accurate trend."
+  - **Single-time-class players see no UI change** — for kids who only
+    play rapid, the chart looks identical to before.
+
+  Implementation: frontend-only, same file as v1.7.2
+  (`rating-progression-chart.tsx`). No backend, no schema, no API,
+  no migration. Zero regression for the typical single-time-class user.
+
+### Tests
+- 4 new frontend tests in
+  `frontend/components/patterns/__tests__/rating-progression-chart.test.tsx`:
+  - Default selection = most-played time class (not "All")
+  - Chips for empty time classes are hidden
+  - Single-time-class player → no "All" chip
+  - Multi-time-class player → "All" chip present with ⚠ marker + tooltip
+- Frontend total: 72 → **76 tests**. Backend unchanged at 358.
+
+---
+
 ## [1.7.2] - 2026-05-24
 
 ### Changed
