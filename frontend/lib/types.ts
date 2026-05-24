@@ -79,6 +79,18 @@ export interface CriticalMoment {
   best_move: string;
 }
 
+/** v1.6.0: meta captured at coaching time — history depth, prompt size,
+ *  model. Persists so the UI can show "Based on N recent games" stamps
+ *  on the coaching panel and so we can correlate coaching quality with
+ *  prompt context after the fact. */
+export interface CoachingMeta {
+  history_games_injected: number;
+  history_tokens_estimate: number;
+  prompt_tokens_estimate: number;
+  provider: string;
+  model: string;
+}
+
 export interface GameCoaching {
   id: number;
   game_id: number;
@@ -92,6 +104,9 @@ export interface GameCoaching {
   opening_analysis: OpeningAnalysis | null;
   opening_analysis_json: string | null;
   coach_notes: string | null;
+  /** v1.6.0+: coaching meta. Older briefs (pre-v1.6.0) have this null. */
+  meta?: CoachingMeta | null;
+  coaching_meta_json?: string | null;
 }
 
 export interface GameDetail {

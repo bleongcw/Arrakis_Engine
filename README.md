@@ -370,8 +370,8 @@ analysis:
 
 coaching:
   default_provider: claude            # claude | openai | gemini | grok | mistral | deepseek | qwen | ollama
-  anthropic_model: claude-opus-4-6
-  openai_model: gpt-5.4
+  anthropic_model: claude-opus-4-7
+  openai_model: gpt-5.5-pro-2026-04-23
   gemini_model: gemini-2.5-pro        # optional — requires ARRAKIS_GOOGLE_API_KEY
   grok_model: grok-3                  # optional — requires ARRAKIS_XAI_API_KEY
   mistral_model: mistral-medium-latest # optional — requires ARRAKIS_MISTRAL_API_KEY
@@ -465,7 +465,7 @@ python main.py coach --provider openai --limit 5
 
 > **LLM Cost Warning:** Each coaching call sends a detailed prompt (~3,000–7,000 tokens) and receives a structured response (~2,000–4,000 tokens). At current API pricing, coaching a single game costs approximately **$0.03–0.10 with Claude** and **$0.02–0.08 with GPT-5.4**. For a backlog of 400+ games, this can add up to **$15–40 or more**. Start with `--limit 5` to verify quality and estimate your costs before running large batches. **Ollama is free** — it runs locally with no API costs.
 
-> **Rate limits:** Cloud providers have tokens-per-minute caps (e.g., OpenAI's `gpt-5.4` at ~10,000 TPM on free tiers). Use `--limit 5` per batch to avoid 429 errors. Claude typically has higher throughput — `--limit 10-20` is safe. Ollama has no rate limits but is slower (~30–90s per game depending on model size).
+> **Rate limits:** Cloud providers have tokens-per-minute caps (e.g., OpenAI's `gpt-5.5-pro-2026-04-23` at ~10,000 TPM on free tiers). Use `--limit 5` per batch to avoid 429 errors. Claude typically has higher throughput — `--limit 10-20` is safe. Ollama has no rate limits but is slower (~30–90s per game depending on model size).
 
 > **Dashboard coaching:** You can also coach individual games directly from the dashboard — select any provider from the dropdown on a game's detail page and click **Coach Game**. The pipeline panel also supports all 8 providers with Cloud/Local grouping. Results auto-refresh when complete.
 
@@ -611,8 +611,8 @@ Chess coaching demands multi-step reasoning at every level:
 
 | Provider | Model | API Identifier | Notes |
 |---|---|---|---|
-| Anthropic | Claude Opus 4.6 | `claude-opus-4-6` | Extended thinking, excellent coaching tone |
-| OpenAI | GPT-5.4 | `gpt-5.4` | Strong reasoning via Responses API |
+| Anthropic | Claude Opus 4.7 | `claude-opus-4-7` | Extended thinking, excellent coaching tone |
+| OpenAI | GPT-5.5 Pro | `gpt-5.5-pro-2026-04-23` | Strong reasoning via Responses API |
 | Google | Gemini 2.5 Pro | `gemini-2.5-pro` | Long context, strong reasoning |
 | xAI | Grok 3 | `grok-3` | OpenAI-compatible API |
 | Mistral | Mistral Medium | `mistral-medium-latest` | European alternative |

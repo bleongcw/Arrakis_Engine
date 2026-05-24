@@ -374,15 +374,36 @@ def _parse_llm_response(text: str) -> dict:
     return json.loads(text)
 
 
+def _estimate_tokens(text: str) -> int:
+    """Rough token estimate using the standard ~4 chars/token heuristic.
+
+    Accurate enough for context-window safety decisions and diagnostic
+    logging; not a substitute for a real tokenizer when precision matters."""
+    return max(1, len(text) // 4)
+
+
+def _count_history_games(history_text: str) -> int:
+    """Count how many games appear in the injected coaching-history block.
+    The block uses `### Game N` headings; this counts those."""
+    if not history_text:
+        return 0
+    return history_text.count("### Game ")
+
+
 def coach_game(game_id: int, provider: str | None = "claude",
                model: str | None = None, db_path: str | None = None,
-               config: dict | None = None) -> dict:
+               config: dict | None = None,
+               dump_prompt_to: "str | None" = None) -> dict:
     """Generate coaching insights for a single analyzed game.
 
     Args:
         config: Full config dict (from config.yaml). If provided, coaching
                 settings (tone, detail_level, focus_areas, custom_instructions)
                 are read from config["coaching"].
+        dump_prompt_to: If set (v1.6.0+), the full assembled prompt is written
+                to this path with a `_game{id}.txt` suffix. Useful for
+                verifying that coaching history is actually being injected
+                and for inspecting the full LLM input.
 
     Returns the parsed coaching data dict.
     """
@@ -539,7 +560,47 @@ def coach_game(game_id: int, provider: str | None = "claude",
         provider = coaching_config.get("default_provider", "claude")
 
     used_model = resolve_model(provider, model, coaching_config)
-    logger.info("Coaching game %d with %s:%s...", game_id, provider, used_model)
+
+    # v1.6.0 Phase 2 diagnostics: visibility into history injection + prompt size
+    history_games_injected = _count_history_games(previous_coaching_guidance)
+    prompt_tokens_est = _estimate_tokens(prompt)
+    history_tokens_est = _estimate_tokens(previous_coaching_guidance)
+    logger.info(
+        "Coaching game %d with %s:%s — history=%d games (~%d tokens), "
+        "full prompt ~%d tokens",
+        game_id, provider, used_model,
+        history_games_injected, history_tokens_est, prompt_tokens_est,
+    )
+
+    # Optional prompt dump — writes the full prompt to a file for inspection.
+    # Useful for "did history actually get in?" verification.
+    if dump_prompt_to:
+        try:
+            from pathlib import Path
+            dump_path = Path(dump_prompt_to)
+            # Treat as a directory if:
+            #   - the path already exists and is a directory
+            #   - the path ends with a separator
+            #   - the path has no file suffix (e.g. "/tmp/prompts")
+            # Otherwise treat as a file path; append `_game_{id}` to avoid
+            # clobbering across games.
+            looks_like_dir = (
+                (dump_path.exists() and dump_path.is_dir())
+                or str(dump_prompt_to).endswith(("/", "\\"))
+                or not dump_path.suffix
+            )
+            if looks_like_dir:
+                dump_path.mkdir(parents=True, exist_ok=True)
+                out_file = dump_path / f"prompt_game_{game_id}.txt"
+            else:
+                dump_path.parent.mkdir(parents=True, exist_ok=True)
+                out_file = dump_path.with_name(
+                    f"{dump_path.stem}_game_{game_id}{dump_path.suffix}"
+                )
+            out_file.write_text(prompt, encoding="utf-8")
+            logger.info("Prompt dumped to %s (%d bytes)", out_file, len(prompt))
+        except Exception as e:
+            logger.warning("Failed to dump prompt for game %d: %s", game_id, e)
 
     raw = call_provider(provider, prompt, model=used_model,
                         coaching_config=coaching_config)
@@ -562,16 +623,31 @@ def coach_game(game_id: int, provider: str | None = "claude",
     critical_json = json.dumps(coaching.get("critical_moments", []))
     opening_json = json.dumps(coaching.get("opening_analysis", {}))
 
+    # v1.6.0: persist coaching meta (history depth, prompt size, model). Lets
+    # the UI show "based on N recent games" stamps and lets us correlate
+    # coaching quality with prompt context after the fact.
+    meta = {
+        "history_games_injected": history_games_injected,
+        "history_tokens_estimate": history_tokens_est,
+        "prompt_tokens_estimate": prompt_tokens_est,
+        "provider": provider,
+        "model": used_model,
+    }
+    meta_json = json.dumps(meta)
+    coaching["meta"] = meta  # also surface to the immediate caller's response
+
     provider_model = f"{provider}:{used_model}"
     conn.execute(
         """INSERT OR REPLACE INTO game_coaching
         (game_id, provider, narrative, key_lesson, practical_focus,
-         critical_moments_json, opening_analysis_json, player_feedback, coach_notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+         critical_moments_json, opening_analysis_json, player_feedback,
+         coach_notes, coaching_meta_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (game_id, provider_model, coaching.get("narrative"),
          coaching.get("key_lesson"), coaching.get("practical_focus"),
          critical_json, opening_json,
-         coaching.get("player_feedback"), coaching.get("coach_notes")),
+         coaching.get("player_feedback"), coaching.get("coach_notes"),
+         meta_json),
     )
     conn.execute(
         "UPDATE games SET coaching_status = 'complete' WHERE id = ?",
@@ -601,7 +677,8 @@ def coach_pending(provider: str = "claude", model: str | None = None,
                   config: dict | None = None,
                   cancel_event: "threading.Event | None" = None,
                   progress_callback: "callable | None" = None,
-                  player: str | None = None) -> dict:
+                  player: str | None = None,
+                  dump_prompt_to: "str | None" = None) -> dict:
     """Generate coaching for analyzed but uncoached games with robust error handling.
 
     Args:
@@ -611,6 +688,8 @@ def coach_pending(provider: str = "claude", model: str | None = None,
         progress_callback: Optional callback(coached, errors, total, message)
                           for real-time progress updates.
         player: Optional username — if provided, only coach this player's games.
+        dump_prompt_to: Optional path (v1.6.0+) — if set, full prompts are
+                          written to this path (one file per game).
 
     Returns dict with {coached, errors, skipped, aborted, abort_reason}.
     """
@@ -698,7 +777,8 @@ def coach_pending(provider: str = "claude", model: str | None = None,
         for attempt in range(1, max_retries_per_game + 1):
             try:
                 coach_game(game_id, provider=provider, model=model,
-                           db_path=db_path, config=config)
+                           db_path=db_path, config=config,
+                           dump_prompt_to=dump_prompt_to)
                 success = True
                 consecutive_failures = 0  # Reset on success
                 # Gradually recover delay back to base after successful calls

@@ -4,6 +4,66 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.7.0] - 2026-05-18
+
+### Changed
+- **Model defaults bumped** for the two flagship cloud providers:
+  - Anthropic: `claude-opus-4-6` → `claude-opus-4-7`
+  - OpenAI: `gpt-5.4` → `gpt-5.5-pro-2026-04-23`
+
+  The same change is reflected in `src/llm_providers.py` (the authoritative
+  source), the Settings UI defaults + placeholders, README + ROADMAP +
+  CLAUDE.md docs, and the relevant test mocks. Users with the old strings
+  in their `config.yaml` continue to work — only the defaults move.
+
+### Added — Phase 2 coaching diagnostics
+
+Concerns surfaced during real use that the configured coaching history
+depth (default 5, range 1-20) might not actually be reaching the LLM at
+the user-set value. Audit confirmed the data flow is correct end-to-end,
+but there was no visible signal to verify it from the outside. v1.7.0
+adds three layers of visibility, no behaviour change:
+
+- **Diagnostic log line** before every LLM coaching call. Format:
+  ```
+  Coaching game 1234 with claude:claude-opus-4-7 — history=10 games
+  (~5,000 tokens), full prompt ~18,200 tokens
+  ```
+  Visible in the backend console / dashboard log.
+
+- **`--dump-prompt PATH` flag** on `python main.py coach` and
+  `python main.py run-all`. When set, the full assembled prompt is
+  written to disk (one file per game) so you can verify with your own
+  eyes that the history block is present and the LLM is getting what
+  you configured. PATH can be a directory (files named
+  `prompt_game_<id>.txt`) or a file path (suffixed `_game_<id>`).
+
+- **"📚 N recent games in context" stamp** on the coaching panel in
+  the dashboard. Shows the count of games the LLM had in its context
+  window when generating that brief. Hover for explanation. Older
+  briefs (pre-v1.7.0) show no stamp.
+
+### Schema
+- **New `coaching_meta_json` column** on the `game_coaching` table.
+  Stores history depth, prompt token estimate, provider, and model
+  used at coach time. Idempotent migration via `init_db()`.
+
+### Tests
+- 6 new tests in `tests/test_coach.py::TestCoachingDiagnostics` covering
+  the token estimator, history counter, meta persistence, prompt dump,
+  and response shape.
+- Backend test count: 348 → 354.
+
+### Why diagnostics, not "fix"
+The audit confirmed history injection is working correctly. The user
+concern was a *visibility* gap (the LLM is prompted to NOT repeat
+history, so there's no observable cue that history was used). Phase 2
+ships visibility. Phase 3 (context-window safety / auto-truncation if
+the prompt overflows on smaller models like Ollama 8B) is deferred
+until Phase 2 logging surfaces actual overflow cases on real games.
+
+---
+
 ## [1.6.0] - 2026-05-18
 
 A developer-quality release: no new user-facing features, but the frontend

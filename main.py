@@ -142,7 +142,13 @@ def cmd_coach(args, config):
         print(f"Coaching history depth: {n} (overridden via --history)")
 
     limit = getattr(args, 'limit', 0) or 0
-    result = coach_pending(provider=provider, model=model, db_path=db_path, limit=limit, config=config)
+    dump_prompt_to = getattr(args, "dump_prompt", None)
+    if dump_prompt_to:
+        print(f"Prompt dump enabled: writing to {dump_prompt_to}")
+    result = coach_pending(
+        provider=provider, model=model, db_path=db_path,
+        limit=limit, config=config, dump_prompt_to=dump_prompt_to,
+    )
     print(f"Coached {result['coached']} games with {provider} ({model}). "
           f"Errors: {result['errors']}, Skipped: {result['skipped']}"
           + (f" — Aborted: {result['abort_reason']}" if result.get('aborted') else ""))
@@ -471,6 +477,12 @@ def main():
         help="Coaching history depth: number of recent coached games to inject "
              "into the LLM prompt (default: from config, range 1-20)",
     )
+    coach_parser.add_argument(
+        "--dump-prompt", metavar="PATH",
+        help="(v1.6.0+) Write the full assembled prompt for each coached game "
+             "to PATH. If PATH is a directory, files are written as "
+             "prompt_game_<id>.txt. Use to verify history injection.",
+    )
 
     # patterns
     patterns_parser = subparsers.add_parser("patterns", help="Update pattern tracking")
@@ -517,6 +529,11 @@ def main():
     run_all_parser.add_argument(
         "--history", type=int,
         help="Coaching history depth (default: from config, range 1-20)",
+    )
+    run_all_parser.add_argument(
+        "--dump-prompt", metavar="PATH",
+        help="(v1.6.0+) Write the full assembled coaching prompt for each "
+             "game to PATH. See `coach --dump-prompt` for details.",
     )
 
     args = parser.parse_args()

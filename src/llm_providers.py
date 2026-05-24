@@ -27,7 +27,7 @@ PROVIDER_REGISTRY = {
     "claude": {
         "display_name": "Claude",
         "sdk_type": "anthropic",
-        "default_model": "claude-opus-4-6",
+        "default_model": "claude-opus-4-7",
         "env_var": "ARRAKIS_ANTHROPIC_API_KEY",
         "base_url": None,
         "default_timeout": 300.0,  # Opus with extended thinking needs more time
@@ -38,7 +38,7 @@ PROVIDER_REGISTRY = {
     "openai": {
         "display_name": "ChatGPT",
         "sdk_type": "openai_responses",
-        "default_model": "gpt-5.4",
+        "default_model": "gpt-5.5-pro-2026-04-23",
         "env_var": "ARRAKIS_OPENAI_API_KEY",
         "base_url": None,
         "default_timeout": 120.0,

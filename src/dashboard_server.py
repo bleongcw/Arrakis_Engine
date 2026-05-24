@@ -1137,6 +1137,15 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                     )
                 except (json.JSONDecodeError, TypeError):
                     coaching_data["opening_analysis"] = {}
+            # v1.6.0: surface coaching meta (history depth, prompt size,
+            # model) so the UI can show a "based on N recent games" stamp
+            if coaching_data and coaching_data.get("coaching_meta_json"):
+                try:
+                    coaching_data["meta"] = json.loads(
+                        coaching_data["coaching_meta_json"]
+                    )
+                except (json.JSONDecodeError, TypeError):
+                    coaching_data["meta"] = None
 
             game_data = dict_from_row(game)
             tier = get_tier(game["player_rating"])

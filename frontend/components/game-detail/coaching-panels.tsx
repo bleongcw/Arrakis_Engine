@@ -46,12 +46,20 @@ export function CoachingPanels({ coaching }: CoachingPanelsProps) {
   const badgeColor = prov === "claude" ? "#7c3aed" : "#059669";
   const badgeIcon = prov === "claude" ? "\uD83D\uDFE3" : "\uD83D\uDFE2";
 
+  // v1.6.0: coaching meta \u2014 shows how many recent games the LLM had in
+  // its context window when generating this brief. Helps the user verify
+  // history-injection is actually working as configured.
+  const historyCount = coaching.meta?.history_games_injected;
+  const historyStamp = typeof historyCount === "number" && historyCount > 0
+    ? `${historyCount} recent game${historyCount === 1 ? "" : "s"} in context`
+    : null;
+
   return (
     <div className="space-y-4">
       {/* Game Story */}
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-sm flex items-center gap-2">
+          <CardTitle className="text-sm flex items-center gap-2 flex-wrap">
             Game Story
             {model && (
               <span
@@ -59,6 +67,14 @@ export function CoachingPanels({ coaching }: CoachingPanelsProps) {
                 style={{ backgroundColor: badgeColor }}
               >
                 {badgeIcon} {model}
+              </span>
+            )}
+            {historyStamp && (
+              <span
+                className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-normal"
+                title={`The coach had access to the lessons from ${historyCount} previous coached games when writing this brief, so the advice should build on (not repeat) earlier coaching.`}
+              >
+                \uD83D\uDCDA {historyStamp}
               </span>
             )}
           </CardTitle>

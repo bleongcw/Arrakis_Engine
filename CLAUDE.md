@@ -24,7 +24,7 @@ Current release: **v1.6.0** (2026-05-18). See `CHANGELOG.md` for history.
 ## Key Configuration
 - Stockfish: depth 22, 6 threads, 512MB hash, path configured in `config.yaml`
 - LLM: unified provider abstraction (`src/llm_providers.py`) supporting 8 providers:
-  - **Cloud:** Claude (`claude-opus-4-6`), ChatGPT (`gpt-5.4`), Gemini (`gemini-2.5-pro`),
+  - **Cloud:** Claude (`claude-opus-4-7`), ChatGPT (`gpt-5.5-pro-2026-04-23`), Gemini (`gemini-2.5-pro`),
     Grok (`grok-3`), Mistral (`mistral-medium-latest`), DeepSeek (`deepseek-reasoner`),
     Qwen (`qwen3-235b-a22b`)
   - **Local:** Ollama (`deepseek-r1:8b`) — no API key required

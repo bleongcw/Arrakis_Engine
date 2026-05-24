@@ -81,7 +81,7 @@ class TestRunFullPipeline:
 
         mock_harvest.return_value = {"new": 3, "errors": 0}
         mock_analyze.return_value = 3
-        mock_resolve.return_value = "claude-opus-4-6"
+        mock_resolve.return_value = "claude-opus-4-7"
         mock_coach.return_value = {"coached": 2, "errors": 0, "skipped": 1}
 
         config = _make_config()
@@ -119,7 +119,7 @@ class TestRunFullPipeline:
 
         mock_harvest.return_value = {"new": 0, "errors": 0}
         mock_analyze.return_value = 0
-        mock_resolve.return_value = "claude-opus-4-6"
+        mock_resolve.return_value = "claude-opus-4-7"
         mock_coach.return_value = {"coached": 0, "errors": 0, "skipped": 0}
 
         run_full_pipeline(_make_config(), "test.db", player_filter="evan")
@@ -147,7 +147,7 @@ class TestRunFullPipeline:
 
         mock_harvest.return_value = {"new": 0, "errors": 0}
         mock_analyze.return_value = 0
-        mock_resolve.return_value = "claude-opus-4-6"
+        mock_resolve.return_value = "claude-opus-4-7"
         mock_coach.return_value = {"coached": 0, "errors": 0, "skipped": 0}
 
         cancel = threading.Event()
@@ -175,7 +175,7 @@ class TestRunFullPipeline:
 
         mock_harvest.return_value = {"new": 0, "errors": 0}
         mock_analyze.return_value = 0
-        mock_resolve.return_value = "gpt-5.4"
+        mock_resolve.return_value = "gpt-5.5-pro-2026-04-23"
         mock_coach.return_value = {"coached": 0, "errors": 0, "skipped": 0}
 
         run_full_pipeline(_make_config(), "test.db", provider="openai")
@@ -202,7 +202,7 @@ class TestRunFullPipeline:
 
         mock_harvest.return_value = {"new": 0, "errors": 0}
         mock_analyze.return_value = 0
-        mock_resolve.return_value = "claude-opus-4-6"
+        mock_resolve.return_value = "claude-opus-4-7"
         mock_coach.return_value = {"coached": 0, "errors": 0, "skipped": 0}
 
         run_full_pipeline(_make_config(), "test.db")

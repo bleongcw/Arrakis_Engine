@@ -168,6 +168,91 @@ class TestCoachGame:
         conn.close()
 
 
+class TestCoachingDiagnostics:
+    """v1.6.0: Phase 2 diagnostics — log line + --dump-prompt + meta storage."""
+
+    def test_estimate_tokens_roughly_chars_over_four(self):
+        from src.coach import _estimate_tokens
+        assert _estimate_tokens("") == 1
+        assert _estimate_tokens("a" * 4) == 1
+        assert _estimate_tokens("a" * 400) == 100
+        # Token estimate is intentionally rough — within an order of
+        # magnitude is all we need for context-window safety + logging
+        assert _estimate_tokens("Hello world") > 0
+
+    def test_count_history_games_handles_empty(self):
+        from src.coach import _count_history_games
+        assert _count_history_games("") == 0
+        assert _count_history_games(None or "") == 0
+
+    def test_count_history_games_counts_headings(self):
+        from src.coach import _count_history_games
+        sample = """
+## Coaching History
+### Game 1 (2026-04-01, white, loss)
+- Key lesson: foo
+### Game 2 (2026-04-02, black, win)
+- Key lesson: bar
+### Game 3 (2026-04-03, white, draw)
+- Key lesson: baz
+"""
+        assert _count_history_games(sample) == 3
+
+    @patch("src.coach.call_provider")
+    def test_coaching_meta_persisted_to_db(self, mock_claude, db_path, game_with_analysis):
+        """The coaching_meta_json column should be populated with history
+        count, prompt tokens, provider, and model."""
+        mock_claude.return_value = json.dumps({
+            "narrative": "...", "key_lesson": "...", "practical_focus": "...",
+            "critical_moments": [], "coach_notes": "...",
+        })
+        coach_game(game_with_analysis, provider="claude", db_path=db_path)
+
+        conn = init_db(db_path)
+        row = conn.execute(
+            "SELECT coaching_meta_json FROM game_coaching WHERE game_id = ?",
+            (game_with_analysis,),
+        ).fetchone()
+        conn.close()
+        assert row["coaching_meta_json"], "meta should be populated"
+        meta = json.loads(row["coaching_meta_json"])
+        assert "history_games_injected" in meta
+        assert "prompt_tokens_estimate" in meta
+        assert meta["provider"] == "claude"
+        assert meta["model"].startswith("claude-")  # whatever the current default is
+
+    @patch("src.coach.call_provider")
+    def test_dump_prompt_writes_file(self, mock_claude, tmp_path, db_path, game_with_analysis):
+        """dump_prompt_to=<dir> writes one file per game with the full prompt."""
+        mock_claude.return_value = json.dumps({
+            "narrative": "...", "key_lesson": "...", "practical_focus": "...",
+            "critical_moments": [], "coach_notes": "...",
+        })
+        dump_dir = tmp_path / "prompts"
+        coach_game(
+            game_with_analysis, provider="claude",
+            db_path=db_path, dump_prompt_to=str(dump_dir),
+        )
+        # File should exist with the expected name pattern
+        expected = dump_dir / f"prompt_game_{game_with_analysis}.txt"
+        assert expected.exists(), f"expected prompt dump at {expected}"
+        content = expected.read_text()
+        # Prompt should at minimum contain the player name section and
+        # the JSON-output instruction
+        assert len(content) > 500  # non-trivial prompt size
+
+    @patch("src.coach.call_provider")
+    def test_coaching_response_includes_meta(self, mock_claude, db_path, game_with_analysis):
+        """The returned coaching dict (used by API) should include meta."""
+        mock_claude.return_value = json.dumps({
+            "narrative": "...", "key_lesson": "...", "practical_focus": "...",
+            "critical_moments": [], "coach_notes": "...",
+        })
+        result = coach_game(game_with_analysis, provider="claude", db_path=db_path)
+        assert "meta" in result
+        assert "history_games_injected" in result["meta"]
+
+
 class TestBuildAnalysisTextTruncation:
     """Test smart truncation for long games."""
 

@@ -103,11 +103,11 @@ class TestResolveModel:
 
     def test_default_model_used_when_no_config(self):
         result = resolve_model("claude", None, None)
-        assert result == "claude-opus-4-6"
+        assert result == "claude-opus-4-7"
 
     def test_default_model_used_when_config_key_missing(self):
-        result = resolve_model("claude", None, {"openai_model": "gpt-5.4"})
-        assert result == "claude-opus-4-6"
+        result = resolve_model("claude", None, {"openai_model": "gpt-5.5-pro-2026-04-23"})
+        assert result == "claude-opus-4-7"
 
     def test_unknown_provider_raises(self):
         with pytest.raises(ValueError, match="Unknown provider"):

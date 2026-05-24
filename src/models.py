@@ -134,6 +134,11 @@ def _migrate(conn: sqlite3.Connection):
     if "player_feedback" not in cols:
         conn.execute("ALTER TABLE game_coaching ADD COLUMN player_feedback TEXT")
         conn.commit()
+    # v1.6.0: coaching meta — history_games_injected, prompt_tokens_estimate,
+    # provider, model — stored as JSON for forward-compatibility.
+    if "coaching_meta_json" not in cols:
+        conn.execute("ALTER TABLE game_coaching ADD COLUMN coaching_meta_json TEXT")
+        conn.commit()
 
     game_cols = {r[1] for r in conn.execute("PRAGMA table_info(games)").fetchall()}
     if "opponent_username" not in game_cols:
