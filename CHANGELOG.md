@@ -4,6 +4,49 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.7.2] - 2026-05-24
+
+### Changed
+- **Rating Progression chart now splits chess.com and lichess.** The
+  previous single-line chart aggregated both platforms into one trend,
+  which was incoherent because chess.com (Elo) and lichess (Glicko-2)
+  use different rating systems — lichess typically runs 100–300 points
+  higher for the same player strength. The two also have very uneven
+  game counts for many users (Bernard's data: 940 chess.com vs 14
+  lichess), making the minor platform invisible and creating spurious
+  "rating spikes" when the rare points crossed.
+
+  New behaviour on the Patterns page Rating Progression card:
+
+  - **Players with only one platform** see no change — the chart looks
+    identical to before. Zero regression.
+  - **Players with both platforms** see a new toggle:
+    `[Both | chess.com | lichess]`. Defaults to the most-played
+    platform (single chart). Switching to `Both` shows two charts
+    stacked vertically, each with its own Y-axis range. Switching to
+    a single platform shows just that one full-width.
+  - The existing time-class filter (`all / rapid / blitz / bullet /
+    daily`) applies to all visible charts simultaneously.
+
+  Implementation is entirely frontend — the chart was already computed
+  client-side from the `games` prop (which already includes the
+  `platform` field per game). No backend changes, no schema migration,
+  no API changes.
+
+### Tests
+- 6 new frontend tests in
+  `frontend/components/patterns/__tests__/rating-progression-chart.test.tsx`:
+  - Single-platform players (chess.com only / lichess only) — no
+    platform toggle rendered
+  - Both platforms present — toggle visible with three options
+  - Default selection = most-played platform (single chart)
+  - Clicking `Both` renders two stacked charts
+  - No rated games at all → component returns `null` (preserved legacy
+    behaviour)
+- Frontend total: 66 → **72 tests**. Backend unchanged at 358.
+
+---
+
 ## [1.7.1] - 2026-05-24
 
 ### Fixed

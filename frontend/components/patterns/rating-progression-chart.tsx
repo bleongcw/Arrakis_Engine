@@ -25,6 +25,14 @@ const RESULT_COLORS: Record<string, string> = {
   draw: "#f59e0b",
 };
 
+// v1.7.2: per-platform display.
+type Platform = "chess.com" | "lichess";
+type PlatformView = Platform | "both";
+const PLATFORM_LABELS: Record<Platform, string> = {
+  "chess.com": "chess.com",
+  lichess: "lichess",
+};
+
 interface ChartDataPoint {
   date: string;
   rating: number;
@@ -59,7 +67,7 @@ function RatingInfoModal({ onClose }: { onClose: () => void }) {
     >
       <div className="absolute inset-0 bg-black/30" />
       <div
-        className="relative bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl shadow-2xl w-[340px] p-5 text-sm"
+        className="relative bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl shadow-2xl w-[360px] p-5 text-sm"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex justify-between items-start mb-3">
@@ -102,6 +110,16 @@ function RatingInfoModal({ onClose }: { onClose: () => void }) {
           short-term swings and reveal the overall trend.
         </p>
 
+        <h5 className="font-semibold text-xs text-zinc-800 dark:text-zinc-200 mb-1">
+          Why per platform?
+        </h5>
+        <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-3">
+          chess.com (Elo) and lichess (Glicko-2) use different rating
+          systems &mdash; lichess typically runs 100&ndash;300 points higher
+          for the same player strength. Each chart has its own Y-axis so the
+          numbers aren&apos;t misleadingly mixed.
+        </p>
+
         <p className="text-xs font-semibold text-blue-600 dark:text-blue-400">
           &uarr; Higher is better &mdash; an upward trend means improving!
         </p>
@@ -119,10 +137,23 @@ function ResultDot(props: any) {
   return <circle cx={cx} cy={cy} r={4} fill={fill} stroke="#fff" strokeWidth={1.5} />;
 }
 
-export function RatingProgressionChart({ games }: RatingProgressionChartProps) {
-  const [showInfo, setShowInfo] = useState(false);
-  const [timeClass, setTimeClass] = useState<string>("all");
+// ── Single-platform chart ───────────────────────────────────────────────
+// Extracted from the original RatingProgressionChart so the outer component
+// can render it once (single platform) or twice (stacked "Both" view).
 
+interface SinglePlatformChartProps {
+  games: GameListItem[];   // already filtered to one platform
+  timeClass: string;
+  platformLabel: string;   // shown in subheading when present
+  showSubheading: boolean; // true in stacked "Both" mode, false otherwise
+}
+
+function SinglePlatformChart({
+  games,
+  timeClass,
+  platformLabel,
+  showSubheading,
+}: SinglePlatformChartProps) {
   const chartData = useMemo(() => {
     let filtered = games.filter(
       (g) => g.player_rating != null && g.date_played
@@ -130,7 +161,6 @@ export function RatingProgressionChart({ games }: RatingProgressionChartProps) {
     if (timeClass !== "all") {
       filtered = filtered.filter((g) => g.time_class === timeClass);
     }
-    // Sort ascending by date
     filtered.sort((a, b) =>
       (a.date_played || "").localeCompare(b.date_played || "")
     );
@@ -147,7 +177,6 @@ export function RatingProgressionChart({ games }: RatingProgressionChartProps) {
     return computeMovingAverage(points, 10);
   }, [games, timeClass]);
 
-  // Compute Y-axis domain with padding
   const [yMin, yMax] = useMemo(() => {
     if (chartData.length === 0) return [0, 1600];
     const ratings = chartData.map((d) => d.rating);
@@ -157,47 +186,17 @@ export function RatingProgressionChart({ games }: RatingProgressionChartProps) {
     return [Math.floor((min - pad) / 10) * 10, Math.ceil((max + pad) / 10) * 10];
   }, [chartData]);
 
-  if (games.filter((g) => g.player_rating != null).length === 0) {
-    return null;
-  }
-
   return (
     <div>
-      <div className="flex items-center gap-2 mb-3">
-        <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-          Rating Progression
-        </h3>
-        <button
-          onClick={() => setShowInfo(true)}
-          className="text-sm text-muted-foreground hover:text-foreground cursor-help select-none transition-colors"
-          title="What is this chart?"
-        >
-          &#9432;
-        </button>
-      </div>
-
-      {showInfo && <RatingInfoModal onClose={() => setShowInfo(false)} />}
-
-      {/* Time class filter */}
-      <div className="flex gap-1 mb-3 flex-wrap">
-        {TIME_CLASSES.map((tc) => (
-          <button
-            key={tc}
-            onClick={() => setTimeClass(tc)}
-            className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
-              timeClass === tc
-                ? "bg-primary text-primary-foreground"
-                : "bg-muted text-muted-foreground hover:bg-muted/80"
-            }`}
-          >
-            {tc === "all" ? "All" : tc.charAt(0).toUpperCase() + tc.slice(1)}
-          </button>
-        ))}
-      </div>
-
+      {showSubheading && (
+        <div className="text-xs font-semibold text-muted-foreground mb-1 ml-1">
+          {platformLabel}
+        </div>
+      )}
       {chartData.length === 0 ? (
         <p className="text-sm text-muted-foreground text-center py-8">
-          No rated games for this time control.
+          No rated games for {platformLabel}
+          {timeClass !== "all" ? ` (${timeClass})` : ""}.
         </p>
       ) : (
         <ResponsiveContainer width="100%" height={250}>
@@ -253,7 +252,6 @@ export function RatingProgressionChart({ games }: RatingProgressionChartProps) {
                 );
               }}
             />
-            {/* Rating line */}
             <Line
               type="monotone"
               dataKey="rating"
@@ -262,7 +260,6 @@ export function RatingProgressionChart({ games }: RatingProgressionChartProps) {
               dot={<ResultDot />}
               activeDot={{ r: 6 }}
             />
-            {/* Moving average trend line */}
             <Line
               type="monotone"
               dataKey="movingAvg"
@@ -274,6 +271,151 @@ export function RatingProgressionChart({ games }: RatingProgressionChartProps) {
             />
           </LineChart>
         </ResponsiveContainer>
+      )}
+    </div>
+  );
+}
+
+// ── Outer chart with platform toggle ────────────────────────────────────
+
+export function RatingProgressionChart({ games }: RatingProgressionChartProps) {
+  const [showInfo, setShowInfo] = useState(false);
+  const [timeClass, setTimeClass] = useState<string>("all");
+
+  // Detect which platforms the player has rated games on, and which has more.
+  // We only count rated games (player_rating != null) because the chart can't
+  // plot un-rated ones anyway.
+  const { availablePlatforms, mostPlayedPlatform } = useMemo(() => {
+    const counts: Record<Platform, number> = { "chess.com": 0, lichess: 0 };
+    for (const g of games) {
+      if (g.player_rating == null) continue;
+      if (g.platform === "chess.com" || g.platform === "lichess") {
+        counts[g.platform] += 1;
+      }
+    }
+    const available: Platform[] = (["chess.com", "lichess"] as Platform[])
+      .filter((p) => counts[p] > 0);
+    const mostPlayed: Platform | null =
+      available.length === 0
+        ? null
+        : counts["chess.com"] >= counts.lichess
+          ? "chess.com"
+          : "lichess";
+    return { availablePlatforms: available, mostPlayedPlatform: mostPlayed };
+  }, [games]);
+
+  const showPlatformToggle = availablePlatforms.length > 1;
+
+  // Default platform selection: most-played when both exist, the single
+  // available platform otherwise. Stable across re-renders unless the
+  // available-platforms set changes.
+  const [platformView, setPlatformView] = useState<PlatformView>(
+    mostPlayedPlatform ?? "chess.com"
+  );
+  useEffect(() => {
+    // If the active selection is no longer valid (e.g. games prop changed
+    // to a player who has no lichess games), reset to a sensible default.
+    if (platformView === "both" && !showPlatformToggle) {
+      setPlatformView(mostPlayedPlatform ?? "chess.com");
+    } else if (
+      platformView !== "both" &&
+      !availablePlatforms.includes(platformView as Platform)
+    ) {
+      setPlatformView(mostPlayedPlatform ?? "chess.com");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [availablePlatforms.join(","), mostPlayedPlatform, showPlatformToggle]);
+
+  // Bail out if no rated games at all (matches legacy behaviour).
+  if (availablePlatforms.length === 0) return null;
+
+  const chessGames = games.filter((g) => g.platform === "chess.com");
+  const lichessGames = games.filter((g) => g.platform === "lichess");
+
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-3">
+        <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+          Rating Progression
+        </h3>
+        <button
+          onClick={() => setShowInfo(true)}
+          className="text-sm text-muted-foreground hover:text-foreground cursor-help select-none transition-colors"
+          title="What is this chart?"
+        >
+          &#9432;
+        </button>
+      </div>
+
+      {showInfo && <RatingInfoModal onClose={() => setShowInfo(false)} />}
+
+      {/* Time class filter (shared across visible charts) */}
+      <div className="flex gap-1 mb-3 flex-wrap">
+        {TIME_CLASSES.map((tc) => (
+          <button
+            key={tc}
+            onClick={() => setTimeClass(tc)}
+            className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+              timeClass === tc
+                ? "bg-primary text-primary-foreground"
+                : "bg-muted text-muted-foreground hover:bg-muted/80"
+            }`}
+          >
+            {tc === "all" ? "All" : tc.charAt(0).toUpperCase() + tc.slice(1)}
+          </button>
+        ))}
+      </div>
+
+      {/* Platform toggle (v1.7.2): only rendered when the player has games
+          on BOTH platforms. Players with only one platform see no extra
+          UI — layout matches the pre-v1.7.2 single chart. */}
+      {showPlatformToggle && (
+        <div className="flex gap-1 mb-3 flex-wrap">
+          {(["both", ...availablePlatforms] as PlatformView[]).map((pv) => (
+            <button
+              key={pv}
+              onClick={() => setPlatformView(pv)}
+              className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                platformView === pv
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-muted text-muted-foreground hover:bg-muted/80"
+              }`}
+            >
+              {pv === "both" ? "Both" : PLATFORM_LABELS[pv as Platform]}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Chart area */}
+      {platformView === "both" ? (
+        <div className="space-y-4">
+          {availablePlatforms.includes("chess.com") && (
+            <SinglePlatformChart
+              games={chessGames}
+              timeClass={timeClass}
+              platformLabel="chess.com"
+              showSubheading={true}
+            />
+          )}
+          {availablePlatforms.includes("lichess") && (
+            <SinglePlatformChart
+              games={lichessGames}
+              timeClass={timeClass}
+              platformLabel="lichess"
+              showSubheading={true}
+            />
+          )}
+        </div>
+      ) : (
+        <SinglePlatformChart
+          games={platformView === "chess.com" ? chessGames : lichessGames}
+          timeClass={timeClass}
+          platformLabel={PLATFORM_LABELS[platformView as Platform]}
+          // Hide the subheading when only one chart is visible — the parent
+          // section title is enough context.
+          showSubheading={false}
+        />
       )}
     </div>
   );
