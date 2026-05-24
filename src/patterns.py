@@ -522,6 +522,47 @@ def _compute_your_arsenal(games: list[dict]) -> list[dict]:
 # ──────────────────────────────────────────────────────────────────────────
 
 
+def _per_move_player_loss(m: dict, side: str, eval_cap: int = 1000) -> int:
+    """Per-move centipawn loss with the v1.7.1 rules, used everywhere
+    that computes ACPL from a move row.
+
+    Rules (must match `src/analyzer.py` and `src/models.py::backfill_acpl_for_games`):
+
+      1. If `move_played == best_move`, loss = 0 (engine's #1 choice
+         can't be a "mistake", including mate-delivering moves).
+      2. Otherwise cap each eval at ±EVAL_CAP, difference them from
+         `side`'s perspective, take max(0, ·).
+      3. Cap the resulting per-move loss at EVAL_CAP (Lichess
+         convention — any single move contributes at most EVAL_CAP to
+         the average).
+
+    Centralized in v1.7.4 — previously 7 sites each had their own
+    inline copy of this logic, only one of which (the ACPL trend chart,
+    fixed in v1.7.1) had the played-best and per-move-cap rules.
+    Inflated values on Phase ACPL, Opening ACPL, Time-Control ACPL,
+    Consistency, Opening Repertoire, and Tactical Misses are all
+    eliminated by routing through this single function.
+
+    Args:
+        m: A move_analysis row dict.
+        side: "white" or "black" — the moving side.
+        eval_cap: Cap magnitude in centipawns (default 1000).
+
+    Returns the per-move loss in centipawns, in [0, eval_cap].
+    """
+    played = m.get("move_played")
+    best = m.get("best_move")
+    if played and best and played == best:
+        return 0
+    before = max(-eval_cap, min(eval_cap, m.get("eval_before_cp") or 0))
+    after = max(-eval_cap, min(eval_cap, m.get("eval_after_cp") or 0))
+    if side == "white":
+        raw = max(0, before - after)
+    else:
+        raw = max(0, after - before)
+    return min(raw, eval_cap)
+
+
 def _compute_acpl_trend(games: list[dict],
                         moves_by_game: dict[int, list[dict]]) -> list[dict]:
     """ACPL trend using per-game stored ACPL (±1000cp capped).
@@ -547,9 +588,9 @@ def _compute_acpl_trend(games: list[dict],
 
         game_acpl = g.get("acpl")
 
-        # Fallback: compute from moves with cap if not stored.
-        # v1.7.1: matches the fixed _backfill_acpl logic — played-best-move
-        # gets zero loss, per-move loss capped at EVAL_CAP.
+        # Fallback: compute from moves if not stored. v1.7.4: now routes
+        # through the shared _per_move_player_loss helper (matches the
+        # backfill_acpl_for_games logic).
         if game_acpl is None:
             player_moves = [
                 m for m in moves_by_game.get(g["id"], [])
@@ -557,22 +598,10 @@ def _compute_acpl_trend(games: list[dict],
             ]
             if not player_moves:
                 continue
-            losses = []
-            for m in player_moves:
-                played = m.get("move_played")
-                best = m.get("best_move")
-                if played and best and played == best:
-                    losses.append(0)
-                    continue
-                before = m.get("eval_before_cp") or 0
-                after = m.get("eval_after_cp") or 0
-                cb = max(-EVAL_CAP, min(EVAL_CAP, before))
-                ca = max(-EVAL_CAP, min(EVAL_CAP, after))
-                if m["side"] == "white":
-                    raw = max(0, cb - ca)
-                else:
-                    raw = max(0, ca - cb)
-                losses.append(min(raw, EVAL_CAP))
+            losses = [
+                _per_move_player_loss(m, m["side"], EVAL_CAP)
+                for m in player_moves
+            ]
             game_acpl = round(sum(losses) / len(losses), 1) if losses else None
 
         if game_acpl is not None:
@@ -615,14 +644,11 @@ def _compute_phase_analysis(games: list[dict],
         for m in player_moves:
             phase = _classify_game_phase(m["move_number"])
             phases[phase]["moves"] += 1
-            # Use capped cp_loss for phase ACPL
-            before = max(-EVAL_CAP, min(EVAL_CAP, m.get("eval_before_cp") or 0))
-            after = max(-EVAL_CAP, min(EVAL_CAP, m.get("eval_after_cp") or 0))
-            if m["side"] == "white":
-                capped_loss = max(0, before - after)
-            else:
-                capped_loss = max(0, after - before)
-            phases[phase]["cp_loss"] += capped_loss
+            # v1.7.4: use the shared helper so mate-transition moves don't
+            # inflate per-phase ACPL (especially endgame, where mates land)
+            phases[phase]["cp_loss"] += _per_move_player_loss(
+                m, m["side"], EVAL_CAP,
+            )
             if m["classification"] == "blunder":
                 phases[phase]["blunders"] += 1
             elif m["classification"] == "mistake":
@@ -780,20 +806,19 @@ def _compute_consistency(games: list[dict],
     for g in games:
         acpl = g.get("acpl")
         if acpl is None:
+            # v1.7.4: fallback now matches backfill_acpl_for_games via the
+            # shared helper. (Previously had its own inline implementation
+            # that lacked the v1.7.1 played-best + per-move-cap rules.)
             player_moves = [
                 m for m in moves_by_game.get(g["id"], [])
                 if m["side"] == g["player_color"]
             ]
             if not player_moves:
                 continue
-            losses = []
-            for m in player_moves:
-                before = max(-EVAL_CAP, min(EVAL_CAP, m.get("eval_before_cp") or 0))
-                after = max(-EVAL_CAP, min(EVAL_CAP, m.get("eval_after_cp") or 0))
-                if m["side"] == "white":
-                    losses.append(max(0, before - after))
-                else:
-                    losses.append(max(0, after - before))
+            losses = [
+                _per_move_player_loss(m, m["side"], EVAL_CAP)
+                for m in player_moves
+            ]
             acpl = round(sum(losses) / len(losses), 1) if losses else None
 
         if acpl is not None:
@@ -1002,7 +1027,7 @@ def _compute_time_control_performance(games: list[dict],
         else:
             tc_data[tc]["draws"] += 1
 
-        # ACPL per time control
+        # ACPL per time control. v1.7.4: shared helper for consistency.
         acpl = g.get("acpl")
         if acpl is None:
             player_moves = [
@@ -1010,14 +1035,10 @@ def _compute_time_control_performance(games: list[dict],
                 if m["side"] == g["player_color"]
             ]
             if player_moves:
-                losses = []
-                for m in player_moves:
-                    before = max(-EVAL_CAP, min(EVAL_CAP, m.get("eval_before_cp") or 0))
-                    after = max(-EVAL_CAP, min(EVAL_CAP, m.get("eval_after_cp") or 0))
-                    if m["side"] == "white":
-                        losses.append(max(0, before - after))
-                    else:
-                        losses.append(max(0, after - before))
+                losses = [
+                    _per_move_player_loss(m, m["side"], EVAL_CAP)
+                    for m in player_moves
+                ]
                 acpl = round(sum(losses) / len(losses), 1) if losses else None
 
         if acpl is not None:
@@ -1276,14 +1297,11 @@ def _compute_opening_repertoire(games: list[dict],
                 if m["side"] == g["player_color"] and m["move_number"] <= 15
             ]
             if player_moves:
-                move_losses = []
-                for m in player_moves:
-                    before = max(-EVAL_CAP, min(EVAL_CAP, m.get("eval_before_cp") or 0))
-                    after = max(-EVAL_CAP, min(EVAL_CAP, m.get("eval_after_cp") or 0))
-                    if m["side"] == "white":
-                        move_losses.append(max(0, before - after))
-                    else:
-                        move_losses.append(max(0, after - before))
+                # v1.7.4: shared helper for consistency with backfill_acpl
+                move_losses = [
+                    _per_move_player_loss(m, m["side"], EVAL_CAP)
+                    for m in player_moves
+                ]
                 if move_losses:
                     acpl_sum += sum(move_losses) / len(move_losses)
                     acpl_games += 1
@@ -1384,12 +1402,11 @@ def _compute_opening_acpl(games: list[dict],
         if player_moves:
             losses = []
             for m in player_moves:
-                before = max(-EVAL_CAP, min(EVAL_CAP, m.get("eval_before_cp") or 0))
-                after = max(-EVAL_CAP, min(EVAL_CAP, m.get("eval_after_cp") or 0))
-                if m["side"] == "white":
-                    losses.append(max(0, before - after))
-                else:
-                    losses.append(max(0, after - before))
+                # v1.7.4: shared helper. Mate-transition moves in the
+                # opening phase no longer inflate per-opening ACPL.
+                losses.append(
+                    _per_move_player_loss(m, m["side"], EVAL_CAP)
+                )
                 if m["classification"] == "blunder":
                     opening_data[name]["blunders"] += 1
                 opening_data[name]["total_moves"] += 1
@@ -1461,17 +1478,12 @@ def _compute_tactical_misses(games: list[dict],
             if m["side"] != player_color:
                 continue
 
-            # Was there an opportunity? Check if best move gives big advantage
-            eval_before = max(-EVAL_CAP, min(EVAL_CAP, m.get("eval_before_cp") or 0))
-            eval_after = max(-EVAL_CAP, min(EVAL_CAP, m.get("eval_after_cp") or 0))
-
-            # Player's perspective
-            if player_color == "white":
-                player_eval_before = eval_before
-                cp_loss = max(0, eval_before - eval_after)
-            else:
-                player_eval_before = -eval_before
-                cp_loss = max(0, eval_after - eval_before)
+            # v1.7.4: cp_loss now goes through the shared helper. The
+            # MISS/OPPORTUNITY thresholds below (100/200) are well below the
+            # per-move cap (1000), so behavior is unchanged — just code consistency.
+            # (Removed dead `player_eval_before` calculation that was set
+            # but never read.)
+            cp_loss = _per_move_player_loss(m, player_color, EVAL_CAP)
 
             # Tactical opportunity: position was good for the player AND
             # best move was significantly better than what was played

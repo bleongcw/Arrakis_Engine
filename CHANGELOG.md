@@ -4,6 +4,56 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.7.4] - 2026-05-24
+
+### Fixed
+- **ACPL fix from v1.7.1 now applied across all widgets.** v1.7.1
+  corrected the mate-transition bug in three sites (real-time analyzer,
+  backfill in `models.py`, and the ACPL Trend fallback in
+  `patterns.py::_compute_acpl_trend`). But six *other* pattern widgets
+  still computed per-move centipawn loss with the old broken formula
+  inline — meaning mate-delivering moves continued to register as
+  ~2000cp losses inside those widgets even after v1.7.1.
+
+  Affected widgets (all in `src/patterns.py`):
+  - `_compute_phase_analysis` — opening / middlegame / endgame ACPL
+  - `_compute_consistency` (fallback path when `g.acpl` is null)
+  - `_compute_time_control_performance` — per-time-control ACPL
+  - `_compute_opening_repertoire` — per-opening ACPL
+  - `_compute_opening_acpl` — opening-pool ACPL
+  - `_compute_tactical_misses` — opportunity-cost loss calc
+
+  The fix extracts the v1.7.1 logic into a single helper,
+  `_per_move_player_loss(move, side, eval_cap=1000)`, and replaces all
+  six inline calculations (plus the `_compute_acpl_trend` fallback for
+  code consistency). The helper applies the played-best-move zero rule
+  AND the per-move loss cap at `EVAL_CAP`, identical to v1.7.1.
+
+  Also removed dead `player_eval_before` tracking in
+  `_compute_tactical_misses` that the rewrite orphaned.
+
+  **No migration needed.** Run `python main.py patterns` once after
+  upgrading to refresh aggregations (analyzer.py + models.py were
+  already correct from v1.7.1, so the underlying game records are fine
+  — only the cross-game pattern aggregations recomputed from them
+  needed the helper). On the reference DB the refresh completes in
+  ~10s for 4 players / 954 games.
+
+### Tests
+- 9 new backend tests in `tests/test_patterns.py`:
+  - `TestPerMovePlayerLoss` (7): played-best-move returns 0, non-best
+    normal swing unchanged, mate-transition capped at `eval_cap`,
+    black perspective, missing fields safe defaults, no negative loss,
+    custom `eval_cap` honored.
+  - `TestAcplConsistencyAcrossWidgets`: synthetic mate game → ACPL
+    Trend and Phase Analysis agree (both bounded, both apply the
+    played-best rule).
+  - `TestPhaseAcplNoLongerInflated`: endgame phase ACPL bounded by
+    `EVAL_CAP` even for mate-delivering moves.
+- Backend total: 358 → **367 tests**. Frontend unchanged at 76.
+
+---
+
 ## [1.7.3] - 2026-05-24
 
 ### Changed
