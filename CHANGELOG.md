@@ -4,6 +4,65 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.7.1] - 2026-05-24
+
+### Fixed
+- **ACPL inflation on mate-ending games.** The per-move centipawn-loss
+  calculation capped each eval at ±1000cp but never capped the resulting
+  loss, so a single move could contribute up to 2000cp to the average.
+  This bit specifically on **checkmate-delivering moves** (e.g. `Qxf7#`)
+  where Stockfish reports mate-encoded values (29990 → -30000) that
+  survive the per-eval cap but produce huge differences. A 7-move
+  Scholar's-Mate-style win could register ACPL ~291 instead of the real
+  ~4. Visible as anomalous spikes on the ACPL Trend chart.
+
+  Two-part fix applied to `analyzer.py`, `models.py::_backfill_acpl`,
+  and `patterns.py::_compute_acpl_trend` (the fallback path):
+  - **Played-best-move zero rule** — if `move_played == best_move`, the
+    loss is 0. Playing the engine's #1 choice (including delivering
+    mate) cannot be a "mistake". Matches Lichess convention.
+  - **Per-move loss cap of `EVAL_CAP=1000`** — safety net for any
+    remaining edge case where the cap-then-difference arithmetic could
+    still produce >1000.
+
+  Scope at time of release: across 952 analyzed games in the reference
+  database, 339 games had at least one player-side move with raw
+  swing > 1000 (potential mate artifact). 12 games had stored ACPL > 200
+  (clearly distorted); 2 had ACPL > 300. After the fix: 3 games > 200
+  (real bad games), 0 > 300.
+
+### Added
+- **`python main.py backfill-acpl [--force]`** — new CLI command. Without
+  `--force`, computes ACPL only for games where it's currently NULL
+  (same as the original migration behaviour). With `--force`, recomputes
+  ACPL for ALL analyzed games — the migration path from v1.7.0 → v1.7.1.
+
+### Migration
+Run once after upgrade:
+```
+python main.py backfill-acpl --force
+python main.py patterns
+```
+Takes ~30 seconds for ~1000 games. Idempotent (safe to re-run).
+
+### Tests
+- 3 new regression tests in `tests/test_models.py::TestBackfillAcplMateTransition`:
+  - synthetic Scholar's-Mate game → ACPL ≤ EVAL_CAP, mate-delivering move
+    contributes 0
+  - non-best move with >2000cp raw swing → properly capped at 1000
+  - `force=True` correctly overwrites previously-stored values
+- Backend total: 354 → 358 tests, all green.
+
+### Backwards-compatibility notes
+- `move_analysis.swing_cp` historical values are NOT modified. Per-move
+  data stays raw (preserves mate-transition signal for diagnostic use).
+  Only the aggregate `games.acpl` is corrected.
+- `classification` column is NOT touched (mate-delivering moves still
+  show as "blunder" by raw swing; that's a separate, lower-priority
+  fix deferred to a future release).
+
+---
+
 ## [1.7.0] - 2026-05-18
 
 ### Changed

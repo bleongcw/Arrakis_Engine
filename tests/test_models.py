@@ -168,3 +168,134 @@ class TestMigrations:
         assert "fide_rating" in player_cols
         assert "lichess_username" in player_cols
         conn.close()
+
+
+class TestBackfillAcplMateTransition:
+    """v1.7.1 regression: ACPL should NOT count the mate-delivering move as a
+    loss, and no single move should contribute more than EVAL_CAP cp.
+
+    Original bug: a Scholar's-Mate game ending in Qxf7# had stored ACPL of
+    291.3 because the mate-delivering move (engine's #1 choice, eval
+    transition 29990 → -30000) registered as a 2000cp 'loss' after the
+    per-eval cap of ±1000. Fix: played-best-move gets zero loss + per-move
+    loss cap. See game 419 in the repro DB."""
+
+    def _seed_mate_game(self, conn, player_id):
+        cur = conn.execute(
+            """INSERT INTO games (player_id, game_url, pgn, player_color,
+                                  player_rating, opponent_rating, result,
+                                  time_control, time_class, date_played,
+                                  platform, analysis_status)
+               VALUES (?, ?, ?, 'white', 1100, 1000, 'win', '600',
+                       'rapid', '2026-03-06', 'chess.com', 'complete')""",
+            (player_id, "https://test.example/g/1",
+             '[White "TestKid"]\n[Black "Opp"]\n\n1. e4 e5 2. Bc4 Nc6 3. Qh5 Nf6 4. Qxf7# *'),
+        )
+        game_id = cur.lastrowid
+        moves = [
+            (1, "white", "e4",    "Nf3",   20,     25),
+            (1, "black", "e5",    "e5",    25,     25),
+            (2, "white", "Bc4",   "Nf3",   25,     40),
+            (2, "black", "Nc6",   "Nc6",   40,     40),
+            (3, "white", "Qh5",   "Nf3",   40,    150),
+            (3, "black", "Nf6",   "g6",   150,  29990),
+            # The bug case: white delivers mate, played==best, eval crosses cap.
+            (4, "white", "Qxf7#", "Qxf7#", 29990, -30000),
+        ]
+        for mv in moves:
+            conn.execute(
+                """INSERT INTO move_analysis (game_id, move_number, side,
+                                              move_played, best_move,
+                                              eval_before_cp, eval_after_cp,
+                                              swing_cp, classification)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'excellent')""",
+                (game_id, mv[0], mv[1], mv[2], mv[3], mv[4], mv[5], 0),
+            )
+        conn.commit()
+        return game_id
+
+    def test_mate_delivering_move_does_not_inflate_acpl(self, db_path):
+        from src.models import backfill_acpl_for_games
+        conn = init_db(db_path)
+        pid = ensure_player(conn, "testkid", display_name="TestKid",
+                            age=9, rating=1100)
+        game_id = self._seed_mate_game(conn, pid)
+        updated = backfill_acpl_for_games(conn, force=True)
+        assert updated == 1
+        acpl = conn.execute(
+            "SELECT acpl FROM games WHERE id = ?", (game_id,),
+        ).fetchone()["acpl"]
+        # Sanity: no single move can contribute more than EVAL_CAP=1000
+        assert acpl <= 1000
+        # Expected: (5 + 15 + 110 + 0) / 4 = 32.5. Allow rounding wiggle.
+        assert acpl < 50, (
+            f"ACPL {acpl} suggests mate-delivering move still inflated it "
+            "(should be ~32, was probably ~290 pre-fix)"
+        )
+        conn.close()
+
+    def test_per_move_loss_cap_applied(self, db_path):
+        """A non-best move with a >2000cp swing must be capped at 1000."""
+        from src.models import backfill_acpl_for_games
+        conn = init_db(db_path)
+        pid = ensure_player(conn, "x", age=10, rating=1000)
+        cur = conn.execute(
+            """INSERT INTO games (player_id, game_url, pgn, player_color,
+                                  result, time_class, date_played,
+                                  analysis_status)
+               VALUES (?, '', '', 'white', 'loss', 'rapid',
+                       '2026-04-01', 'complete')""",
+            (pid,),
+        )
+        gid = cur.lastrowid
+        conn.execute(
+            """INSERT INTO move_analysis (game_id, move_number, side,
+                                          move_played, best_move,
+                                          eval_before_cp, eval_after_cp,
+                                          swing_cp, classification)
+               VALUES (?, 1, 'white', 'g4', 'e4', 29990, -30000, 0, 'blunder')""",
+            (gid,),
+        )
+        conn.commit()
+        updated = backfill_acpl_for_games(conn, force=True)
+        assert updated == 1
+        acpl = conn.execute(
+            "SELECT acpl FROM games WHERE id = ?", (gid,),
+        ).fetchone()["acpl"]
+        # Single move, capped at 1000 → ACPL = 1000.0 exactly
+        assert acpl == 1000.0
+
+    def test_force_recomputes_existing_acpl(self, db_path):
+        """`force=True` should overwrite previously-stored (wrong) values."""
+        from src.models import backfill_acpl_for_games
+        conn = init_db(db_path)
+        pid = ensure_player(conn, "x", age=10, rating=1000)
+        cur = conn.execute(
+            """INSERT INTO games (player_id, game_url, pgn, player_color,
+                                  result, time_class, date_played,
+                                  analysis_status, acpl)
+               VALUES (?, '', '', 'white', 'win', 'rapid',
+                       '2026-04-01', 'complete', 999)""",
+            (pid,),
+        )
+        gid = cur.lastrowid
+        conn.execute(
+            """INSERT INTO move_analysis (game_id, move_number, side,
+                                          move_played, best_move,
+                                          eval_before_cp, eval_after_cp,
+                                          swing_cp, classification)
+               VALUES (?, 1, 'white', 'e4', 'e4', 20, 20, 0, 'excellent')""",
+            (gid,),
+        )
+        conn.commit()
+        # Default (no force) skips it because acpl IS NOT NULL
+        n = backfill_acpl_for_games(conn, force=False)
+        assert n == 0
+        # force=True overwrites
+        n = backfill_acpl_for_games(conn, force=True)
+        assert n == 1
+        acpl_fixed = conn.execute(
+            "SELECT acpl FROM games WHERE id = ?", (gid,),
+        ).fetchone()["acpl"]
+        assert acpl_fixed == 0.0
+        conn.close()

@@ -225,14 +225,26 @@ def analyze_game(game_id: int, pgn_text: str, player_color: str,
         capped_before = cap_eval(eval_before_cp or 0)
         capped_after = cap_eval(eval_after_cp or 0)
 
-        # Calculate centipawn loss from the moving side's perspective
-        if side == "white":
-            # White wants positive eval. Loss = before - after (from white POV)
-            cp_loss = max(0, capped_before - capped_after)
+        # v1.7.1 fix: if the player chose the engine's #1 move (including
+        # checkmate-delivering moves like Qxf7#), there's no "loss" — playing
+        # the best available move can't be a mistake. Without this rule, mate-
+        # transition moves register as ~2000cp losses because Stockfish reports
+        # mate-encoded values (e.g. 29990 → -30000) that survive the per-eval
+        # cap but produce huge differences. Matches Lichess convention.
+        if move_san and best_move_san and move_san == best_move_san:
+            cp_loss = 0
         else:
-            # Black wants negative eval. Loss = after - before (from white POV)
-            # i.e., if eval goes from -100 to +50, black lost 150cp
-            cp_loss = max(0, capped_after - capped_before)
+            # Calculate centipawn loss from the moving side's perspective
+            if side == "white":
+                # White wants positive eval. Loss = before - after (from white POV)
+                cp_loss = max(0, capped_before - capped_after)
+            else:
+                # Black wants negative eval. Loss = after - before (from white POV)
+                # i.e., if eval goes from -100 to +50, black lost 150cp
+                cp_loss = max(0, capped_after - capped_before)
+            # Per-move loss cap (safety net) — any single move contributes at
+            # most EVAL_CAP cp to the ACPL average. Lichess convention.
+            cp_loss = min(cp_loss, EVAL_CAP)
 
         swing_cp = cp_loss
         classification = tier_classify_move(cp_loss, tier) if tier else classify_move(cp_loss)

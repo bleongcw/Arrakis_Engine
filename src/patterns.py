@@ -547,7 +547,9 @@ def _compute_acpl_trend(games: list[dict],
 
         game_acpl = g.get("acpl")
 
-        # Fallback: compute from moves with cap if not stored
+        # Fallback: compute from moves with cap if not stored.
+        # v1.7.1: matches the fixed _backfill_acpl logic — played-best-move
+        # gets zero loss, per-move loss capped at EVAL_CAP.
         if game_acpl is None:
             player_moves = [
                 m for m in moves_by_game.get(g["id"], [])
@@ -557,14 +559,20 @@ def _compute_acpl_trend(games: list[dict],
                 continue
             losses = []
             for m in player_moves:
+                played = m.get("move_played")
+                best = m.get("best_move")
+                if played and best and played == best:
+                    losses.append(0)
+                    continue
                 before = m.get("eval_before_cp") or 0
                 after = m.get("eval_after_cp") or 0
                 cb = max(-EVAL_CAP, min(EVAL_CAP, before))
                 ca = max(-EVAL_CAP, min(EVAL_CAP, after))
                 if m["side"] == "white":
-                    losses.append(max(0, cb - ca))
+                    raw = max(0, cb - ca)
                 else:
-                    losses.append(max(0, ca - cb))
+                    raw = max(0, ca - cb)
+                losses.append(min(raw, EVAL_CAP))
             game_acpl = round(sum(losses) / len(losses), 1) if losses else None
 
         if game_acpl is not None:

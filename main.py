@@ -364,6 +364,28 @@ def cmd_fide_update(args, config):
         print(f"  Profile: https://ratings.fide.com/profile/{updated['fide_id']}")
 
 
+def cmd_backfill_acpl(args, config):
+    """Recompute per-game ACPL from existing move_analysis data.
+
+    Without `--force`, only fills games where `acpl IS NULL` (initial
+    backfill behavior). With `--force`, recomputes ACPL for ALL analyzed
+    games, applying the v1.7.1 fixes (played-best-move zero rule + per-
+    move loss cap). Use this once after upgrading from v1.7.0 or earlier
+    to correct historical ACPL values distorted by mate-transition bugs.
+    """
+    from src.models import backfill_acpl_for_games
+    db_path = config["database"]["path"]
+    conn = init_db(db_path)
+    force = getattr(args, "force", False)
+    if force:
+        print("Recomputing ACPL for ALL analyzed games (v1.7.1 fix)...")
+    else:
+        print("Backfilling ACPL for games where acpl IS NULL...")
+    updated = backfill_acpl_for_games(conn, force=force)
+    conn.close()
+    print(f"Updated ACPL for {updated} games.")
+
+
 def cmd_backfill_clocks(args, config):
     """Backfill clock_seconds from PGN annotations for existing games."""
     from src.analyzer import extract_clocks_from_pgn
@@ -519,6 +541,18 @@ def main():
     fide_parser.add_argument("--rating", type=int, help="New FIDE rating")
     fide_parser.add_argument("--fide-id", help="FIDE player ID (e.g., 1234567)")
 
+    # backfill-acpl (v1.7.1) — recompute ACPL with the mate-transition fix
+    backfill_acpl_parser = subparsers.add_parser(
+        "backfill-acpl",
+        help="Recompute per-game ACPL (v1.7.1 fix for mate-transition bug)",
+    )
+    backfill_acpl_parser.add_argument(
+        "--force", action="store_true",
+        help="Recompute ACPL for ALL analyzed games (default: only games "
+             "where acpl IS NULL). Use after upgrading to v1.7.1 to "
+             "correct historical values.",
+    )
+
     # backfill-clocks
     backfill_parser = subparsers.add_parser("backfill-clocks", help="Backfill clock data from PGN annotations")
 
@@ -570,6 +604,8 @@ def main():
             sys.exit(rc)
     elif args.command == "fide-update":
         cmd_fide_update(args, config)
+    elif args.command == "backfill-acpl":
+        cmd_backfill_acpl(args, config)
     elif args.command == "backfill-clocks":
         cmd_backfill_clocks(args, config)
     elif args.command == "run-all":

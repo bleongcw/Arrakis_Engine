@@ -70,28 +70,45 @@ def _backfill_opponent_usernames(conn: sqlite3.Connection):
         conn.commit()
 
 
-def _backfill_acpl(conn: sqlite3.Connection):
+def backfill_acpl_for_games(conn: sqlite3.Connection, force: bool = False) -> int:
     """Backfill per-game ACPL from existing move_analysis data.
 
-    Applies ±1000cp cap to stored evals before computing loss,
-    matching the Lichess/Chess.com standard. Only considers moves
-    from the player's side.
+    Applies ±1000cp cap to stored evals AND ±1000cp cap to per-move loss,
+    matching the Lichess/Chess.com standard. Only considers moves from the
+    player's side.
+
+    v1.7.1 fix: also gives zero loss to any move where the player chose the
+    engine's best move (including checkmate-delivering moves like Qxf7#).
+    Previously these registered as ~2000cp losses because Stockfish reports
+    mate-encoded values that survive the per-eval cap but produce huge
+    differences. See test_models.py::test_backfill_acpl_handles_mate_delivery.
+
+    Args:
+        conn: Open SQLite connection (init_db'd).
+        force: If True, recompute ACPL for ALL analyzed games (overwriting
+               any existing value). If False, only computes for games where
+               `acpl IS NULL` (initial backfill behaviour).
+
+    Returns the number of games whose ACPL was updated.
     """
     EVAL_CAP = 1000
 
+    where_clause = "WHERE g.analysis_status = 'complete'"
+    if not force:
+        where_clause += " AND g.acpl IS NULL"
+
     games = conn.execute(
-        """SELECT g.id, g.player_color FROM games g
-        WHERE g.analysis_status = 'complete' AND g.acpl IS NULL"""
+        f"SELECT g.id, g.player_color FROM games g {where_clause}"
     ).fetchall()
 
     if not games:
-        return
+        return 0
 
     updated = 0
     for game in games:
         moves = conn.execute(
-            """SELECT eval_before_cp, eval_after_cp, side FROM move_analysis
-            WHERE game_id = ? ORDER BY move_number""",
+            """SELECT eval_before_cp, eval_after_cp, side, move_played, best_move
+               FROM move_analysis WHERE game_id = ? ORDER BY move_number""",
             (game["id"],),
         ).fetchall()
 
@@ -104,14 +121,24 @@ def _backfill_acpl(conn: sqlite3.Connection):
             if before is None or after is None:
                 continue
 
-            # Cap evals at ±1000 BEFORE computing difference
-            capped_before = max(-EVAL_CAP, min(EVAL_CAP, before))
-            capped_after = max(-EVAL_CAP, min(EVAL_CAP, after))
-
-            if m["side"] == "white":
-                loss = max(0, capped_before - capped_after)
+            # v1.7.1: if the player chose the engine's #1 move, no loss.
+            played = m["move_played"]
+            best = m["best_move"]
+            if played and best and played == best:
+                loss = 0
             else:
-                loss = max(0, capped_after - capped_before)
+                # Cap evals at ±1000 BEFORE computing difference
+                capped_before = max(-EVAL_CAP, min(EVAL_CAP, before))
+                capped_after = max(-EVAL_CAP, min(EVAL_CAP, after))
+
+                if m["side"] == "white":
+                    loss = max(0, capped_before - capped_after)
+                else:
+                    loss = max(0, capped_after - capped_before)
+
+                # v1.7.1: per-move loss cap (safety net) — any single move
+                # contributes at most EVAL_CAP cp to the average.
+                loss = min(loss, EVAL_CAP)
 
             player_losses.append(loss)
 
@@ -122,6 +149,14 @@ def _backfill_acpl(conn: sqlite3.Connection):
 
     if updated:
         conn.commit()
+    return updated
+
+
+def _backfill_acpl(conn: sqlite3.Connection):
+    """Legacy alias retained for the in-place migration on first init_db.
+    Use `backfill_acpl_for_games(conn)` directly in new code."""
+    updated = backfill_acpl_for_games(conn, force=False)
+    if updated:
         print(f"  Backfilled ACPL for {updated} games (±1000cp capped)")
 
 
