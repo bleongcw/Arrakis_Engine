@@ -82,13 +82,27 @@ export interface CriticalMoment {
 /** v1.6.0: meta captured at coaching time — history depth, prompt size,
  *  model. Persists so the UI can show "Based on N recent games" stamps
  *  on the coaching panel and so we can correlate coaching quality with
- *  prompt context after the fact. */
+ *  prompt context after the fact.
+ *  v1.8.0: extended with trajectory injection diagnostics. */
 export interface CoachingMeta {
   history_games_injected: number;
   history_tokens_estimate: number;
   prompt_tokens_estimate: number;
   provider: string;
   model: string;
+  /** v1.8.0+: true if the per-player trajectory block was injected
+   *  into the coaching prompt (requires populated player_patterns
+   *  AND coaching_trajectory_enabled). Pre-v1.8.0 briefs lack this. */
+  trajectory_injected?: boolean;
+  /** v1.8.0+: how stale the player_patterns row was at coaching time.
+   *  null when trajectory was skipped. */
+  trajectory_age_days?: number | null;
+  /** v1.8.0+: the weakest phase the coach saw, for tooltip context. */
+  trajectory_weakest_phase?: string | null;
+  /** v1.8.0+: improving / flat / declining / insufficient_data. */
+  trajectory_trend_direction?: string | null;
+  /** v1.8.0+: rough size of the injected trajectory block. */
+  trajectory_tokens_estimate?: number;
 }
 
 export interface GameCoaching {

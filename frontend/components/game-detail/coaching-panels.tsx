@@ -54,6 +54,29 @@ export function CoachingPanels({ coaching }: CoachingPanelsProps) {
     ? `${historyCount} recent game${historyCount === 1 ? "" : "s"} in context`
     : null;
 
+  // v1.8.0: trajectory injection stamp \u2014 shows whether the per-player
+  // 30-day trajectory block reached the LLM, and how stale it was at
+  // coaching time. Silent (no stamp) when trajectory wasn't injected
+  // (player has no patterns yet, or disabled via config / CLI flag).
+  const trajectoryInjected = coaching.meta?.trajectory_injected;
+  const trajectoryAge = coaching.meta?.trajectory_age_days;
+  const trajectoryWeakest = coaching.meta?.trajectory_weakest_phase;
+  const trajectoryTrend = coaching.meta?.trajectory_trend_direction;
+  const trajectoryStamp = trajectoryInjected
+    ? `30-day trajectory${typeof trajectoryAge === "number" ? ` (${trajectoryAge}d old)` : ""}`
+    : null;
+  const trajectoryTooltip = trajectoryInjected
+    ? `The coach had access to the player's measured 30-day trajectory${
+        trajectoryWeakest ? ` (weakest phase: ${trajectoryWeakest}` : ""
+      }${
+        trajectoryTrend ? `; trend: ${trajectoryTrend})` : trajectoryWeakest ? ")" : ""
+      } when writing this brief.${
+        typeof trajectoryAge === "number" && trajectoryAge > 7
+          ? ` This snapshot is ${trajectoryAge} days old \u2014 re-run \`python main.py patterns\` to refresh.`
+          : ""
+      }`
+    : "";
+
   return (
     <div className="space-y-4">
       {/* Game Story */}
@@ -75,6 +98,14 @@ export function CoachingPanels({ coaching }: CoachingPanelsProps) {
                 title={`The coach had access to the lessons from ${historyCount} previous coached games when writing this brief, so the advice should build on (not repeat) earlier coaching.`}
               >
                 \uD83D\uDCDA {historyStamp}
+              </span>
+            )}
+            {trajectoryStamp && (
+              <span
+                className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-normal"
+                title={trajectoryTooltip}
+              >
+                \uD83D\uDCCA {trajectoryStamp}
               </span>
             )}
           </CardTitle>
