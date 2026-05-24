@@ -67,7 +67,21 @@ coaching:
   #   10 = ~5,000 tokens added (safe for cloud providers; tight on Ollama 8B)
   #   15 = ~7,500 tokens added (cloud providers only)
   #   20 = ~10,000 tokens added (large-context cloud providers only — Claude, Gemini)
+  # Note: trajectory injection (v1.8.0, see below) adds ~250 more tokens on top.
   coaching_history_count: 5
+
+  # v1.8.0+ — per-player trajectory injection. When true, the per-game coaching
+  # prompt also includes a structured "Player Trajectory (last 30 days)" block
+  # derived from player_patterns.stats_json. The block lists 6-8 measured
+  # cross-game signals (weakest phase, ACPL trend, tactical miss rate, endgame
+  # conversion, comeback/collapse rates, repertoire focus) so the LLM can
+  # ground its feedback in the broader arc rather than treating each game as
+  # standalone. Adds ~250 prompt tokens.
+  #
+  # Recommended ON for cloud providers (Claude, Gemini, GPT). Consider OFF
+  # for Ollama 8B local if you're already running high coaching_history_count.
+  # The CLI flag `python main.py coach --no-trajectory` overrides per-run.
+  coaching_trajectory_enabled: true
 
 schedule:
   enabled: false                       # set to true to auto-run the pipeline on a timer

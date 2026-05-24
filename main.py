@@ -145,9 +145,15 @@ def cmd_coach(args, config):
     dump_prompt_to = getattr(args, "dump_prompt", None)
     if dump_prompt_to:
         print(f"Prompt dump enabled: writing to {dump_prompt_to}")
+    # v1.8.0: --no-trajectory disables trajectory injection for this run
+    no_trajectory = getattr(args, "no_trajectory", False)
+    trajectory_enabled = False if no_trajectory else None  # None = read config
+    if no_trajectory:
+        print("Trajectory injection: OFF (--no-trajectory)")
     result = coach_pending(
         provider=provider, model=model, db_path=db_path,
         limit=limit, config=config, dump_prompt_to=dump_prompt_to,
+        trajectory_enabled=trajectory_enabled,
     )
     print(f"Coached {result['coached']} games with {provider} ({model}). "
           f"Errors: {result['errors']}, Skipped: {result['skipped']}"
@@ -504,6 +510,13 @@ def main():
         help="(v1.6.0+) Write the full assembled prompt for each coached game "
              "to PATH. If PATH is a directory, files are written as "
              "prompt_game_<id>.txt. Use to verify history injection.",
+    )
+    coach_parser.add_argument(
+        "--no-trajectory", action="store_true",
+        help="(v1.8.0+) Disable per-player trajectory injection for this "
+             "run. The prompt will not include the 'Player Trajectory' "
+             "section. Useful for A/B comparing coaching output with vs "
+             "without trajectory context.",
     )
 
     # patterns

@@ -11,6 +11,7 @@ using reasoning LLMs (Claude, ChatGPT, Gemini, Grok, Mistral, DeepSeek, Qwen, Ol
 import json
 import logging
 import time
+from datetime import datetime
 
 from src.llm_providers import call_provider, resolve_model
 from src.models import init_db
@@ -48,6 +49,11 @@ This game has been classified as: **{game_type}**
 - Vary sentence length and rhythm. Sometimes use short punchy sentences. Sometimes longer flowing ones.
 - For tips and advice, do NOT always use the same phrasing patterns like "Next time you see X, try Y." Mix it up: ask questions ("What if you tried...?"), use challenges ("See if you can spot..."), share coach secrets ("Here's a trick strong players use..."), use stories ("Imagine your pieces are a team and...").
 {previous_coaching_guidance}
+{player_trajectory}
+## Trajectory-Aware Coaching
+- Where the trajectory snapshot above (if present) shows measurable progress, acknowledge it concretely (e.g. "your endgame conversion has been climbing — this game shows why").
+- If this game illustrates a weakness that the trajectory flags as recurring, note the recurrence GENTLY — once, in passing. Don't re-lecture the player on it.
+- Tie this game's key_lesson and practical_focus to the broader trajectory where the connection is real. Do NOT restate the numbers — the trajectory is for you to reason from, not to read back to the player.
 
 ## Focus Areas for {tier_label} Players
 {focus_areas}
@@ -84,13 +90,15 @@ Produce a JSON response with these exact keys:
    game should discuss the clock; a comeback should build suspense.
 
 3. "key_lesson" — The single most important takeaway from this game, in 1-2 sentences.
-   Make it specific and actionable, not generic. MUST be different from any previous lessons
-   listed in the coaching history section (if provided). If the same theme keeps appearing,
-   go deeper or find a different angle.
+   Make it specific and actionable, not generic. The wording and angle MUST be different
+   from any previous lessons listed in the coaching history section, even when you are
+   reinforcing a theme the player keeps hitting. If the same theme keeps appearing, go
+   deeper, find a fresh angle, or tie it to the trajectory snapshot below.
 
 4. "practical_focus" — One specific thing to practice, framed as a fun challenge.
    Example: "Before moving a piece, count how many enemy pieces are looking at that square."
-   MUST be different from previous practical_focus items in the coaching history (if provided).
+   The wording MUST be different from previous practical_focus items in the coaching history,
+   even when reinforcing a recurring weakness.
 
 5. "critical_moments" — A JSON array of the {critical_moments_count} most important moments. Each object has:
    - "move_number": int
@@ -359,6 +367,64 @@ def _fetch_coaching_history(conn, player_id: int, current_game_id: int,
     return "\n".join(lines)
 
 
+def _maybe_refresh_patterns(conn, player_id: int,
+                            db_path: str | None,
+                            stale_after_days: int = 7) -> None:
+    """v1.8.0: refresh player_patterns when stale or out-of-date with games.
+
+    Calls compute_player_patterns when:
+      - no patterns row exists for this player yet, OR
+      - the patterns row is older than ``stale_after_days``, OR
+      - there are completed games dated after the patterns' period_end
+        (the patterns missed games that have since been analyzed).
+
+    compute_player_patterns is pure-Python (no LLM call) so this is cheap
+    — typically a few seconds per player on a full DB. We do NOT call
+    generate_trend_summary here (that's a paid LLM round-trip).
+    """
+    row = conn.execute(
+        """SELECT updated_at, period_end FROM player_patterns
+        WHERE player_id = ? ORDER BY updated_at DESC LIMIT 1""",
+        (player_id,),
+    ).fetchone()
+
+    needs_refresh = False
+    if not row:
+        needs_refresh = True
+    else:
+        try:
+            updated = datetime.fromisoformat(row["updated_at"])
+            if (datetime.now() - updated).days >= stale_after_days:
+                needs_refresh = True
+        except (TypeError, ValueError):
+            needs_refresh = True
+        if not needs_refresh and row["period_end"]:
+            # Are there completed games dated after the patterns' window?
+            newer = conn.execute(
+                """SELECT COUNT(*) AS n FROM games
+                WHERE player_id = ? AND analysis_status = 'complete'
+                AND date_played > ?""",
+                (player_id, row["period_end"]),
+            ).fetchone()
+            if newer and (newer["n"] or 0) > 0:
+                needs_refresh = True
+
+    if not needs_refresh:
+        return
+
+    try:
+        from src.patterns import compute_player_patterns
+        logger.info("Auto-refreshing player_patterns for player %d (stale or out-of-date)",
+                    player_id)
+        compute_player_patterns(player_id, db_path=db_path)
+    except Exception as e:
+        # Pattern refresh is best-effort. If it fails, fall through and
+        # let build_trajectory_block return an empty block — coaching
+        # still proceeds, just without trajectory injection.
+        logger.warning("Auto-refresh of player_patterns failed for player %d: %s",
+                       player_id, e)
+
+
 def _parse_llm_response(text: str) -> dict:
     """Parse JSON from LLM response, handling markdown fences and thinking tags."""
     import re
@@ -393,17 +459,23 @@ def _count_history_games(history_text: str) -> int:
 def coach_game(game_id: int, provider: str | None = "claude",
                model: str | None = None, db_path: str | None = None,
                config: dict | None = None,
-               dump_prompt_to: "str | None" = None) -> dict:
+               dump_prompt_to: "str | None" = None,
+               trajectory_enabled: bool | None = None) -> dict:
     """Generate coaching insights for a single analyzed game.
 
     Args:
         config: Full config dict (from config.yaml). If provided, coaching
-                settings (tone, detail_level, focus_areas, custom_instructions)
-                are read from config["coaching"].
+                settings (tone, detail_level, focus_areas, custom_instructions,
+                coaching_trajectory_enabled) are read from config["coaching"].
         dump_prompt_to: If set (v1.6.0+), the full assembled prompt is written
                 to this path with a `_game{id}.txt` suffix. Useful for
                 verifying that coaching history is actually being injected
                 and for inspecting the full LLM input.
+        trajectory_enabled: v1.8.0+ explicit override for the
+                ``coaching_trajectory_enabled`` config flag. When True/False
+                this takes precedence; when None the config value is used
+                (defaults to True). Set to False from CLI ``--no-trajectory``
+                for debugging A/B comparisons.
 
     Returns the parsed coaching data dict.
     """
@@ -471,6 +543,36 @@ def coach_game(game_id: int, provider: str | None = "claude",
         previous_coaching_guidance = ("\n## Coaching History\n"
                                       "No previous coaching history — this is the first coached game. "
                                       "Set a strong, encouraging foundation.\n")
+
+    # v1.8.0: Player trajectory injection. Pulls the latest player_patterns
+    # row and surfaces 6-8 measured cross-game signals (weakest phase,
+    # tactical miss rate, ACPL trend direction, etc.) so the per-game
+    # coach is aware of the player's broader arc, not just this one game.
+    # The flag defaults to True; explicit argument wins over config.
+    if trajectory_enabled is None:
+        cfg_traj = coaching_config.get("coaching_trajectory_enabled", True)
+        trajectory_enabled = bool(cfg_traj)
+
+    if trajectory_enabled:
+        # Auto-refresh patterns when stale (>7 days old) or when new
+        # completed games exist beyond the patterns' period_end. The
+        # compute is pure-Python (no LLM) so this is cheap.
+        _maybe_refresh_patterns(conn, game["player_id"], db_path)
+        # Lazy import — see src/dashboard_server.py:191 for the same
+        # pattern. Avoids any circular-import risk between coach and
+        # patterns at module-load time.
+        from src.patterns import build_trajectory_block
+        player_trajectory, trajectory_diag = build_trajectory_block(
+            conn, game["player_id"]
+        )
+    else:
+        player_trajectory = ""
+        trajectory_diag = {
+            "trajectory_injected": False,
+            "trajectory_age_days": None,
+            "weakest_phase": None,
+            "trend_direction": None,
+        }
 
     # Build tone modifier from config
     tone = coaching_config.get("tone", "balanced")
@@ -544,6 +646,7 @@ def coach_game(game_id: int, provider: str | None = "claude",
         game_type=game_type,
         game_type_guidance=game_type_guidance,
         previous_coaching_guidance=previous_coaching_guidance,
+        player_trajectory=player_trajectory,
         tone_modifier=tone_modifier,
         detail_modifier=detail_modifier,
         focus_modifier=focus_modifier,
@@ -561,15 +664,22 @@ def coach_game(game_id: int, provider: str | None = "claude",
 
     used_model = resolve_model(provider, model, coaching_config)
 
-    # v1.6.0 Phase 2 diagnostics: visibility into history injection + prompt size
+    # v1.6.0 Phase 2 diagnostics: visibility into history injection + prompt size.
+    # v1.8.0 adds trajectory injection status and freshness.
     history_games_injected = _count_history_games(previous_coaching_guidance)
     prompt_tokens_est = _estimate_tokens(prompt)
     history_tokens_est = _estimate_tokens(previous_coaching_guidance)
+    trajectory_tokens_est = _estimate_tokens(player_trajectory)
+    traj_state = "injected" if trajectory_diag.get("trajectory_injected") else "skipped"
+    traj_age = trajectory_diag.get("trajectory_age_days")
+    traj_age_str = f"{traj_age}d" if traj_age is not None else "n/a"
     logger.info(
         "Coaching game %d with %s:%s — history=%d games (~%d tokens), "
-        "full prompt ~%d tokens",
+        "trajectory=%s (age=%s, ~%d tokens), full prompt ~%d tokens",
         game_id, provider, used_model,
-        history_games_injected, history_tokens_est, prompt_tokens_est,
+        history_games_injected, history_tokens_est,
+        traj_state, traj_age_str, trajectory_tokens_est,
+        prompt_tokens_est,
     )
 
     # Optional prompt dump — writes the full prompt to a file for inspection.
@@ -626,12 +736,20 @@ def coach_game(game_id: int, provider: str | None = "claude",
     # v1.6.0: persist coaching meta (history depth, prompt size, model). Lets
     # the UI show "based on N recent games" stamps and lets us correlate
     # coaching quality with prompt context after the fact.
+    # v1.8.0: also persist trajectory injection status + age so the UI can
+    # render a "30-day trajectory (Nd old)" stamp and so we can compare
+    # coaching quality with/without trajectory after the fact.
     meta = {
         "history_games_injected": history_games_injected,
         "history_tokens_estimate": history_tokens_est,
         "prompt_tokens_estimate": prompt_tokens_est,
         "provider": provider,
         "model": used_model,
+        "trajectory_injected": trajectory_diag.get("trajectory_injected", False),
+        "trajectory_age_days": trajectory_diag.get("trajectory_age_days"),
+        "trajectory_weakest_phase": trajectory_diag.get("weakest_phase"),
+        "trajectory_trend_direction": trajectory_diag.get("trend_direction"),
+        "trajectory_tokens_estimate": trajectory_tokens_est,
     }
     meta_json = json.dumps(meta)
     coaching["meta"] = meta  # also surface to the immediate caller's response
@@ -678,7 +796,8 @@ def coach_pending(provider: str = "claude", model: str | None = None,
                   cancel_event: "threading.Event | None" = None,
                   progress_callback: "callable | None" = None,
                   player: str | None = None,
-                  dump_prompt_to: "str | None" = None) -> dict:
+                  dump_prompt_to: "str | None" = None,
+                  trajectory_enabled: bool | None = None) -> dict:
     """Generate coaching for analyzed but uncoached games with robust error handling.
 
     Args:
@@ -778,7 +897,8 @@ def coach_pending(provider: str = "claude", model: str | None = None,
             try:
                 coach_game(game_id, provider=provider, model=model,
                            db_path=db_path, config=config,
-                           dump_prompt_to=dump_prompt_to)
+                           dump_prompt_to=dump_prompt_to,
+                           trajectory_enabled=trajectory_enabled)
                 success = True
                 consecutive_failures = 0  # Reset on success
                 # Gradually recover delay back to base after successful calls

@@ -4,6 +4,125 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.8.0] - 2026-05-25
+
+### Added
+- **Trajectory-aware per-game coaching.** Bernard noticed the "Feedback
+  to the Player" box on each game's coaching panel reads like every
+  game lives in a vacuum — it has no awareness of the player's
+  measurable trajectory across recent games, no idea whether the lesson
+  raised last week was applied this week, and no sense that every
+  Elementary-tier player gets the same static `focus_areas` regardless
+  of where their actual measured weaknesses are.
+
+  The raw material to fix this already existed: `player_patterns.stats_json`
+  has 14 cross-game pattern dimensions, computed by
+  `compute_player_patterns()`. It was just never flowing into the
+  per-game coaching prompt.
+
+  v1.8.0 adds a new `build_trajectory_block()` helper in
+  `src/patterns.py` that fetches the latest player_patterns row and
+  produces a structured `## Player Trajectory (last 30 days)` block:
+
+  - **6-8 numeric facts** (one line each): weakest phase + ACPL,
+    strongest phase + ACPL, tactical miss rate, winning-endgame
+    conversion, ACPL trend direction (improving / flat / declining
+    over last 4 weekly buckets, deterministic Python calc), comeback
+    and collapse rates, repertoire focus rating per color.
+  - **A synthesized headline sentence** like *"ACPL has been improving
+    over the last 4 weeks; middlegame remains the weakest phase at
+    77.8cp avg loss."*
+
+  The block is injected into `GAME_COACHING_PROMPT` as a new
+  `{player_trajectory}` slot. Three new prompt instructions tell the
+  LLM how to use it: acknowledge real progress, note recurring
+  weaknesses *gently* (don't re-lecture), and tie the per-game lesson
+  to the broader arc without restating the numbers.
+
+  The existing tier-based system (rating → language complexity,
+  Stockfish depth, classification thresholds, default focus_areas) is
+  unchanged — trajectory is *layered on top*, not a replacement.
+
+  Net effect on Evan's data: the coach now sees in every game brief
+  that his middlegame is his measured weakest phase (68.6 ACPL vs 45.1
+  in the opening) and his tactical miss rate is 48.3%, so per-game
+  feedback can reference the trajectory ("this game is another example
+  of the middlegame drift you've been working on") instead of
+  rediscovering it from scratch each time.
+
+- **Auto-refresh of player_patterns when stale.** New helper
+  `_maybe_refresh_patterns()` in `src/coach.py` calls
+  `compute_player_patterns()` (pure-Python, no LLM, ~3-5s per player
+  on Bernard's DB) before coaching if the patterns row is >7 days old
+  OR if completed games exist beyond the row's `period_end`. Means
+  Bernard doesn't have to remember to re-run `python main.py patterns`
+  before coaching new games. We do NOT auto-call
+  `generate_trend_summary()` — that's a paid LLM round-trip.
+
+- **`coaching_trajectory_enabled: true` config flag.** New knob in
+  `config.yaml` and `config.yaml.example`, default ON. Set to `false`
+  on Ollama-8B local deployments if you're already running a high
+  `coaching_history_count` and want to save context.
+
+- **`--no-trajectory` CLI flag** on `python main.py coach` for one-off
+  A/B comparisons of coaching output with vs without trajectory
+  context. Useful for verifying the trajectory injection is actually
+  improving feedback quality (or for debugging if it's getting in the
+  way).
+
+- **UI stamp** on the game-detail coaching panel: next to the existing
+  v1.7.0 "📚 N recent games in context" badge, a new "📊 30-day
+  trajectory (Nd old)" badge appears when trajectory was injected.
+  Tooltip explains what the LLM saw and suggests re-running
+  `python main.py patterns` if the freshness exceeds 7 days. When the
+  player has no trajectory yet (first coached games), the badge is
+  silent — same UX as before.
+
+### Changed
+- **Softened the "MUST be different from previous lessons" rule** in
+  the coaching prompt to "different in wording and angle, even when
+  reinforcing a recurring theme." Resolves tension with the new
+  trajectory-aware "note recurrence gently" instruction — the LLM
+  needed permission to revisit a theme without forcing artificial
+  novelty when the player genuinely has a persistent weakness worth
+  flagging twice.
+
+- **Coaching meta diagnostics extended.** `coaching_meta_json` now
+  includes `trajectory_injected`, `trajectory_age_days`,
+  `trajectory_weakest_phase`, `trajectory_trend_direction`, and
+  `trajectory_tokens_estimate`. The existing log line is extended with
+  `trajectory=injected/skipped (age=Nd, ~T tokens)`.
+
+### Tests
+- 11 new backend tests in `tests/test_patterns.py`:
+  - `TestAcplTrendDirection` (4): improving / declining / flat /
+    insufficient-data classifier semantics
+  - `TestFindBestPhase` (2): the new helper that finds the
+    lowest-ACPL phase (mirror of existing `_find_worst_phase`)
+  - `TestBuildTrajectoryBlock` (5): no patterns → empty block,
+    populated patterns → expected keywords, heading doesn't contain
+    `### Game ` (preserves `_count_history_games` correctness),
+    token budget bounded under 400 tokens, no-signal skip path
+- 6 new backend tests in `tests/test_coach.py` (`TestTrajectoryInjection`):
+  - Trajectory injected when enabled + patterns populated
+  - Trajectory disabled via `trajectory_enabled=False` argument
+  - Trajectory disabled via `coaching_trajectory_enabled=False` config
+  - Trajectory diagnostics persisted to `coaching_meta_json`
+  - Silently skipped when no patterns row exists
+  - Source-grep wiring guard (mirror of the v1.7.0 history-count
+    wiring test)
+- Backend total: 367 → **384 tests**. Frontend unchanged at 76.
+
+### Migration
+- No schema change, no DB migration. Players who have never run
+  `patterns` see the silent-skip path; players with stale patterns
+  get auto-refreshed when they next coach.
+- The trajectory block only appears for **newly coached games** after
+  upgrading. Existing coached games keep their pre-v1.8.0 feedback
+  unless explicitly re-coached.
+
+---
+
 ## [1.7.4] - 2026-05-24
 
 ### Fixed

@@ -22,6 +22,9 @@ from src.patterns import (
     _compute_opening_acpl,
     _compute_tactical_misses,
     _compute_repertoire_consistency,
+    _acpl_trend_direction,
+    _find_best_phase,
+    build_trajectory_block,
     compute_player_patterns,
     update_patterns,
 )
@@ -691,3 +694,196 @@ class TestPhaseAcplNoLongerInflated:
         # 4 white moves, all non-best, all mate-transition → each capped at
         # 1000 → sum = 4000, avg = 1000. Pre-v1.7.4 would have produced 2000.
         assert endgame["acpl"] <= 1000, f"endgame ACPL {endgame['acpl']} exceeds cap"
+
+
+# --- v1.8.0: trajectory-aware per-game coaching ---
+
+class TestAcplTrendDirection:
+    """The deterministic improving/declining/flat classifier used by the
+    trajectory block. Lower ACPL is better, so a drop in recent buckets
+    counts as improvement."""
+
+    def test_insufficient_data_when_under_4_buckets(self):
+        assert _acpl_trend_direction([]) == "insufficient_data"
+        assert _acpl_trend_direction([{"acpl": 50}] * 3) == "insufficient_data"
+
+    def test_improving_when_recent_lower(self):
+        # Prior mean = 80, recent mean = 60 → 25% drop → improving
+        trend = [{"acpl": 80}, {"acpl": 80}, {"acpl": 60}, {"acpl": 60}]
+        assert _acpl_trend_direction(trend) == "improving"
+
+    def test_declining_when_recent_higher(self):
+        trend = [{"acpl": 50}, {"acpl": 50}, {"acpl": 75}, {"acpl": 75}]
+        assert _acpl_trend_direction(trend) == "declining"
+
+    def test_flat_when_change_inside_threshold(self):
+        # Prior 60, recent 61 → ~1.7% → flat (threshold is ±5%)
+        trend = [{"acpl": 60}, {"acpl": 60}, {"acpl": 61}, {"acpl": 61}]
+        assert _acpl_trend_direction(trend) == "flat"
+
+
+class TestFindBestPhase:
+    def test_finds_lowest_acpl_phase(self):
+        phase = {
+            "opening": {"acpl": 40},
+            "middlegame": {"acpl": 80},
+            "endgame": {"acpl": 60},
+        }
+        assert _find_best_phase(phase) == "opening"
+
+    def test_handles_missing_phases(self):
+        assert _find_best_phase({}) == "N/A"
+
+
+class TestBuildTrajectoryBlock:
+    """v1.8.0: the new helper that builds the structured trajectory block
+    injected into the per-game coaching prompt."""
+
+    def test_no_patterns_row_returns_empty_block(self, db_path):
+        """When the player has never had patterns computed, return empty
+        string + trajectory_injected=False so coach_game silently skips
+        the prompt slot."""
+        conn = init_db(db_path)
+        pid = ensure_player(conn, "newkid", display_name="New Kid", age=8, rating=900)
+        block, diag = build_trajectory_block(conn, pid)
+        conn.close()
+        assert block == ""
+        assert diag["trajectory_injected"] is False
+        assert diag["trajectory_age_days"] is None
+        assert diag["weakest_phase"] is None
+
+    def test_populated_patterns_produces_block_with_expected_keywords(self, db_path):
+        """Synthetic stats_json → block contains the structured facts
+        (headline, weakest phase, tactical miss rate, etc.)."""
+        conn = init_db(db_path)
+        pid = ensure_player(conn, "evan", display_name="Evan", age=9, rating=1100)
+        stats = {
+            "total_games": 100,
+            "phase_analysis": {
+                "opening": {"acpl": 45.1, "moves": 800},
+                "middlegame": {"acpl": 77.8, "moves": 550},
+                "endgame": {"acpl": 50.0, "moves": 400},
+            },
+            "consistency": {"mean_acpl": 54.6, "total_games": 100, "rating": "Stable"},
+            "tactical_misses": {"miss_rate": 48.3},
+            "endgame_conversion": {"winning_endgames": {"conversion_rate": 81.3}},
+            "comeback_collapse": {
+                "comebacks": {"comeback_rate": 35.8},
+                "collapses": {"collapse_rate": 27.8},
+            },
+            "repertoire_consistency": {
+                "white": {"rating": "Focused"},
+                "black": {"rating": "Scattered"},
+            },
+            # Improving trend: prior 80→80, recent 60→60 (25% drop)
+            "acpl_trend": [
+                {"week": "2026-04-01", "acpl": 80, "games": 5},
+                {"week": "2026-04-08", "acpl": 80, "games": 5},
+                {"week": "2026-04-15", "acpl": 60, "games": 5},
+                {"week": "2026-04-22", "acpl": 60, "games": 5},
+            ],
+        }
+        conn.execute(
+            """INSERT INTO player_patterns
+            (player_id, period_start, period_end, stats_json, updated_at)
+            VALUES (?, ?, ?, ?, datetime('now'))""",
+            (pid, "2026-04-01", "2026-04-30", json.dumps(stats)),
+        )
+        conn.commit()
+        block, diag = build_trajectory_block(conn, pid)
+        conn.close()
+
+        assert diag["trajectory_injected"] is True
+        assert diag["weakest_phase"] == "middlegame"
+        assert diag["trend_direction"] == "improving"
+        assert diag["trajectory_age_days"] is not None
+        # The block contains the structured facts
+        assert "## Player Trajectory (last 30 days)" in block
+        assert "middlegame" in block
+        assert "77.8" in block
+        assert "48.3" in block  # tactical miss rate
+        assert "81.3" in block  # endgame conversion
+        assert "improving" in block
+        assert "Headline:" in block
+
+    def test_heading_does_not_collide_with_history_substring(self, db_path):
+        """`_count_history_games` in coach.py counts `### Game ` substrings.
+        The trajectory block MUST NOT contain that substring or it will
+        inflate the history count."""
+        conn = init_db(db_path)
+        pid = ensure_player(conn, "evan2", display_name="Evan", age=9, rating=1100)
+        stats = {
+            "total_games": 10,
+            "phase_analysis": {"middlegame": {"acpl": 60}},
+            "consistency": {"mean_acpl": 60},
+        }
+        conn.execute(
+            """INSERT INTO player_patterns
+            (player_id, period_start, period_end, stats_json, updated_at)
+            VALUES (?, ?, ?, ?, datetime('now'))""",
+            (pid, "2026-04-01", "2026-04-30", json.dumps(stats)),
+        )
+        conn.commit()
+        block, _ = build_trajectory_block(conn, pid)
+        conn.close()
+        assert "### Game " not in block
+
+    def test_token_budget_stays_bounded(self, db_path):
+        """Block should fit comfortably inside ~400 tokens (rough budget)
+        even with all fields populated. Uses the same ~4 chars/token
+        heuristic as coach._estimate_tokens."""
+        conn = init_db(db_path)
+        pid = ensure_player(conn, "evan3", display_name="Evan", age=9, rating=1100)
+        # Fully-populated stats — worst case for size
+        stats = {
+            "total_games": 500,
+            "phase_analysis": {
+                "opening": {"acpl": 45.1},
+                "middlegame": {"acpl": 77.8},
+                "endgame": {"acpl": 50.0},
+            },
+            "consistency": {"mean_acpl": 54.6, "total_games": 500},
+            "tactical_misses": {"miss_rate": 48.3},
+            "endgame_conversion": {"winning_endgames": {"conversion_rate": 81.3}},
+            "comeback_collapse": {
+                "comebacks": {"comeback_rate": 35.8},
+                "collapses": {"collapse_rate": 27.8},
+            },
+            "repertoire_consistency": {
+                "white": {"rating": "No clear repertoire"},
+                "black": {"rating": "No clear repertoire"},
+            },
+            "acpl_trend": [{"week": f"w{i}", "acpl": 60} for i in range(8)],
+        }
+        conn.execute(
+            """INSERT INTO player_patterns
+            (player_id, period_start, period_end, stats_json, updated_at)
+            VALUES (?, ?, ?, ?, datetime('now'))""",
+            (pid, "2026-04-01", "2026-04-30", json.dumps(stats)),
+        )
+        conn.commit()
+        block, _ = build_trajectory_block(conn, pid)
+        conn.close()
+        # ~4 chars/token; assert under 400 tokens (≈1600 chars)
+        assert len(block) < 1600, (
+            f"trajectory block grew to {len(block)} chars (~{len(block)//4} tokens), "
+            "exceeding the 400-token budget"
+        )
+
+    def test_skips_when_essentially_no_signal(self, db_path):
+        """If patterns row exists but every measurable field is missing,
+        skip injection instead of emitting an empty/useless block."""
+        conn = init_db(db_path)
+        pid = ensure_player(conn, "blank", display_name="Blank", age=10, rating=1000)
+        stats = {"total_games": 0, "phase_analysis": {}, "consistency": {}}
+        conn.execute(
+            """INSERT INTO player_patterns
+            (player_id, period_start, period_end, stats_json, updated_at)
+            VALUES (?, ?, ?, ?, datetime('now'))""",
+            (pid, "2026-04-01", "2026-04-30", json.dumps(stats)),
+        )
+        conn.commit()
+        block, diag = build_trajectory_block(conn, pid)
+        conn.close()
+        assert block == ""
+        assert diag["trajectory_injected"] is False

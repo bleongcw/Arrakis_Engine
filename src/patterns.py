@@ -1794,6 +1794,168 @@ def _find_worst_phase(phase_analysis: dict) -> str:
     return worst or "N/A"
 
 
+def _find_best_phase(phase_analysis: dict) -> str:
+    """Find the phase with the lowest ACPL (best play)."""
+    best = None
+    best_acpl = float("inf")
+    for name in ["opening", "middlegame", "endgame"]:
+        acpl = (phase_analysis.get(name) or {}).get("acpl")
+        if acpl is not None and acpl < best_acpl:
+            best_acpl = acpl
+            best = name
+    return best or "N/A"
+
+
+def _acpl_trend_direction(acpl_trend: list[dict]) -> str:
+    """Classify the recent ACPL trend as improving / flat / declining.
+
+    Compares the mean ACPL of the most recent 2 weekly buckets against
+    the 2 buckets before that. Lower ACPL = better play, so a drop is
+    improvement. Returns "improving" / "declining" / "flat" / "insufficient_data".
+    """
+    if not acpl_trend or len(acpl_trend) < 4:
+        return "insufficient_data"
+    recent = acpl_trend[-2:]
+    prior = acpl_trend[-4:-2]
+    recent_mean = sum(t.get("acpl", 0) or 0 for t in recent) / max(1, len(recent))
+    prior_mean = sum(t.get("acpl", 0) or 0 for t in prior) / max(1, len(prior))
+    # Use a relative threshold so noise doesn't flip the label
+    if prior_mean <= 0:
+        return "flat"
+    delta_pct = (recent_mean - prior_mean) / prior_mean * 100
+    if delta_pct < -5:
+        return "improving"
+    if delta_pct > 5:
+        return "declining"
+    return "flat"
+
+
+def build_trajectory_block(
+    conn,
+    player_id: int,
+) -> tuple[str, dict]:
+    """Build a structured per-player trajectory block for prompt injection.
+
+    Returns (formatted_markdown_block, diagnostics_dict).
+    - The markdown block goes into the GAME_COACHING_PROMPT under the
+      ``## Player Trajectory (last 30 days)`` heading.
+    - The diagnostics dict is suitable for storage in
+      ``game_coaching.coaching_meta_json``.
+
+    Falls back gracefully when patterns haven't been computed yet:
+    returns ("", {trajectory_injected: False, ...}). v1.8.0+
+    """
+    diag: dict = {
+        "trajectory_injected": False,
+        "trajectory_age_days": None,
+        "weakest_phase": None,
+        "trend_direction": None,
+    }
+    row = conn.execute(
+        """SELECT id, stats_json, updated_at, period_end FROM player_patterns
+        WHERE player_id = ? ORDER BY updated_at DESC LIMIT 1""",
+        (player_id,),
+    ).fetchone()
+    if not row or not row["stats_json"]:
+        return "", diag
+
+    try:
+        stats = json.loads(row["stats_json"])
+    except (TypeError, ValueError):
+        return "", diag
+
+    # Compute the freshness of the pattern row (days since updated_at).
+    try:
+        updated = datetime.fromisoformat(row["updated_at"])
+        age_days = max(0, (datetime.now() - updated).days)
+    except (TypeError, ValueError):
+        age_days = None
+
+    phase = stats.get("phase_analysis") or {}
+    consistency = stats.get("consistency") or {}
+    tactical = stats.get("tactical_misses") or {}
+    endgame = stats.get("endgame_conversion") or {}
+    comeback = stats.get("comeback_collapse") or {}
+    repertoire = stats.get("repertoire_consistency") or {}
+    acpl_trend = stats.get("acpl_trend") or []
+
+    worst_phase = _find_worst_phase(phase)
+    best_phase = _find_best_phase(phase)
+    worst_phase_acpl = (phase.get(worst_phase) or {}).get("acpl")
+    best_phase_acpl = (phase.get(best_phase) or {}).get("acpl")
+    trend_direction = _acpl_trend_direction(acpl_trend)
+
+    mean_acpl = consistency.get("mean_acpl")
+    total_games = consistency.get("total_games") or stats.get("total_games", 0)
+    miss_rate = tactical.get("miss_rate")
+    winning_endgames = endgame.get("winning_endgames") or {}
+    conversion_rate = winning_endgames.get("conversion_rate")
+    comeback_rate = (comeback.get("comebacks") or {}).get("comeback_rate")
+    collapse_rate = (comeback.get("collapses") or {}).get("collapse_rate")
+    white_rep_rating = (repertoire.get("white") or {}).get("rating") or "N/A"
+    black_rep_rating = (repertoire.get("black") or {}).get("rating") or "N/A"
+
+    # If essentially nothing is measurable yet, skip rather than emit
+    # an empty block that would just waste tokens.
+    if worst_phase == "N/A" and mean_acpl is None:
+        return "", diag
+
+    # Build the synthesized headline sentence deterministically.
+    pieces: list[str] = []
+    if trend_direction == "improving":
+        pieces.append("ACPL has been improving over the last 4 weeks")
+    elif trend_direction == "declining":
+        pieces.append("ACPL has been climbing over the last 4 weeks")
+    elif trend_direction == "flat":
+        pieces.append("ACPL has been steady over the last 4 weeks")
+    if worst_phase != "N/A" and worst_phase_acpl is not None:
+        pieces.append(
+            f"{worst_phase} remains the weakest phase at {worst_phase_acpl:.1f}cp avg loss"
+        )
+    headline = "; ".join(pieces) + "." if pieces else ""
+
+    lines = [
+        "",
+        "## Player Trajectory (last 30 days)",
+        "Measured cross-game signals for this player. Use these to ground",
+        "your feedback in the broader arc — acknowledge real progress where",
+        "the numbers show it, and note recurring weaknesses gently.",
+        "",
+    ]
+    if headline:
+        lines.append(f"**Headline:** {headline}")
+        lines.append("")
+    lines.append("**Numeric snapshot:**")
+    lines.append(f"- Games analyzed in this window: {total_games}")
+    if mean_acpl is not None:
+        lines.append(f"- Mean ACPL: {mean_acpl}")
+    if worst_phase != "N/A" and worst_phase_acpl is not None:
+        lines.append(f"- Weakest phase: {worst_phase} (ACPL {worst_phase_acpl:.1f})")
+    if best_phase != "N/A" and best_phase_acpl is not None:
+        lines.append(f"- Strongest phase: {best_phase} (ACPL {best_phase_acpl:.1f})")
+    if miss_rate is not None:
+        lines.append(f"- Tactical miss rate: {miss_rate}%")
+    if conversion_rate is not None:
+        lines.append(f"- Winning endgame conversion: {conversion_rate}%")
+    if comeback_rate is not None and collapse_rate is not None:
+        lines.append(
+            f"- Comeback rate: {comeback_rate}%  |  Collapse rate: {collapse_rate}%"
+        )
+    lines.append(
+        f"- Repertoire focus: White = {white_rep_rating}; Black = {black_rep_rating}"
+    )
+    lines.append(f"- ACPL trend direction (last 4 weeks): {trend_direction}")
+    lines.append("")
+
+    diag = {
+        "trajectory_injected": True,
+        "trajectory_age_days": age_days,
+        "weakest_phase": worst_phase if worst_phase != "N/A" else None,
+        "trend_direction": trend_direction,
+    }
+    return "\n".join(lines), diag
+
+
 def _compute_time_pressure(games: list[dict],
                            moves_by_game: dict[int, list[dict]]) -> dict | None:
     """Compute time pressure statistics from clock data.
