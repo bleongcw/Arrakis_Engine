@@ -26,7 +26,10 @@ from src.patterns import (
     _find_best_phase,
     build_trajectory_block,
     compute_player_patterns,
+    compute_recent_form_review,
     update_patterns,
+    _build_recent_games_table,
+    _build_recent_lessons_block,
 )
 from src.models import init_db, ensure_player
 
@@ -887,3 +890,206 @@ class TestBuildTrajectoryBlock:
         conn.close()
         assert block == ""
         assert diag["trajectory_injected"] is False
+
+
+# --- v1.9.0: Recent Form Review ---
+
+
+class TestRecentGamesTableFormatting:
+    """Format helpers for the recent-form-review prompt."""
+
+    def test_empty_games_returns_placeholder(self):
+        out = _build_recent_games_table([])
+        assert "no coached games found" in out
+
+    def test_table_includes_date_opponent_result_color_opening(self):
+        games = [
+            {"date_played": "2026-05-24 18:24:28", "player_color": "black",
+             "opponent_username": "sarcasta", "result": "win",
+             "opening_name": "Sicilian Defense", "time_class": "rapid"},
+        ]
+        out = _build_recent_games_table(games)
+        assert "2026-05-24" in out
+        assert "sarcasta" in out
+        assert "win" in out
+        assert "black" in out
+        assert "Sicilian Defense" in out
+        assert "rapid" in out
+
+    def test_long_opening_name_truncated(self):
+        games = [
+            {"date_played": "2026-05-24", "player_color": "white",
+             "opponent_username": "opp", "result": "win",
+             "opening_name": "X" * 100, "time_class": "rapid"},
+        ]
+        out = _build_recent_games_table(games)
+        # 40-char limit on opening name
+        assert "X" * 50 not in out
+
+
+class TestRecentLessonsBlockFormatting:
+    def test_empty_lessons_returns_placeholder(self):
+        assert "no per-game coaching" in _build_recent_lessons_block([])
+
+    def test_truncates_long_feedback_at_200_chars(self):
+        games = [
+            {"date_played": "2026-05-24", "opponent_username": "opp", "result": "win",
+             "key_lesson": "k", "practical_focus": "p",
+             "player_feedback": "F" * 500},
+        ]
+        out = _build_recent_lessons_block(games)
+        # Should contain at most 200 F's plus an ellipsis
+        assert "F" * 201 not in out
+        assert "…" in out
+
+    def test_short_feedback_not_truncated(self):
+        games = [
+            {"date_played": "2026-05-24", "opponent_username": "opp", "result": "win",
+             "key_lesson": "k", "practical_focus": "p",
+             "player_feedback": "short feedback text"},
+        ]
+        out = _build_recent_lessons_block(games)
+        assert "short feedback text" in out
+        assert "…" not in out
+
+
+class TestComputeRecentFormReview:
+    """v1.9.0: end-to-end test of the review generator (mocking the LLM)."""
+
+    def _seed_coached_games(self, db_path: str, player_id: int, n: int = 5):
+        """Insert n analyzed + coached games for the player."""
+        conn = init_db(db_path)
+        for i in range(n):
+            conn.execute(
+                """INSERT INTO games
+                (player_id, game_url, pgn, player_color, player_rating,
+                 opponent_rating, opponent_username, result, time_control,
+                 time_class, date_played, analysis_status, coaching_status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (player_id, f"https://chess.com/g/{i}",
+                 f'[White "evan"]\n[Black "opp{i}"]\n[Opening "Sicilian Defense"]\n\n1. e4 c5 *',
+                 "white" if i % 2 == 0 else "black", 1100, 1050,
+                 f"opp{i}", "win" if i % 2 == 0 else "loss",
+                 "600", "rapid",
+                 f"2026-05-{20-i:02d}", "complete", "complete"),
+            )
+            gid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+            conn.execute(
+                """INSERT INTO game_coaching
+                (game_id, provider, narrative, key_lesson, practical_focus,
+                 player_feedback, coach_notes)
+                VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (gid, "openai:gpt-5.5-pro-2026-04-23",
+                 f"Narrative for game {i}",
+                 f"Lesson {i}: outpost theme",
+                 f"Practice {i}: outpost drill",
+                 f"Feedback {i}: keep the knight active",
+                 f"Notes {i}"),
+            )
+        conn.commit()
+        conn.close()
+
+    def test_no_coached_games_returns_empty(self, db_path):
+        conn = init_db(db_path)
+        pid = ensure_player(conn, "lonely", display_name="Lonely", age=8, rating=900)
+        conn.close()
+        result = compute_recent_form_review(pid, db_path=db_path, provider="openai")
+        assert result == ""
+
+    def test_missing_player_raises(self, db_path):
+        init_db(db_path)
+        with pytest.raises(ValueError, match="not found"):
+            compute_recent_form_review(99999, db_path=db_path, provider="openai")
+
+    def test_calls_llm_and_persists_review(self, db_path):
+        from unittest.mock import patch
+        conn = init_db(db_path)
+        pid = ensure_player(conn, "evan", display_name="Evan", age=9, rating=1100)
+        conn.close()
+        self._seed_coached_games(db_path, pid, n=5)
+
+        mock_review = (
+            "Over your last 5 games you played 3 wins and 2 losses. "
+            "Your win against opp0 showed the outpost theme. "
+            "The middlegame is still your weakest area. "
+            "For next time: find one outpost before move 15."
+        )
+        with patch("src.llm_providers.call_provider", return_value=mock_review):
+            result = compute_recent_form_review(
+                pid, db_path=db_path, provider="openai",
+                model="gpt-5.5-pro-2026-04-23",
+            )
+
+        assert result == mock_review
+
+        # Verify persistence in player_patterns
+        conn = init_db(db_path)
+        row = conn.execute(
+            "SELECT recent_form_review, recent_form_review_updated_at "
+            "FROM player_patterns WHERE player_id = ?",
+            (pid,),
+        ).fetchone()
+        conn.close()
+        assert row is not None
+        assert row["recent_form_review"] == mock_review
+        assert row["recent_form_review_updated_at"] is not None
+
+    def test_respects_window_parameter(self, db_path):
+        """If only 3 games exist, window=10 should still work with what's available."""
+        from unittest.mock import patch
+        conn = init_db(db_path)
+        pid = ensure_player(conn, "evan2", display_name="Evan", age=9, rating=1100)
+        conn.close()
+        self._seed_coached_games(db_path, pid, n=3)
+
+        captured_prompts = []
+        def capture(provider, prompt, **kwargs):
+            captured_prompts.append(prompt)
+            return "mock review"
+
+        with patch("src.llm_providers.call_provider", side_effect=capture):
+            compute_recent_form_review(
+                pid, db_path=db_path, provider="openai", window=10,
+            )
+
+        assert len(captured_prompts) == 1
+        # Prompt should contain 3 games (not 10) since that's all available
+        # Look for the "### Game N" markers in the lessons block
+        assert "### Game 1" in captured_prompts[0]
+        assert "### Game 3" in captured_prompts[0]
+        assert "### Game 4" not in captured_prompts[0]
+
+    def test_prompt_includes_trajectory_block(self, db_path):
+        """The review prompt must include the v1.8.0 trajectory snapshot
+        when one is available — that's the whole point of cross-game review."""
+        from unittest.mock import patch
+        conn = init_db(db_path)
+        pid = ensure_player(conn, "evan3", display_name="Evan", age=9, rating=1100)
+        conn.close()
+        self._seed_coached_games(db_path, pid, n=3)
+
+        # Seed a patterns row so build_trajectory_block returns content
+        conn = init_db(db_path)
+        stats = {
+            "total_games": 3,
+            "phase_analysis": {"middlegame": {"acpl": 80.0}, "opening": {"acpl": 40.0}},
+            "consistency": {"mean_acpl": 60.0, "total_games": 3},
+            "tactical_misses": {"miss_rate": 50.0},
+        }
+        conn.execute(
+            """INSERT INTO player_patterns
+            (player_id, period_start, period_end, stats_json, updated_at)
+            VALUES (?, ?, ?, ?, datetime('now'))""",
+            (pid, "2026-04-01", "2026-04-30", json.dumps(stats)),
+        )
+        conn.commit()
+        conn.close()
+
+        captured = []
+        with patch("src.llm_providers.call_provider",
+                   side_effect=lambda p, prompt, **kw: captured.append(prompt) or "ok"):
+            compute_recent_form_review(pid, db_path=db_path, provider="openai")
+
+        assert "Player Trajectory (last 30 days)" in captured[0]
+        assert "middlegame" in captured[0]
+

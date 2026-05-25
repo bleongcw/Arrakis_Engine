@@ -67,6 +67,8 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             self._handle_coach(body)
         elif path == "/api/trend-summary":
             self._handle_trend_summary(body)
+        elif path == "/api/recent-form-review":
+            self._handle_recent_form_review(body)
         elif path == "/api/pipeline/harvest":
             self._handle_pipeline_harvest(body)
         elif path == "/api/pipeline/analyze":
@@ -225,6 +227,63 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             "player": player_username,
             "provider": provider,
             "message": f"Trend summary generation started for {player_username}."
+        })
+
+    def _handle_recent_form_review(self, body):
+        """v1.9.0: trigger Recent Form Review (last 10 games) for a player."""
+        from src.patterns import compute_recent_form_review, DEFAULT_REVIEW_WINDOW
+
+        player_username = body.get("player")
+        provider = body.get("provider", "openai")
+        window = int(body.get("window", DEFAULT_REVIEW_WINDOW) or DEFAULT_REVIEW_WINDOW)
+        window = max(3, min(30, window))  # clamp 3-30
+
+        if not player_username:
+            self._send_json({"error": "player required"}, 400)
+            return
+
+        conn = self._get_conn()
+        try:
+            row = conn.execute(
+                "SELECT id FROM players WHERE username = ?",
+                (player_username,),
+            ).fetchone()
+            if not row:
+                self._send_json({"error": f"Player {player_username} not found"}, 404)
+                return
+            player_id = row["id"]
+        finally:
+            conn.close()
+
+        # Load coaching config so the provider can resolve its model from yaml
+        cfg = None
+        try:
+            import yaml
+            with open("config.yaml") as f:
+                cfg = yaml.safe_load(f)
+        except Exception:
+            pass
+
+        def run_review():
+            try:
+                compute_recent_form_review(
+                    player_id, db_path=self.db_path,
+                    provider=provider, window=window, config=cfg,
+                )
+                logger.info("Recent form review complete for %s (%s, %d games)",
+                            player_username, provider, window)
+            except Exception as e:
+                logger.error("Recent form review failed for %s: %s", player_username, e)
+
+        thread = threading.Thread(target=run_review, daemon=True)
+        thread.start()
+
+        self._send_json({
+            "status": "started",
+            "player": player_username,
+            "provider": provider,
+            "window": window,
+            "message": f"Recent form review started for {player_username} (last {window} games).",
         })
 
     # ── Player CRUD handlers ────────────────────────────────────

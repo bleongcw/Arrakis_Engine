@@ -167,6 +167,62 @@ def cmd_patterns(args, config):
     print(f"Updated patterns for {count} players.")
 
 
+def cmd_review(args, config):
+    """v1.9.0: Generate the Recent Form Review (last N coached games) for a player.
+
+    Distinct from `patterns` (stats aggregate) — this is an LLM-generated
+    narrative across the last N coached games. ~$0.10-0.15 per run.
+    """
+    from src.patterns import compute_recent_form_review, DEFAULT_REVIEW_WINDOW
+    from src.models import init_db
+
+    db_path = config["database"]["path"]
+    provider = args.provider or config.get("coaching", {}).get("default_provider", "openai")
+    window = max(3, min(30, args.window or DEFAULT_REVIEW_WINDOW))
+    players_arg = args.player or []
+
+    conn = init_db(db_path)
+    if players_arg:
+        targets = []
+        for username in players_arg:
+            row = conn.execute(
+                "SELECT id, username, display_name FROM players WHERE username = ?",
+                (username,),
+            ).fetchone()
+            if not row:
+                print(f"WARN: player '{username}' not found — skipping")
+                continue
+            targets.append(dict(row))
+    else:
+        # All active players
+        rows = conn.execute(
+            "SELECT id, username, display_name FROM players WHERE is_active = 1"
+        ).fetchall()
+        targets = [dict(r) for r in rows]
+    conn.close()
+
+    if not targets:
+        print("No target players found.")
+        return
+
+    print(f"Generating Recent Form Review for {len(targets)} player(s) "
+          f"using {provider} (window={window})...")
+
+    for t in targets:
+        try:
+            review = compute_recent_form_review(
+                t["id"], db_path=db_path, provider=provider,
+                window=window, config=config,
+            )
+            if review:
+                preview = review.replace("\n", " ")[:120]
+                print(f"  ✓ {t['username']} ({len(review)} chars): {preview}…")
+            else:
+                print(f"  — {t['username']}: no coached games to review yet")
+        except Exception as e:
+            print(f"  ✗ {t['username']}: ERROR — {e}")
+
+
 def cmd_export_json(args, config):
     """Export data to JSON for the dashboard."""
     db_path = config["database"]["path"]
@@ -522,6 +578,26 @@ def main():
     # patterns
     patterns_parser = subparsers.add_parser("patterns", help="Update pattern tracking")
 
+    # review (v1.9.0) — LLM-generated narrative across the last N coached games
+    review_parser = subparsers.add_parser(
+        "review",
+        help="(v1.9.0) Generate the Recent Form Review for one or all players",
+    )
+    review_parser.add_argument(
+        "--player", action="append",
+        help="Username (repeat for multiple). Default: all active players.",
+    )
+    review_parser.add_argument(
+        "--provider", choices=["claude", "openai", "gemini", "grok",
+                               "mistral", "deepseek", "qwen", "ollama"],
+        help="LLM provider (default: from coaching.default_provider)",
+    )
+    review_parser.add_argument(
+        "--window", type=int, default=10,
+        help="Number of recent coached games to include in the review "
+             "(default: 10, range 3-30)",
+    )
+
     # export-json
     export_parser = subparsers.add_parser("export-json", help="Export data to JSON for dashboard")
 
@@ -605,6 +681,8 @@ def main():
         cmd_coach(args, config)
     elif args.command == "patterns":
         cmd_patterns(args, config)
+    elif args.command == "review":
+        cmd_review(args, config)
     elif args.command == "export-json":
         cmd_export_json(args, config)
     elif args.command == "report":

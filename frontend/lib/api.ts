@@ -42,8 +42,15 @@ export async function fetchGameDetail(id: number): Promise<GameDetail> {
   return fetchJSON<GameDetail>(`${BASE}/games/${id}`);
 }
 
-export async function fetchPatterns(player: string): Promise<{ stats: PatternStats; trend_summary?: string }> {
-  return fetchJSON<{ stats: PatternStats; trend_summary?: string }>(
+export async function fetchPatterns(player: string): Promise<{
+  stats: PatternStats;
+  trend_summary?: string;
+  /** v1.9.0+: LLM narrative across the last N coached games. */
+  recent_form_review?: string | null;
+  /** v1.9.0+: ISO timestamp of the last review generation. */
+  recent_form_review_updated_at?: string | null;
+}> {
+  return fetchJSON(
     `${BASE}/patterns?player=${encodeURIComponent(player)}`
   );
 }
@@ -71,6 +78,21 @@ export async function triggerTrendSummary(
     body: JSON.stringify({ player, provider }),
   });
   if (!res.ok) throw new Error(`Trend summary API error: ${res.status}`);
+  return res.json();
+}
+
+/** v1.9.0: Trigger the Recent Form Review (LLM narrative across last N games). */
+export async function triggerRecentFormReview(
+  player: string,
+  provider: string = "openai",
+  window: number = 10
+): Promise<{ status: string; message: string; window: number }> {
+  const res = await fetch(`${BASE}/recent-form-review`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ player, provider, window }),
+  });
+  if (!res.ok) throw new Error(`Recent form review API error: ${res.status}`);
   return res.json();
 }
 

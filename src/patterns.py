@@ -1782,6 +1782,230 @@ def generate_trend_summary(player_id: int, db_path: str | None = None,
     return summary
 
 
+# ---------------------------------------------------------------------------
+# v1.9.0: Recent Form Review
+# ---------------------------------------------------------------------------
+#
+# Distinct from `trend_summary` (which is a 30-day stats aggregate written
+# without knowledge of specific games). The recent-form review names the
+# last 10 coached games by date + opponent + result, synthesizes the
+# per-game lessons the coach has already written, and identifies the
+# through-line. This is what the user sees when asking "how have my
+# last 10 games been, as a unit?"
+#
+# Triggered manually via the Patterns page "Refresh Review" button or
+# `python main.py review --player X`. ~$0.10-0.15 per call with gpt-5.5-pro.
+
+DEFAULT_REVIEW_WINDOW = 10  # games
+
+RECENT_FORM_REVIEW_PROMPT = """You are a chess coach writing a multi-game review for {name}, a {age}-year-old at the {tier_label} {tier_icon} level (rating ~{rating}).
+
+Each of {name}'s recent games has already been coached one-by-one. Your job is the **cross-game review** — what's the through-line across the last {window} games? What's actually changing? What patterns recur?
+
+## Last {window} games
+{games_table}
+
+## What the per-game coach has been telling {name}
+(Most recent first. Use these to find through-lines — do NOT repeat them verbatim.)
+{lessons_block}
+
+## Player Trajectory (last 30 days, measured)
+{trajectory_block}
+
+## Instructions
+Write a 4-paragraph review for {name}. Plain text, no headings, no markdown.
+
+1. **The arc** — Recent record (W/L/D) + 2-3 sentences setting the scene. Use language a {age}-year-old at {tier_label} level can follow: {language_level}
+
+2. **Specific games** — Name 2-3 standout games by date + opponent + what happened (e.g. "Your win against sarcasta on 2026-05-24 showed exactly the knight-outpost theme"). Refer to actual moves only when they illustrate the through-line. Mix at least one win and one loss/draw if both exist.
+
+3. **What's working / what's not** — Tie to the measured trajectory above. Be concrete: name the phases, name the measured stats by description (don't read back numbers). Acknowledge real progress where the trajectory shows it; flag recurring weaknesses gently — once, in passing.
+
+4. **Forward guidance** — One concrete coaching mission for the next {window} games. Frame as a challenge, not a lecture. Specific and observable (e.g. "find one knight outpost before move 15"), not abstract ("play more accurately").
+
+Tone: warm, honest, and personal. Address {name} by name in paragraph 1 or 2.
+
+Respond with ONLY the four paragraphs of plain text. No JSON, no markdown headings, no extra commentary."""
+
+
+def _build_recent_games_table(games: list[dict]) -> str:
+    """Format the last N coached games as a compact table for the prompt."""
+    if not games:
+        return "  (no coached games found)"
+    lines = []
+    for g in games:
+        opp = g.get("opponent_username") or "?"
+        date = (g.get("date_played") or "")[:10]  # YYYY-MM-DD
+        color = g.get("player_color", "?")
+        result = g.get("result", "?")
+        opening = (g.get("opening_name") or "—")[:40]
+        tc = g.get("time_class") or "?"
+        lines.append(
+            f"  - {date} | {color:>5} vs {opp:<20} | {result:<4} | "
+            f"{tc:<6} | {opening}"
+        )
+    return "\n".join(lines)
+
+
+def _build_recent_lessons_block(games: list[dict]) -> str:
+    """Format per-game lessons + practice focus + brief excerpt for the prompt."""
+    if not games:
+        return "  (no per-game coaching available)"
+    parts = []
+    for i, g in enumerate(games, 1):
+        date = (g.get("date_played") or "")[:10]
+        result = g.get("result", "?")
+        opp = g.get("opponent_username") or "?"
+        lesson = (g.get("key_lesson") or "").strip()
+        focus = (g.get("practical_focus") or "").strip()
+        feedback = (g.get("player_feedback") or "").strip()
+        # Trim long player_feedback to first ~200 chars for context
+        feedback_excerpt = feedback[:200].rstrip()
+        if len(feedback) > 200:
+            feedback_excerpt += "…"
+        parts.append(
+            f"### Game {i} ({date}, {result} vs {opp})\n"
+            f"- Key lesson: {lesson or 'N/A'}\n"
+            f"- Practice focus: {focus or 'N/A'}\n"
+            f"- Feedback excerpt: {feedback_excerpt or 'N/A'}\n"
+        )
+    return "\n".join(parts)
+
+
+def compute_recent_form_review(
+    player_id: int,
+    db_path: str | None = None,
+    provider: str = "openai",
+    model: str | None = None,
+    window: int = DEFAULT_REVIEW_WINDOW,
+    config: dict | None = None,
+) -> str:
+    """Generate the LLM-powered Recent Form Review across the last N coached games.
+
+    Pulls the most-recent ``window`` coached games for the player, builds a
+    prompt that combines the per-game lessons + the measured trajectory,
+    calls the LLM, stores the result in
+    ``player_patterns.recent_form_review`` + ``recent_form_review_updated_at``,
+    and returns the review text.
+
+    Returns empty string if no coached games exist for the player.
+    Raises ValueError if the player is not found.
+
+    v1.9.0+
+    """
+    from src.llm_providers import call_provider, resolve_model
+    from src.tiers import get_tier
+
+    conn = init_db(db_path)
+
+    player = conn.execute(
+        "SELECT * FROM players WHERE id = ?", (player_id,)
+    ).fetchone()
+    if not player:
+        conn.close()
+        raise ValueError(f"Player {player_id} not found")
+
+    # Fetch last N coached games (ordered most-recent first)
+    rows = conn.execute(
+        """SELECT g.id, g.date_played, g.player_color, g.result,
+                  g.opponent_username, g.time_class, g.pgn,
+                  gc.key_lesson, gc.practical_focus, gc.player_feedback
+           FROM games g
+           JOIN game_coaching gc ON gc.game_id = g.id
+           WHERE g.player_id = ?
+             AND g.analysis_status = 'complete'
+             AND gc.player_feedback IS NOT NULL
+           ORDER BY g.date_played DESC
+           LIMIT ?""",
+        (player_id, window),
+    ).fetchall()
+
+    if not rows:
+        conn.close()
+        logger.info("No coached games for player %d — skipping review", player_id)
+        return ""
+
+    games = []
+    for r in rows:
+        g = dict(r)
+        g["opening_name"] = _get_opening_name(g.get("pgn", "") or "")
+        games.append(g)
+
+    # Build the trajectory block (reuses v1.8.0 helper)
+    trajectory_block, _diag = build_trajectory_block(conn, player_id)
+    if not trajectory_block:
+        trajectory_block = (
+            "  (no trajectory snapshot yet — run `python main.py patterns` "
+            "to enable measured cross-game signals)"
+        )
+
+    # Player + tier
+    name = player["display_name"] or player["username"]
+    age = player["age"] or 10
+    rating = player["rating"] or 1000
+    tier = get_tier(rating)
+
+    prompt = RECENT_FORM_REVIEW_PROMPT.format(
+        name=name,
+        age=age,
+        rating=rating,
+        tier_label=tier.label,
+        tier_icon=tier.icon,
+        language_level=tier.language_level,
+        window=len(games),  # actual count, may be < requested if few games
+        games_table=_build_recent_games_table(games),
+        lessons_block=_build_recent_lessons_block(games),
+        trajectory_block=trajectory_block,
+    )
+
+    # Resolve provider config + call LLM
+    coaching_config = (config or {}).get("coaching", {}) if config else {}
+    used_model = resolve_model(provider, model, coaching_config)
+    logger.info(
+        "Generating recent form review for player %d (window=%d) with %s:%s...",
+        player_id, len(games), provider, used_model,
+    )
+    review = call_provider(
+        provider, prompt, model=used_model, coaching_config=coaching_config
+    )
+
+    # Persist on the most-recent player_patterns row
+    row = conn.execute(
+        """SELECT id FROM player_patterns
+        WHERE player_id = ? ORDER BY updated_at DESC LIMIT 1""",
+        (player_id,),
+    ).fetchone()
+    if row:
+        conn.execute(
+            """UPDATE player_patterns
+            SET recent_form_review = ?, recent_form_review_updated_at = datetime('now')
+            WHERE id = ?""",
+            (review, row["id"]),
+        )
+    else:
+        # No patterns row yet — create a minimal one so the review has somewhere to live
+        now = datetime.now()
+        conn.execute(
+            """INSERT INTO player_patterns
+            (player_id, period_start, period_end, stats_json,
+             recent_form_review, recent_form_review_updated_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))""",
+            (
+                player_id,
+                (now - timedelta(days=30)).strftime("%Y-%m-%d"),
+                now.strftime("%Y-%m-%d"),
+                json.dumps({}),
+                review,
+            ),
+        )
+    conn.commit()
+    conn.close()
+
+    logger.info("Recent form review generated for player %d (%d chars)",
+                player_id, len(review))
+    return review
+
+
 def _find_worst_phase(phase_analysis: dict) -> str:
     """Find the phase with the highest ACPL."""
     worst = None

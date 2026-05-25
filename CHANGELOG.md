@@ -4,6 +4,92 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.9.0] - 2026-05-25
+
+### Added
+- **Recent Form Review — LLM narrative across the last 10 coached games.**
+  Bernard noticed that the per-game coaching panels feel game-internal
+  even with v1.8.0's trajectory injection working as designed — the
+  per-game prompt acknowledges measured trends, but you only see those
+  trends one game at a time. There was no "let me tell you about your
+  last 10 games as a unit, naming specific games" view.
+
+  v1.9.0 adds a new card at the top of the Patterns page
+  (`/[player]/patterns`), sitting above the existing AI Coaching
+  Summary. The new card displays an LLM-generated 4-paragraph review:
+
+  1. **The arc** — recent W/L/D record, what kind of week it's been
+  2. **Standout games** — 2–3 specific games named by date + opponent
+  3. **What's working / what's not** — tied to the measured trajectory
+  4. **Forward guidance** — one concrete coaching mission for the next 10 games
+
+  Distinct from the existing `trend_summary` (which is a 30-day stats
+  aggregate written without knowledge of specific games). The review
+  pulls each of the last 10 games' `key_lesson`, `practical_focus`,
+  and a 200-char excerpt of `player_feedback`, combines them with the
+  v1.8.0 trajectory snapshot, and asks the LLM to synthesize.
+
+- **Reuses the v1.8.0 trajectory infrastructure** — the review prompt
+  includes the same `build_trajectory_block` snapshot the per-game
+  coach sees, so it knows the player's measured weakest phase, ACPL
+  trend direction, tactical miss rate, endgame conversion,
+  comeback/collapse rates without restating numbers to the reader.
+
+- **Manual refresh trigger** — same UX pattern as the existing
+  Coaching Summary card. Click "Generate Review" / "Regenerate", pick
+  a provider, wait 2–5 minutes for a reasoning model to write it. Cost
+  per refresh: ~$0.10–0.15 with gpt-5.5-pro on a typical prompt.
+
+- **New CLI command** `python main.py review`:
+  ```
+  python main.py review                            # all active players
+  python main.py review --player evanleongxinyu    # one player
+  python main.py review --provider claude --window 15
+  ```
+  Useful for batch-generating reviews after re-coaching a backlog of
+  games (cf. `scripts/recoach_test.py`).
+
+- **New API endpoint** `POST /api/recent-form-review` mirrors the
+  existing `/api/trend-summary` shape. GET `/api/patterns?player=X`
+  now also includes `recent_form_review` and
+  `recent_form_review_updated_at` in the response payload.
+
+### Schema
+- **New columns** on `player_patterns`: `recent_form_review TEXT` and
+  `recent_form_review_updated_at TEXT`. Idempotent migration via
+  `init_db()` — runs automatically on next startup. No data loss; old
+  rows just get NULL until a review is generated.
+
+### Tests
+- 11 new backend tests in `tests/test_patterns.py`:
+  - `TestRecentGamesTableFormatting` (3) — date / opponent / opening
+    rendering + 40-char opening-name truncation
+  - `TestRecentLessonsBlockFormatting` (3) — 200-char player_feedback
+    truncation + short-feedback passthrough
+  - `TestComputeRecentFormReview` (5) — no coached games → empty,
+    missing player → ValueError, mocked LLM persists review +
+    timestamp, window param works with fewer-than-N games, trajectory
+    block flows into the prompt
+- Backend total: 385 → **396 tests**. Frontend unchanged at 91.
+
+### Migration
+- No backfill needed. The first time a player loads the Patterns page
+  after upgrade, the Recent Form Review card appears in empty state
+  with a "Generate Review" button. Click it to populate.
+- Existing `trend_summary` rows are untouched.
+
+### Recommended usage
+1. After coaching a batch of new games (e.g. via
+   `scripts/recoach_test.py`), open the Patterns page for the player.
+2. Click "Generate Review" on the new card at the top.
+3. Wait 2–5 minutes for the reasoning model.
+4. The review names specific games from the last 10 coached, ties them
+   to measured trajectory, and gives a forward coaching mission.
+5. Re-generate when you've coached another batch of games and want a
+   fresh take.
+
+---
+
 ## [1.8.2] - 2026-05-25
 
 ### Fixed
@@ -29,19 +115,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   re-coaching needed. Already-stored summaries from every provider now
   render correctly on next page load.
 
-### Tests
-- New `frontend/lib/__tests__/summary.test.ts` with 15 cases including
-  two v1.8.2 regression locks: one with the exact `\\n\\n` shape that
-  triggered the bug, and one with the verbatim Evan Leong summary from
-  the report (4 paragraphs, asserts no literal `\n` survives in any
-  rendered paragraph).
-- Frontend total: 76 → **91 tests**. Backend unchanged at 385.
-
----
-
-## [1.8.2] - 2026-05-25
-
-### Fixed
 - **Coaching-panel badges rendered escape sequences instead of emoji.**
   The "Game Story" header on the per-game coaching panel was showing
   literal text `📚 10 recent games in context` and
@@ -61,9 +134,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   now render correctly. No data-shape changes, no API changes — pure
   presentational patch.
 
-  No new tests — Vitest renders the JSX exactly as the browser would
-  and would have caught a real regression; this was a content-only
-  byte fix. Frontend suite stays at 76 tests.
+### Tests
+- New `frontend/lib/__tests__/summary.test.ts` with 15 cases including
+  two v1.8.2 regression locks: one with the exact `\\n\\n` shape that
+  triggered the bug, and one with the verbatim Evan Leong summary from
+  the report (4 paragraphs, asserts no literal `\n` survives in any
+  rendered paragraph).
+- Frontend total: 76 → **91 tests**. Backend unchanged at 385.
 
 ---
 

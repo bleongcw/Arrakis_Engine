@@ -200,6 +200,13 @@ def _migrate(conn: sqlite3.Connection):
     if "trend_summary" not in pattern_cols:
         conn.execute("ALTER TABLE player_patterns ADD COLUMN trend_summary TEXT")
         conn.commit()
+    if "recent_form_review" not in pattern_cols:
+        # v1.9.0: LLM-generated narrative across the last 10 coached games.
+        # Distinct from trend_summary (which is a 30-day stats aggregate) —
+        # this names specific games and identifies cross-game through-lines.
+        conn.execute("ALTER TABLE player_patterns ADD COLUMN recent_form_review TEXT")
+        conn.execute("ALTER TABLE player_patterns ADD COLUMN recent_form_review_updated_at TEXT")
+        conn.commit()
 
     player_cols = {r[1] for r in conn.execute("PRAGMA table_info(players)").fetchall()}
     if "fide_id" not in player_cols:
