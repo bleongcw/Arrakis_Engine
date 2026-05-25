@@ -97,7 +97,7 @@ export function CoachingPanels({ coaching }: CoachingPanelsProps) {
                 className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-normal"
                 title={`The coach had access to the lessons from ${historyCount} previous coached games when writing this brief, so the advice should build on (not repeat) earlier coaching.`}
               >
-                \uD83D\uDCDA {historyStamp}
+                📚 {historyStamp}
               </span>
             )}
             {trajectoryStamp && (
@@ -105,7 +105,7 @@ export function CoachingPanels({ coaching }: CoachingPanelsProps) {
                 className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-normal"
                 title={trajectoryTooltip}
               >
-                \uD83D\uDCCA {trajectoryStamp}
+                📊 {trajectoryStamp}
               </span>
             )}
           </CardTitle>

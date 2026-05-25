@@ -39,6 +39,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [1.8.2] - 2026-05-25
+
+### Fixed
+- **Coaching-panel badges rendered escape sequences instead of emoji.**
+  The "Game Story" header on the per-game coaching panel was showing
+  literal text `📚 10 recent games in context` and
+  `📊 30-day trajectory (Nd old)` instead of the intended
+  📚 / 📊 glyphs. Root cause: the JSX source contained the JavaScript
+  string-escape form `📚` and `📊` as plain text
+  inside the element body — and JSX doesn't decode JS escape sequences
+  in text nodes (it does in `{"\uD83D…"}` JS expressions or in
+  attribute-value strings, but not in raw JSX text). The pre-existing
+  history-stamp badge from v1.6.0 had the same latent bug; it just
+  hadn't been spotted because the v1.8.0 trajectory stamp landed next
+  to it with the same pattern.
+
+  Fix: replace the literal escape strings with actual UTF-8 emoji
+  bytes (📚, 📊) in
+  `frontend/components/game-detail/coaching-panels.tsx`. Both badges
+  now render correctly. No data-shape changes, no API changes — pure
+  presentational patch.
+
+  No new tests — Vitest renders the JSX exactly as the browser would
+  and would have caught a real regression; this was a content-only
+  byte fix. Frontend suite stays at 76 tests.
+
+---
+
 ## [1.8.1] - 2026-05-25
 
 ### Fixed
