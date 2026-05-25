@@ -4,6 +4,41 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.8.2] - 2026-05-25
+
+### Fixed
+- **Coaching Summary now renders paragraph breaks instead of literal
+  `\n\n` text.** Bernard noticed that Evan's coaching summary on the
+  patterns page was showing visible `\n\n` characters between paragraphs
+  instead of actually breaking. Root cause: the parser in
+  `frontend/components/patterns/trend-summary.tsx` was splitting on real
+  `"\n\n"` (two newline chars), but the LLM payload sometimes arrives
+  with the **two-character escape sequence** `\` + `n` instead of a real
+  newline — most often from the OpenAI Responses API. The split silently
+  matched nothing, the whole summary rendered as one giant paragraph,
+  and the unrendered escape sequences leaked into the UI.
+
+  Fix: extracted the parser into `frontend/lib/summary.ts` as
+  `parseTrendSummary()` and added a normalization pass that converts
+  literal `\n` (and `\r\n`) sequences to real newlines *before* splitting,
+  and again on each JSON-extracted paragraph in case the escape leaked
+  through the JSON layer too. The component now calls the helper instead
+  of inlining the regex.
+
+  Pure frontend fix — no backend change, no database change, no
+  re-coaching needed. Already-stored summaries from every provider now
+  render correctly on next page load.
+
+### Tests
+- New `frontend/lib/__tests__/summary.test.ts` with 15 cases including
+  two v1.8.2 regression locks: one with the exact `\\n\\n` shape that
+  triggered the bug, and one with the verbatim Evan Leong summary from
+  the report (4 paragraphs, asserts no literal `\n` survives in any
+  rendered paragraph).
+- Frontend total: 76 → **91 tests**. Backend unchanged at 385.
+
+---
+
 ## [1.8.1] - 2026-05-25
 
 ### Fixed

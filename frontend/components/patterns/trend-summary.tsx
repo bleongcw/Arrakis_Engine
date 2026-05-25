@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { triggerTrendSummary, fetchPatterns } from "@/lib/api";
 import { PROVIDERS } from "@/lib/providers";
+import { parseTrendSummary } from "@/lib/summary";
 
 function CoachingSummaryInfoModal({ onClose }: { onClose: () => void }) {
   useEffect(() => {
@@ -79,19 +80,9 @@ export function TrendSummary({ summary, player, onSummaryGenerated }: TrendSumma
     }
   }, [player, onSummaryGenerated]);
 
-  // Parse summary: handle both plain text and JSON {"paragraphs": [...]} format
-  const paragraphs: string[] = (() => {
-    if (!summary) return [];
-    const trimmed = summary.trim();
-    if (trimmed.startsWith("{")) {
-      try {
-        const parsed = JSON.parse(trimmed);
-        if (Array.isArray(parsed.paragraphs)) return parsed.paragraphs;
-        if (typeof parsed === "object") return Object.values(parsed).flat().filter((v): v is string => typeof v === "string");
-      } catch {}
-    }
-    return trimmed.split("\n\n").filter(Boolean);
-  })();
+  // Parse summary into paragraphs. Helper handles plain text, JSON
+  // {"paragraphs": [...]} format, and literal `\n\n` escape leaks (v1.8.2).
+  const paragraphs = parseTrendSummary(summary);
 
   const providerSelector = (
     <div className="flex items-center gap-2">

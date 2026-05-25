@@ -1,0 +1,60 @@
+// ArrakisEngine — Chess Coaching AI
+// Copyright (C) 2026 Bernard Leong
+// Licensed under AGPL-3.0. See LICENSE file.
+
+/**
+ * Parser for `trend_summary` strings stored on `player_patterns`.
+ *
+ * Backend stores whatever the LLM returns verbatim. The shape varies:
+ *  - Plain prose with real `\n\n` paragraph breaks (Claude, Gemini, DeepSeek).
+ *  - JSON `{"paragraphs": [...]}` (older Claude runs).
+ *  - Plain prose where `\n` arrives as the **two-character** escape sequence
+ *    `\` + `n` instead of a real newline (some ChatGPT / Responses API
+ *    runs). Splitting on real `"\n\n"` then silently produces one giant
+ *    paragraph with literal `\n\n` text leaking into the UI — the v1.8.2 bug.
+ *
+ * The fix: normalize literal `\n` sequences to real newlines *before*
+ * splitting, and also inside each JSON-extracted paragraph in case the
+ * escape leaked through the JSON layer too.
+ */
+export function parseTrendSummary(summary: string | null | undefined): string[] {
+  if (!summary) return [];
+  const trimmed = summary.trim();
+
+  let candidates: string[] = [];
+
+  if (trimmed.startsWith("{")) {
+    try {
+      const parsed: unknown = JSON.parse(trimmed);
+      if (parsed && typeof parsed === "object") {
+        const obj = parsed as Record<string, unknown>;
+        if (Array.isArray(obj.paragraphs)) {
+          candidates = obj.paragraphs.filter((v): v is string => typeof v === "string");
+        } else {
+          candidates = Object.values(obj)
+            .flat()
+            .filter((v): v is string => typeof v === "string");
+        }
+      }
+    } catch {
+      // Fall through to the plain-text path.
+    }
+  }
+
+  if (candidates.length === 0) {
+    const normalized = unescapeNewlines(trimmed);
+    candidates = normalized.split(/\n\s*\n/);
+  }
+
+  return candidates
+    .map((p) => unescapeNewlines(p).trim())
+    .filter(Boolean);
+}
+
+/**
+ * Replace the two-character sequence `\` + `n` (and `\` + `r\n`) with real
+ * newlines. Leaves already-real newlines untouched.
+ */
+function unescapeNewlines(s: string): string {
+  return s.replace(/\\r\\n/g, "\n").replace(/\\n/g, "\n");
+}
