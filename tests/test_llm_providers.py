@@ -55,6 +55,14 @@ class TestProviderRegistry:
     def test_timeout_is_positive(self, slug):
         assert PROVIDER_REGISTRY[slug]["default_timeout"] > 0
 
+    def test_openai_timeout_at_least_600s(self):
+        # v1.8.1 regression lock: gpt-5.5-pro is a deep-reasoning model and the
+        # ~6200-token coaching prompt (history + trajectory injection) regularly
+        # takes 2-5 minutes end-to-end. Live verification on Bernard's DB clocked
+        # 5min02s on Evan's game 954. The 300s floor matches Claude/DeepSeek/Gemini
+        # but is still too tight in practice — 600s gives real headroom.
+        assert PROVIDER_REGISTRY["openai"]["default_timeout"] >= 600.0
+
 
 # ── Thinking tag stripping ───────────────────────────────
 

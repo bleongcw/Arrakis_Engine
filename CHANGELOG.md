@@ -4,6 +4,37 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.8.1] - 2026-05-25
+
+### Fixed
+- **OpenAI provider timeout bumped 120s → 600s.** The OpenAI registry
+  entry in `src/llm_providers.py` was carrying a 120s `default_timeout`
+  set back when the default model was the older gpt-5.4. With v1.7.0
+  switching the default to `gpt-5.5-pro-2026-04-23` (a deeper-reasoning
+  model) and v1.8.0 layering ~250 tokens of trajectory context on top of
+  the existing ~5000-token history injection, the total prompt is now
+  ~6200 tokens and the OpenAI Responses API consistently runs past 120s
+  on real coaching calls — surfacing as `httpx.ReadTimeout` →
+  `openai.APITimeoutError` mid-pipeline.
+
+  Live measurement on Bernard's DB: coaching Evan's game 954
+  (2026-05-24 win, closed Sicilian, 80 plies) with
+  `gpt-5.5-pro-2026-04-23` clocked **5 minutes 02 seconds** end-to-end.
+  The 300s floor matches Claude / Gemini / DeepSeek (the other three
+  reasoning-model providers), but the live measurement shows 300s is
+  still cutting it close — 600s gives real headroom for longer games or
+  larger trajectory snapshots without forcing the user back to the
+  retry path. The non-reasoning `openai_chat` providers (Grok, Mistral,
+  Qwen) stay at 120s.
+
+### Tests
+- New regression test `test_openai_timeout_at_least_600s` in
+  `tests/test_llm_providers.py` pins the OpenAI timeout at ≥ 600s so a
+  future model swap can't silently re-introduce the 120s ceiling.
+- Backend total: 384 → **385 tests**. Frontend unchanged.
+
+---
+
 ## [1.8.0] - 2026-05-25
 
 ### Added

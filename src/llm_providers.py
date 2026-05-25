@@ -41,7 +41,7 @@ PROVIDER_REGISTRY = {
         "default_model": "gpt-5.5-pro-2026-04-23",
         "env_var": "ARRAKIS_OPENAI_API_KEY",
         "base_url": None,
-        "default_timeout": 120.0,
+        "default_timeout": 600.0,  # Reasoning model (gpt-5.5-pro); ~6200-token coaching prompt with trajectory injection regularly runs 2-5 minutes
         "config_model_key": "openai_model",
         "group": "cloud",
         "color": "#059669",
