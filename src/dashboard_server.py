@@ -1387,7 +1387,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
           player    — required username
           platform  — optional scope (chess.com / lichess / tournament / ...).
                       When omitted, returns ALL platforms.
-          kind      — optional filter (review / note / tournament_game).
+          kind      — optional filter (review / note).
                       When omitted, returns ALL kinds.
           limit     — optional cap on the number of returned entries (default 50).
         """

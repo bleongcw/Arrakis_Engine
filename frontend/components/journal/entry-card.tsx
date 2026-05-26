@@ -36,13 +36,11 @@ const MAX_NOTE_BODY_LEN = 4000; // mirrors src/journal.py
 const KIND_ICONS: Record<string, string> = {
   review: "📖",
   note: "📝",
-  tournament_game: "🏆",
 };
 
 const KIND_LABELS: Record<string, string> = {
   review: "Review",
   note: "Note",
-  tournament_game: "Tournament Game",
 };
 
 export interface EntryCardProps {

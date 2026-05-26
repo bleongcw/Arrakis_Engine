@@ -103,7 +103,7 @@ export async function triggerRecentFormReview(
 export interface JournalEntry {
   id: number;
   player_id: number;
-  kind: "review" | "note" | "tournament_game" | string;
+  kind: "review" | "note" | string;
   platform: string;
   body: string | null;
   refs: number[];

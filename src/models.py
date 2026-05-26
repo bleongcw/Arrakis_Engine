@@ -381,20 +381,19 @@ CREATE TABLE IF NOT EXISTS player_patterns (
     UNIQUE(player_id, period_start, period_end)
 );
 
--- v1.10.0: journal_entries — chronological diary of LLM reviews + (later)
--- parent notes + (v1.11.0+) tournament games from photo uploads. Each entry
--- is tagged with a platform so the Journal can scope by chess.com / lichess /
--- tournament etc.
+-- v1.10.0: journal_entries — chronological diary of coaching artifacts.
+-- Each entry is tagged with a platform so the Journal can scope by
+-- chess.com / lichess. `kind` is a free-form text column so new entry
+-- types can be added without a schema migration.
 CREATE TABLE IF NOT EXISTS journal_entries (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     player_id       INTEGER NOT NULL REFERENCES players(id),
-    kind            TEXT NOT NULL,        -- 'review' (v1.10.0), 'note' (v1.10.1+),
-                                          -- 'tournament_game' (v1.11.0+)
-    platform        TEXT NOT NULL DEFAULT 'chess.com',  -- chess.com / lichess / tournament
+    kind            TEXT NOT NULL,        -- 'review' (v1.10.0), 'note' (v1.12.0)
+    platform        TEXT NOT NULL DEFAULT 'chess.com',  -- chess.com / lichess
     body            TEXT,                 -- LLM text or note body
     refs_json       TEXT,                 -- JSON array of referenced game IDs
     provider        TEXT,                 -- e.g. 'openai:gpt-5.5-pro-2026-04-23' (NULL for manual notes)
-    metadata_json   TEXT,                 -- forward-compat slot (window, attachments path, etc.)
+    metadata_json   TEXT,                 -- forward-compat slot for per-entry metadata
     created_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

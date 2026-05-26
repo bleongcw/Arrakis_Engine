@@ -248,7 +248,7 @@ export default function JournalPage() {
         </div>
       )}
 
-      {/* Footer hint — multi-platform chip filter is the v1.12.0 / v1.13.0 ask */}
+      {/* Footer hint — multi-platform chip filter is a future polish item */}
       {Object.keys(platformCounts).length > 1 && (
         <p className="text-xs text-muted-foreground text-center pt-2">
           You have entries across {Object.keys(platformCounts).length} platforms

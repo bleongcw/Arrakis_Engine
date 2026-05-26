@@ -85,16 +85,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Migration
 - None. Pure additive change on top of v1.10.0's schema.
 
-### Roadmap renumbering (public version)
-Per Bernard's product call, tournament-game support via photo upload +
-OCR + full Stockfish/coach pipeline integration (originally planned
-as v1.13.0 public) **moves to the commercial Atreides version only**.
-See `CONTRIBUTING.md` "Features reserved for the commercial version"
-for details.
-
-Future public v1.13.0+ continues with Journal polish, coaching prompt
-quality work, and analyzer/coach improvements.
-
 ---
 
 ## [1.11.0] - 2026-05-26
@@ -112,8 +102,8 @@ quality work, and analyzer/coach improvements.
   1. **Vertical timeline thread.** Each entry card carries a 2px left
      border that visually stitches into the next, forming a continuous
      rail down the feed. A colored node attaches each card to the rail
-     at its date line — emerald 🟢 for reviews, blue 🔵 for notes
-     (v1.12.0), gold 🟡 for tournament games (v1.13.0). Scrolling the
+     at its date line — emerald 🟢 for reviews, with blue 🔵 reserved
+     for the parent-note kind (introduced in v1.12.0). Scrolling the
      Journal now reads as one coherent timeline rather than a stack of
      business cards.
 
@@ -157,8 +147,8 @@ quality work, and analyzer/coach improvements.
   aware so "This week" / "Last week" boundaries shift cleanly each
   Monday.
 - **`frontend/components/journal/timeline-thread.tsx`** —
-  `<TimelineNode kind="review|note|tournament_game" />` rendering the
-  colored dot on the rail.
+  `<TimelineNode kind="review|note" />` rendering the colored dot on
+  the rail.
 - **`frontend/components/journal/day-group.tsx`** — sticky section
   header for a day bucket.
 - **`frontend/components/journal/entry-card.tsx`** — extracted from
@@ -176,8 +166,8 @@ quality work, and analyzer/coach improvements.
     invalid input fallback, empty-bucket dropping, intra-bucket order
     preservation, multi-bucket spread.
   - `frontend/components/journal/__tests__/timeline-thread.test.tsx`
-    (6 tests) — node color per kind (review / note / tournament_game
-    / fallback), title attribute, aria-hidden.
+    (5 tests) — node color per kind (review / note / fallback), title
+    attribute, aria-hidden.
   - `frontend/components/journal/__tests__/entry-card.test.tsx`
     (11 tests) — defaultExpanded behavior, click-to-expand,
     click-header-to-collapse, kind icons, platform + model badges,
@@ -188,14 +178,6 @@ quality work, and analyzer/coach improvements.
 ### Migration
 - None. Pure presentation change; reuses v1.10.0 data unchanged. After
   pulling, hard-reload the Journal tab — the redesign is immediate.
-
-### Renumbering (note for the roadmap)
-- v1.12.0 (next minor) = **Parent Note entry type** (was the v1.10.1
-  ask in the original phasing).
-- v1.13.0 = **Tournament games via photo upload + OCR + full pipeline
-  integration** (was v1.11.0). Tournament games will get analyzed by
-  Stockfish, coached by the LLM, and flow into trajectory metrics
-  alongside chess.com and lichess games.
 
 ---
 
@@ -217,9 +199,10 @@ quality work, and analyzer/coach improvements.
   What's new:
   - **New `/[player]/journal` page** in the player nav, between Patterns
     and Hunt.
-  - **`journal_entries` table** with `kind` (review / note / tournament_game)
-    and `platform` (chess.com / lichess / tournament) columns. Forward-
-    compatible with v1.10.1 parent notes and v1.11.0 tournament games.
+  - **`journal_entries` table** with `kind` (review, with note added in
+    v1.12.0) and `platform` (chess.com / lichess) columns. `kind` is
+    free-form text so new entry types can be added without a schema
+    migration.
   - **Recent Form Review now INSERTS a new journal entry per generation**
     instead of UPDATE-ing a single column. Reviews accumulate
     chronologically — generate as many as you want, all are preserved.

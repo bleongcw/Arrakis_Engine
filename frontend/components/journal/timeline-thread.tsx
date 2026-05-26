@@ -9,16 +9,14 @@
  * a continuous timeline thread without absolute-positioning gymnastics.
  *
  * Node color encodes the entry kind so the eye can see "story rhythm":
- *   - 🟢 emerald = review        (v1.10.0+)
- *   - 🔵 blue    = note          (v1.12.0+ — parent notes)
- *   - 🟡 gold    = tournament    (v1.13.0+ — photo OCR'd tournament games)
- *   - ⚪ gray    = unknown / future kinds
+ *   - 🟢 emerald = review        (v1.10.0+ — LLM-generated coaching reviews)
+ *   - 🔵 blue    = note          (v1.12.0+ — parent-authored notes)
+ *   - ⚪ gray    = unknown kinds (graceful fallback)
  */
 
 const NODE_COLORS: Record<string, string> = {
   review: "bg-emerald-500 border-emerald-600",
   note: "bg-blue-500 border-blue-600",
-  tournament_game: "bg-amber-500 border-amber-600",
 };
 
 const FALLBACK_COLOR = "bg-zinc-400 border-zinc-500";

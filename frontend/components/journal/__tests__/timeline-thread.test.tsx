@@ -9,14 +9,9 @@ describe("TimelineNode", () => {
     expect(node.className).toMatch(/bg-emerald-500/);
   });
 
-  it("renders a blue node for kind=note (forward-compat for v1.12.0)", () => {
+  it("renders a blue node for kind=note", () => {
     const { container } = render(<TimelineNode kind="note" />);
     expect((container.firstChild as HTMLElement).className).toMatch(/bg-blue-500/);
-  });
-
-  it("renders a gold node for kind=tournament_game (forward-compat for v1.13.0)", () => {
-    const { container } = render(<TimelineNode kind="tournament_game" />);
-    expect((container.firstChild as HTMLElement).className).toMatch(/bg-amber-500/);
   });
 
   it("falls back to gray for unknown kinds", () => {
