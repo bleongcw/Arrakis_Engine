@@ -4,6 +4,108 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.11.0] - 2026-05-26
+
+### Changed
+- **Journal redesigned as a threaded social-media-style feed.** v1.10.0
+  shipped the right architecture (entries accumulate, never replace)
+  but the cards still felt formal — a stack of report tiles rather than
+  a coaching diary. Bernard asked for it to feel like a Twitter /
+  Mastodon / Substack chronological feed: a visible timeline thread,
+  day grouping, live timestamps, motion when new entries arrive.
+
+  v1.11.0 lands all five polish items in one ship:
+
+  1. **Vertical timeline thread.** Each entry card carries a 2px left
+     border that visually stitches into the next, forming a continuous
+     rail down the feed. A colored node attaches each card to the rail
+     at its date line — emerald 🟢 for reviews, blue 🔵 for notes
+     (v1.12.0), gold 🟡 for tournament games (v1.13.0). Scrolling the
+     Journal now reads as one coherent timeline rather than a stack of
+     business cards.
+
+  2. **Day-grouping headers.** The feed groups into sticky section
+     headers: *Today / Yesterday / This week / Last week / Earlier*.
+     Empty buckets are dropped (a fresh Journal with one entry shows
+     just "Today"). Each header carries an entry count and sticks to
+     the top while you scroll through its bucket.
+
+  3. **Auto-refreshing relative timestamps.** Per-entry labels —
+     "just now / 5 minutes ago / today, 14:23 / yesterday / 3 days ago
+     / 2 weeks ago / 4 months ago / 1 year ago" — update every 60s
+     without a page reload. An entry generated at 14:23 visibly
+     transitions from "just now" → "5 minutes ago" → "today" →
+     "yesterday" over real time.
+
+  4. **Scroll-to-new + soft highlight pulse.** When you click
+     "Generate Review" and the new entry lands (poll detects it), the
+     feed smoothly scrolls to that entry and pulses with a 2-second
+     emerald glow. After 2–5 minutes of waiting for the reasoning
+     model, you don't have to hunt for what arrived.
+
+  5. **Per-entry expand/collapse.** The latest 3 entries default to
+     expanded (full body). Older entries collapse to a one-line
+     preview — *"📖 Review · May 19 · Over your last 10 games you
+     played 7-2-1…"* — click anywhere on the preview to expand. Keeps
+     the feed dense as it grows past the screen, while keeping every
+     entry one click away.
+
+  No schema change, no backend change, no migration. Pure frontend
+  presentation polish on top of the v1.10.0 data layer.
+
+### Added
+- **`frontend/lib/relative-time.ts`** — `getRelativeTime(date)` plus
+  `useLiveRelativeTime(date)` hook that re-renders every 60 seconds.
+  Handles SQLite's `'YYYY-MM-DD HH:MM:SS'` (no timezone) format by
+  treating it as UTC to match `datetime('now')`, plus ISO strings and
+  date-only inputs.
+- **`frontend/lib/journal-grouping.ts`** — `groupEntriesByDay(entries)`
+  returns ordered day-buckets with empty buckets dropped. ISO-week
+  aware so "This week" / "Last week" boundaries shift cleanly each
+  Monday.
+- **`frontend/components/journal/timeline-thread.tsx`** —
+  `<TimelineNode kind="review|note|tournament_game" />` rendering the
+  colored dot on the rail.
+- **`frontend/components/journal/day-group.tsx`** — sticky section
+  header for a day bucket.
+- **`frontend/components/journal/entry-card.tsx`** — extracted from
+  `journal/page.tsx`; adds expand/collapse, scroll-into-view + pulse
+  when freshly generated, live-updating relative timestamp.
+
+### Tests
+- 4 new frontend test files (+43 tests; 91 → 134 total):
+  - `frontend/lib/__tests__/relative-time.test.ts` (12 tests) —
+    boundary cases (just-now / N min / today / yesterday / N days /
+    weeks / months / years), SQL parser + ISO + date-only inputs,
+    future-date clock-skew handling.
+  - `frontend/lib/__tests__/journal-grouping.test.ts` (10 tests) —
+    bucket assignment for Today/Yesterday/This week/Last week/Earlier,
+    invalid input fallback, empty-bucket dropping, intra-bucket order
+    preservation, multi-bucket spread.
+  - `frontend/components/journal/__tests__/timeline-thread.test.tsx`
+    (6 tests) — node color per kind (review / note / tournament_game
+    / fallback), title attribute, aria-hidden.
+  - `frontend/components/journal/__tests__/entry-card.test.tsx`
+    (11 tests) — defaultExpanded behavior, click-to-expand,
+    click-header-to-collapse, kind icons, platform + model badges,
+    referenced-game pills as links, no-refs row absent when empty,
+    pulseOnMount triggers scrollIntoView.
+- Backend unchanged at 414.
+
+### Migration
+- None. Pure presentation change; reuses v1.10.0 data unchanged. After
+  pulling, hard-reload the Journal tab — the redesign is immediate.
+
+### Renumbering (note for the roadmap)
+- v1.12.0 (next minor) = **Parent Note entry type** (was the v1.10.1
+  ask in the original phasing).
+- v1.13.0 = **Tournament games via photo upload + OCR + full pipeline
+  integration** (was v1.11.0). Tournament games will get analyzed by
+  Stockfish, coached by the LLM, and flow into trajectory metrics
+  alongside chess.com and lichess games.
+
+---
+
 ## [1.10.0] - 2026-05-26
 
 ### Added

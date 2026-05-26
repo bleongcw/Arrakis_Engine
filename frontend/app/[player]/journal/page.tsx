@@ -1,11 +1,12 @@
 "use client";
 
 import { useState, useCallback, useEffect, useRef } from "react";
-import Link from "next/link";
 import { useParams } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { RatingProgressionChart } from "@/components/patterns/rating-progression-chart";
+import { DayGroup } from "@/components/journal/day-group";
+import { EntryCard } from "@/components/journal/entry-card";
 import { usePlayerContext } from "@/app/providers";
 import {
   fetchJournal,
@@ -14,24 +15,33 @@ import {
   type JournalEntry,
 } from "@/lib/api";
 import { PROVIDERS } from "@/lib/providers";
-import { parseTrendSummary } from "@/lib/summary";
+import { groupEntriesByDay } from "@/lib/journal-grouping";
 import type { GameListItem } from "@/lib/types";
 
-/** v1.10.0: Journal page — chronological diary of LLM coaching reviews.
+/** v1.10.0: Journal foundation — chronological diary of LLM coaching reviews.
+ *  v1.11.0: redesigned as a threaded social-media-style feed.
  *
- * - Top: rating-progression timeline (reuses the Patterns chart).
- * - Below: entry feed, newest first. Each entry shows the 4-paragraph
- *   review, the platform it covers, the model that wrote it, and clickable
- *   referenced-game pills that jump to that game's detail page.
- * - Action bar: provider selector + "Generate Review" button creates a new
- *   entry (does NOT replace the previous one — entries accumulate).
+ * Page layout:
+ *   - Header + Generate-Review action bar
+ *   - Rating-progression timeline chart (reused from Patterns)
+ *   - Threaded feed:
+ *       Day-group sticky header   ─── Today / Yesterday / etc. ───
+ *       │
+ *       ● EntryCard (most-recent N expanded, older ones collapsed)
+ *       │
+ *       ● EntryCard
+ *       …
  *
- * Forward-compat for v1.10.1 / v1.11.0:
- * - `journal_entries.platform` is already populated per-row. v1.10.1 will add
- *   a chip-row platform filter at the top; the backend already supports it.
- * - `journal_entries.kind` distinguishes review vs note vs tournament_game.
- *   v1.10.1 adds parent notes; v1.11.0 adds tournament games via photo OCR.
+ * The vertical line through the feed is provided by each EntryCard's left
+ * border (see entry-card.tsx). The continuous appearance comes from cards
+ * stacking without margin between them. Each card has a colored TimelineNode
+ * dot that visually sits on the line.
  */
+
+/** How many of the most-recent entries default to expanded. Older ones
+ *  collapse to a one-line preview to keep the feed dense as it grows. */
+const EXPANDED_HEAD_COUNT = 3;
+
 export default function JournalPage() {
   const { player } = useParams<{ player: string }>();
   const { loading: playerLoading } = usePlayerContext();
@@ -41,6 +51,9 @@ export default function JournalPage() {
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [selectedProvider, setSelectedProvider] = useState("openai");
+  // v1.11.0: tracks which entry was just freshly generated so EntryCard can
+  // pulse + scroll-into-view. Cleared after one render cycle.
+  const [pulseEntryId, setPulseEntryId] = useState<number | null>(null);
   // Number of entries before this run — used to detect when a new one arrives
   const entryCountRef = useRef(0);
 
@@ -70,19 +83,21 @@ export default function JournalPage() {
       const oldCount = entryCountRef.current;
       try {
         await triggerRecentFormReview(player, p, 10);
-        // Poll for the new entry to land in the journal
         const poll = setInterval(async () => {
           try {
             const j = await fetchJournal(player);
             if ((j.entries || []).length > oldCount) {
               clearInterval(poll);
-              setEntries(j.entries);
+              const newEntries = j.entries || [];
+              setEntries(newEntries);
               setPlatformCounts(j.platform_counts || {});
-              entryCountRef.current = j.entries.length;
+              entryCountRef.current = newEntries.length;
+              // The newest entry is at index 0 (server orders DESC by created_at)
+              setPulseEntryId(newEntries[0]?.id ?? null);
               setGenerating(false);
             }
           } catch {
-            // swallow polling errors — the safety timeout below ends the wait
+            // Polling errors swallowed; the safety timeout below ends the wait
           }
         }, 5000);
         // gpt-5.5-pro reasoning can take 2-5 min on this prompt
@@ -122,6 +137,9 @@ export default function JournalPage() {
     </select>
   );
 
+  // v1.11.0: group entries by day-bucket for the threaded feed
+  const buckets = groupEntriesByDay(entries);
+
   return (
     <div className="space-y-6">
       {/* Header + action bar */}
@@ -151,10 +169,7 @@ export default function JournalPage() {
         </p>
       )}
 
-      {/* Timeline — reuses the Patterns rating-progression chart. The chart
-          owns its own platform / time-class controls (v1.7.2 / v1.7.3).
-          v1.10.1 will add an annotation-dots overlay so journal entries
-          appear as markers on the rating line. */}
+      {/* Timeline — reuses the Patterns rating-progression chart. */}
       {games.length > 0 && (
         <Card>
           <CardHeader className="pb-2">
@@ -166,7 +181,7 @@ export default function JournalPage() {
         </Card>
       )}
 
-      {/* Entry feed */}
+      {/* Threaded entry feed — empty state vs grouped feed */}
       {entries.length === 0 ? (
         <Card>
           <CardContent className="py-12 text-center space-y-3">
@@ -188,99 +203,43 @@ export default function JournalPage() {
           </CardContent>
         </Card>
       ) : (
-        <div className="space-y-4">
-          {entries.map((e) => (
-            <EntryCard key={e.id} entry={e} player={player} games={games} />
+        <div className="space-y-6">
+          {buckets.map((bucket) => (
+            <DayGroup
+              key={bucket.label}
+              label={bucket.label}
+              count={bucket.entries.length}
+            >
+              {bucket.entries.map((e, indexInBucket) => {
+                // Determine if this entry should default to expanded.
+                // We expand the most-recent EXPANDED_HEAD_COUNT entries
+                // ACROSS the feed (not per-bucket), so older entries collapse
+                // to a preview even if they fall in a fresh bucket.
+                const globalIndex = entries.indexOf(e);
+                return (
+                  <EntryCard
+                    key={e.id}
+                    entry={e}
+                    player={player}
+                    games={games}
+                    defaultExpanded={globalIndex < EXPANDED_HEAD_COUNT}
+                    pulseOnMount={e.id === pulseEntryId}
+                  />
+                );
+              })}
+            </DayGroup>
           ))}
         </div>
       )}
 
-      {/* Footer hint for v1.10.1+ */}
+      {/* Footer hint — multi-platform chip filter is the v1.12.0 / v1.13.0 ask */}
       {Object.keys(platformCounts).length > 1 && (
         <p className="text-xs text-muted-foreground text-center pt-2">
           You have entries across {Object.keys(platformCounts).length} platforms
           ({Object.entries(platformCounts).map(([p, n]) => `${p}: ${n}`).join(", ")}).
-          A platform filter is coming in v1.10.1.
+          A platform filter is coming in a future release.
         </p>
       )}
     </div>
-  );
-}
-
-function EntryCard({
-  entry,
-  player,
-  games,
-}: {
-  entry: JournalEntry;
-  player: string;
-  games: GameListItem[];
-}) {
-  const paragraphs = parseTrendSummary(entry.body || "");
-
-  // Format created_at as a friendly date + relative age
-  const created = new Date(entry.created_at);
-  const dateStr = created.toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
-  const ageMs = Date.now() - created.getTime();
-  const ageDays = Math.floor(ageMs / (1000 * 60 * 60 * 24));
-  const relative = ageDays === 0 ? "today" : ageDays === 1 ? "yesterday" : `${ageDays} days ago`;
-
-  // Resolve referenced game IDs → list items so we can render pills with links
-  const refGames = (entry.refs || [])
-    .map((id) => games.find((g) => g.id === id))
-    .filter((g): g is GameListItem => Boolean(g));
-
-  const kindIcon = entry.kind === "review" ? "📖" : entry.kind === "note" ? "📝" : "🏆";
-  const kindLabel = entry.kind === "review"
-    ? "Review"
-    : entry.kind === "note"
-    ? "Note"
-    : entry.kind.replace(/_/g, " ");
-
-  return (
-    <Card className="border-l-4 border-l-emerald-500">
-      <CardHeader className="pb-2">
-        <CardTitle className="text-sm flex items-center gap-2 flex-wrap">
-          <span>{kindIcon} {kindLabel}</span>
-          <span className="text-xs font-normal text-muted-foreground">
-            · {dateStr} ({relative})
-          </span>
-          <span className="text-[10px] font-normal px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
-            {entry.platform}
-          </span>
-          {entry.provider && (
-            <span className="text-[10px] font-normal px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
-              {entry.provider.split(":")[1] || entry.provider}
-            </span>
-          )}
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-3">
-          {paragraphs.map((p, i) => (
-            <p key={i} className="text-sm leading-relaxed whitespace-pre-wrap">{p}</p>
-          ))}
-          {refGames.length > 0 && (
-            <div className="pt-2 flex items-center gap-1.5 flex-wrap">
-              <span className="text-xs text-muted-foreground">Referenced games:</span>
-              {refGames.map((g) => (
-                <Link
-                  key={g.id}
-                  href={`/${player}/games/${g.id}`}
-                  className="text-xs px-2 py-0.5 rounded border border-emerald-500/40 hover:bg-emerald-500/10 transition-colors"
-                  title={`${g.date_played} · ${g.result} as ${g.player_color}`}
-                >
-                  #{g.id} {g.result === "win" ? "✓" : g.result === "loss" ? "✗" : "="}
-                </Link>
-              ))}
-            </div>
-          )}
-        </div>
-      </CardContent>
-    </Card>
   );
 }
