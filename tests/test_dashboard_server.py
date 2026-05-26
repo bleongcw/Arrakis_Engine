@@ -144,6 +144,80 @@ class TestPatternsAPI:
         assert "error" in data
 
 
+class TestJournalAPI:
+    """v1.10.0: GET /api/journal returns chronological entries."""
+
+    def test_empty_journal_for_new_player(self, live_server):
+        data = api_get(live_server, "/api/journal?player=testplayer")
+        assert data["entries"] == []
+        assert data["platform_counts"] == {}
+        assert data["username"] == "testplayer"
+
+    def test_missing_player_param(self, live_server):
+        data = api_get(live_server, "/api/journal")
+        assert "error" in data
+
+    def test_unknown_player_returns_error(self, live_server):
+        data = api_get(live_server, "/api/journal?player=nobody")
+        assert "error" in data
+
+    def test_returns_entry_after_insertion(self, live_server, db_with_data):
+        """Insert a journal entry directly into the DB, confirm GET returns it."""
+        import sqlite3
+        conn = sqlite3.connect(db_with_data)
+        conn.row_factory = sqlite3.Row
+        pid = conn.execute(
+            "SELECT id FROM players WHERE username = 'testplayer'"
+        ).fetchone()["id"]
+        conn.execute(
+            """INSERT INTO journal_entries
+            (player_id, kind, platform, body, refs_json, provider, created_at)
+            VALUES (?, 'review', 'chess.com', 'A review.', '[1,2]',
+                    'openai:gpt-5.5-pro', datetime('now'))""",
+            (pid,),
+        )
+        conn.commit()
+        conn.close()
+
+        data = api_get(live_server, "/api/journal?player=testplayer")
+        assert len(data["entries"]) == 1
+        e = data["entries"][0]
+        assert e["kind"] == "review"
+        assert e["platform"] == "chess.com"
+        assert e["body"] == "A review."
+        assert e["refs"] == [1, 2]  # decoded from JSON
+        assert e["provider"] == "openai:gpt-5.5-pro"
+        assert data["platform_counts"] == {"chess.com": 1}
+
+    def test_platform_filter_scopes_results(self, live_server, db_with_data):
+        """?platform=lichess returns only lichess entries."""
+        import sqlite3
+        conn = sqlite3.connect(db_with_data)
+        pid = conn.execute(
+            "SELECT id FROM players WHERE username = 'testplayer'"
+        ).fetchone()[0]
+        conn.execute(
+            "INSERT INTO journal_entries (player_id, kind, platform, body, created_at) "
+            "VALUES (?, 'review', 'chess.com', 'chess.com review', datetime('now'))",
+            (pid,),
+        )
+        conn.execute(
+            "INSERT INTO journal_entries (player_id, kind, platform, body, created_at) "
+            "VALUES (?, 'review', 'lichess', 'lichess review', datetime('now'))",
+            (pid,),
+        )
+        conn.commit()
+        conn.close()
+
+        data_all = api_get(live_server, "/api/journal?player=testplayer")
+        assert len(data_all["entries"]) == 2
+        assert data_all["platform_counts"] == {"chess.com": 1, "lichess": 1}
+
+        data_li = api_get(live_server, "/api/journal?player=testplayer&platform=lichess")
+        assert len(data_li["entries"]) == 1
+        assert data_li["entries"][0]["body"] == "lichess review"
+
+
 class TestCorsHeaders:
     def test_response_has_cors(self, live_server):
         """API responses should include CORS headers."""

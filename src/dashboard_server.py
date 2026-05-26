@@ -68,6 +68,10 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         elif path == "/api/trend-summary":
             self._handle_trend_summary(body)
         elif path == "/api/recent-form-review":
+            # v1.9.0 endpoint kept as legacy alias — same payload, same behavior
+            self._handle_recent_form_review(body)
+        elif path == "/api/journal/review":
+            # v1.10.0 — new canonical endpoint for generating a journal review entry
             self._handle_recent_form_review(body)
         elif path == "/api/pipeline/harvest":
             self._handle_pipeline_harvest(body)
@@ -230,13 +234,18 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         })
 
     def _handle_recent_form_review(self, body):
-        """v1.9.0: trigger Recent Form Review (last 10 games) for a player."""
+        """v1.9.0: trigger Recent Form Review (last N games) for a player.
+        v1.10.0: now accepts optional `platform` to scope the review."""
         from src.patterns import compute_recent_form_review, DEFAULT_REVIEW_WINDOW
 
         player_username = body.get("player")
         provider = body.get("provider", "openai")
         window = int(body.get("window", DEFAULT_REVIEW_WINDOW) or DEFAULT_REVIEW_WINDOW)
         window = max(3, min(30, window))  # clamp 3-30
+        # v1.10.0: optional platform scope. None → most-played fallback in the helper.
+        platform = body.get("platform")
+        if platform is not None:
+            platform = str(platform).strip() or None
 
         if not player_username:
             self._send_json({"error": "player required"}, 400)
@@ -269,9 +278,10 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 compute_recent_form_review(
                     player_id, db_path=self.db_path,
                     provider=provider, window=window, config=cfg,
+                    platform=platform,
                 )
-                logger.info("Recent form review complete for %s (%s, %d games)",
-                            player_username, provider, window)
+                logger.info("Recent form review complete for %s (%s, %d games, platform=%s)",
+                            player_username, provider, window, platform)
             except Exception as e:
                 logger.error("Recent form review failed for %s: %s", player_username, e)
 
@@ -283,6 +293,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             "player": player_username,
             "provider": provider,
             "window": window,
+            "platform": platform,
             "message": f"Recent form review started for {player_username} (last {window} games).",
         })
 
@@ -996,6 +1007,9 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 data = self._api_schedule_status()
             elif path == "/api/hunt/profile":
                 data = self._api_hunt_profile(params)
+            elif path == "/api/journal":
+                # v1.10.0: chronological journal entries (reviews, notes, etc.)
+                data = self._api_journal(params)
             else:
                 self._send_json({"error": "Not found"}, 404)
                 return
@@ -1248,6 +1262,94 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 del data["stats_json"]
 
             return data
+        finally:
+            conn.close()
+
+    def _api_journal(self, params):
+        """v1.10.0: list journal entries for a player, newest first.
+
+        Query params:
+          player    — required username
+          platform  — optional scope (chess.com / lichess / tournament / ...).
+                      When omitted, returns ALL platforms.
+          kind      — optional filter (review / note / tournament_game).
+                      When omitted, returns ALL kinds.
+          limit     — optional cap on the number of returned entries (default 50).
+        """
+        player = params.get("player", [None])[0]
+        if not player:
+            return {"error": "player parameter required"}
+        platform = params.get("platform", [None])[0]
+        kind = params.get("kind", [None])[0]
+        try:
+            limit = max(1, min(500, int(params.get("limit", ["50"])[0])))
+        except (ValueError, TypeError):
+            limit = 50
+
+        conn = self._get_conn()
+        try:
+            row = conn.execute(
+                "SELECT id FROM players WHERE username = ?", (player,)
+            ).fetchone()
+            if not row:
+                return {"error": f"Player {player} not found"}
+            player_id = row["id"]
+
+            sql = (
+                "SELECT id, player_id, kind, platform, body, refs_json, provider, "
+                "metadata_json, created_at "
+                "FROM journal_entries WHERE player_id = ?"
+            )
+            args: list = [player_id]
+            if platform:
+                sql += " AND platform = ?"
+                args.append(platform)
+            if kind:
+                sql += " AND kind = ?"
+                args.append(kind)
+            sql += " ORDER BY created_at DESC LIMIT ?"
+            args.append(limit)
+
+            rows = conn.execute(sql, args).fetchall()
+
+            entries = []
+            for r in rows:
+                d = dict_from_row(r)
+                # Decode JSON columns for the client
+                if d.get("refs_json"):
+                    try:
+                        d["refs"] = json.loads(d["refs_json"])
+                    except (json.JSONDecodeError, TypeError):
+                        d["refs"] = []
+                else:
+                    d["refs"] = []
+                if d.get("metadata_json"):
+                    try:
+                        d["metadata"] = json.loads(d["metadata_json"])
+                    except (json.JSONDecodeError, TypeError):
+                        d["metadata"] = {}
+                else:
+                    d["metadata"] = {}
+                # Strip raw JSON keys — clients use the decoded forms
+                d.pop("refs_json", None)
+                d.pop("metadata_json", None)
+                entries.append(d)
+
+            # Also report what platforms exist for this player so the UI
+            # can render the chip row in v1.10.1 without a second round-trip.
+            platform_counts = {}
+            for r in conn.execute(
+                "SELECT platform, COUNT(*) AS n FROM journal_entries "
+                "WHERE player_id = ? GROUP BY platform",
+                (player_id,),
+            ).fetchall():
+                platform_counts[r["platform"]] = r["n"]
+
+            return {
+                "username": player,
+                "entries": entries,
+                "platform_counts": platform_counts,
+            }
         finally:
             conn.close()
 

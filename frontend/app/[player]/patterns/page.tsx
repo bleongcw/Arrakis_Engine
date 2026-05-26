@@ -22,7 +22,10 @@ import { RepertoireConsistency } from "@/components/patterns/repertoire-consiste
 import { OpeningRepertoireTracker } from "@/components/patterns/opening-repertoire-tracker";
 import { TimePressure } from "@/components/patterns/time-pressure";
 import { TrendSummary } from "@/components/patterns/trend-summary";
-import { RecentFormReview } from "@/components/patterns/recent-form-review";
+// v1.10.0: RecentFormReview moved to the dedicated Journal tab.
+// The Patterns page keeps the stats-oriented TrendSummary; the
+// narrative cross-game review now lives in /[player]/journal.
+import Link from "next/link";
 import { FixYourOpenings } from "@/components/patterns/fix-your-openings";
 import { YouFallFor } from "@/components/patterns/you-fall-for";
 import type { PatternStats, GameListItem } from "@/lib/types";
@@ -33,9 +36,6 @@ export default function PatternsPage() {
   const [stats, setStats] = useState<PatternStats | null>(null);
   const [games, setGames] = useState<GameListItem[]>([]);
   const [trendSummary, setTrendSummary] = useState<string | null>(null);
-  // v1.9.0: Recent Form Review — LLM narrative across last 10 coached games
-  const [recentFormReview, setRecentFormReview] = useState<string | null>(null);
-  const [recentFormReviewUpdatedAt, setRecentFormReviewUpdatedAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   const loadPatterns = useCallback(() => {
@@ -48,8 +48,6 @@ export default function PatternsPage() {
       .then(([patternData, gamesData]: [any, GameListItem[]]) => {
         setStats(patternData.stats);
         setTrendSummary(patternData.trend_summary || null);
-        setRecentFormReview(patternData.recent_form_review || null);
-        setRecentFormReviewUpdatedAt(patternData.recent_form_review_updated_at || null);
         setGames(gamesData);
       })
       .catch(console.error)
@@ -80,16 +78,22 @@ export default function PatternsPage() {
 
   return (
     <div className="space-y-6">
-      {/* v1.9.0: Recent Form Review — LLM narrative across last 10 coached games.
-          Sits above the Coaching Summary because it's the most actionable
-          across-games view (names specific games, gives forward guidance). */}
+      {/* v1.10.0: Pointer to the new Journal tab. The Recent Form Review card
+          that used to live here moved to /[player]/journal — keeps users from
+          getting lost when the card disappears. Drop this banner after a
+          couple of releases once people have found it. */}
       {player && (
-        <RecentFormReview
-          review={recentFormReview}
-          updatedAt={recentFormReviewUpdatedAt}
-          player={player}
-          onReviewGenerated={loadPatterns}
-        />
+        <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-4 py-2.5 text-sm flex items-center justify-between flex-wrap gap-2">
+          <span className="text-muted-foreground">
+            📖 Looking for the Recent Form Review? It moved to its own tab.
+          </span>
+          <Link
+            href={`/${player}/journal`}
+            className="text-sm font-medium text-emerald-700 dark:text-emerald-400 hover:underline whitespace-nowrap"
+          >
+            Open Journal →
+          </Link>
+        </div>
       )}
 
       {/* Coaching Trend Summary — stats-based aggregate over 30 days */}

@@ -81,19 +81,50 @@ export async function triggerTrendSummary(
   return res.json();
 }
 
-/** v1.9.0: Trigger the Recent Form Review (LLM narrative across last N games). */
+/** v1.9.0: Trigger the Recent Form Review (LLM narrative across last N games).
+ *  v1.10.0: now accepts an optional `platform` to scope the review. */
 export async function triggerRecentFormReview(
   player: string,
   provider: string = "openai",
-  window: number = 10
-): Promise<{ status: string; message: string; window: number }> {
-  const res = await fetch(`${BASE}/recent-form-review`, {
+  window: number = 10,
+  platform?: string
+): Promise<{ status: string; message: string; window: number; platform?: string }> {
+  const res = await fetch(`${BASE}/journal/review`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ player, provider, window }),
+    body: JSON.stringify({ player, provider, window, platform }),
   });
-  if (!res.ok) throw new Error(`Recent form review API error: ${res.status}`);
+  if (!res.ok) throw new Error(`Journal review API error: ${res.status}`);
   return res.json();
+}
+
+/** v1.10.0: chronological journal entries for a player.
+ *  Returns entries newest-first plus a per-platform count map for the chip row. */
+export interface JournalEntry {
+  id: number;
+  player_id: number;
+  kind: "review" | "note" | "tournament_game" | string;
+  platform: string;
+  body: string | null;
+  refs: number[];
+  provider: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+export async function fetchJournal(
+  player: string,
+  opts?: { platform?: string; kind?: string; limit?: number }
+): Promise<{
+  username: string;
+  entries: JournalEntry[];
+  platform_counts: Record<string, number>;
+}> {
+  const params = new URLSearchParams({ player });
+  if (opts?.platform) params.set("platform", opts.platform);
+  if (opts?.kind) params.set("kind", opts.kind);
+  if (opts?.limit) params.set("limit", String(opts.limit));
+  return fetchJSON(`${BASE}/journal?${params.toString()}`);
 }
 
 // ── Pipeline API ─────────────────────────────────────────

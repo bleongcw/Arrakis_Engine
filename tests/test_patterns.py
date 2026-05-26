@@ -30,6 +30,9 @@ from src.patterns import (
     update_patterns,
     _build_recent_games_table,
     _build_recent_lessons_block,
+    # v1.10.0
+    _most_played_platform,
+    _parse_referenced_game_ids,
 )
 from src.models import init_db, ensure_player
 
@@ -1092,4 +1095,239 @@ class TestComputeRecentFormReview:
 
         assert "Player Trajectory (last 30 days)" in captured[0]
         assert "middlegame" in captured[0]
+
+
+# --- v1.10.0: Journal Entries ---
+
+
+class TestMostPlayedPlatform:
+    """v1.10.0: _most_played_platform picks the platform with the most
+    analyzed games. Used as the default scope for the Recent Form Review."""
+
+    def test_returns_chess_com_when_no_games(self, db_path):
+        conn = init_db(db_path)
+        pid = ensure_player(conn, "newkid", display_name="New", age=8, rating=900)
+        assert _most_played_platform(conn, pid) == "chess.com"
+        conn.close()
+
+    def test_picks_more_frequent_platform(self, db_path):
+        conn = init_db(db_path)
+        pid = ensure_player(conn, "evan", display_name="Evan", age=9, rating=1100)
+        # 4 chess.com games + 1 lichess game → chess.com wins
+        for i in range(4):
+            conn.execute(
+                """INSERT INTO games
+                (player_id, game_url, pgn, player_color, result,
+                 analysis_status, platform)
+                VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (pid, f"u{i}", "1. e4 *", "white", "win", "complete", "chess.com"),
+            )
+        conn.execute(
+            """INSERT INTO games
+            (player_id, game_url, pgn, player_color, result,
+             analysis_status, platform)
+            VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (pid, "u-lichess", "1. e4 *", "white", "win", "complete", "lichess"),
+        )
+        conn.commit()
+        assert _most_played_platform(conn, pid) == "chess.com"
+        conn.close()
+
+    def test_picks_lichess_when_majority(self, db_path):
+        conn = init_db(db_path)
+        pid = ensure_player(conn, "lichkid", display_name="LichKid", age=10, rating=1500)
+        # 3 lichess + 1 chess.com → lichess wins
+        for i in range(3):
+            conn.execute(
+                """INSERT INTO games
+                (player_id, game_url, pgn, player_color, result,
+                 analysis_status, platform)
+                VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (pid, f"l{i}", "1. e4 *", "white", "win", "complete", "lichess"),
+            )
+        conn.execute(
+            """INSERT INTO games
+            (player_id, game_url, pgn, player_color, result,
+             analysis_status, platform)
+            VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (pid, "c1", "1. e4 *", "white", "win", "complete", "chess.com"),
+        )
+        conn.commit()
+        assert _most_played_platform(conn, pid) == "lichess"
+        conn.close()
+
+
+class TestParseReferencedGameIds:
+    """v1.10.0: helper that scans review text for game references."""
+
+    def test_opponent_name_match(self):
+        games = [{"id": 954, "opponent_username": "sarcasta",
+                  "date_played": "2026-05-24 18:24:28"}]
+        text = "Your win against Sarcasta showed the outpost theme."
+        assert _parse_referenced_game_ids(text, games) == [954]
+
+    def test_date_match(self):
+        games = [{"id": 954, "opponent_username": "X",
+                  "date_played": "2026-05-24 18:24:28"}]
+        text = "Look at your 2026-05-24 game — the knight came alive."
+        assert _parse_referenced_game_ids(text, games) == [954]
+
+    def test_dedupes_when_both_signals_match(self):
+        games = [{"id": 954, "opponent_username": "sarcasta",
+                  "date_played": "2026-05-24 18:24:28"}]
+        text = "Your win against sarcasta on 2026-05-24 was great."
+        assert _parse_referenced_game_ids(text, games) == [954]
+
+    def test_no_match_returns_empty(self):
+        games = [{"id": 954, "opponent_username": "sarcasta",
+                  "date_played": "2026-05-24 18:24:28"}]
+        text = "Generic commentary with no specific references."
+        assert _parse_referenced_game_ids(text, games) == []
+
+    def test_handles_empty_inputs(self):
+        assert _parse_referenced_game_ids("", []) == []
+        assert _parse_referenced_game_ids("text", []) == []
+        assert _parse_referenced_game_ids("", [{"id": 1}]) == []
+
+
+class TestJournalEntryCreation:
+    """v1.10.0: compute_recent_form_review INSERTs new journal entries
+    instead of UPDATEing a single column. Entries accumulate chronologically."""
+
+    def _seed_coached_games(self, db_path, player_id, n=3, platform="chess.com"):
+        conn = init_db(db_path)
+        for i in range(n):
+            # game_url includes the platform so seeding both chess.com + lichess
+            # in the same DB doesn't violate the UNIQUE(game_url) constraint
+            conn.execute(
+                """INSERT INTO games
+                (player_id, game_url, pgn, player_color, player_rating,
+                 opponent_rating, opponent_username, result, time_control,
+                 time_class, date_played, analysis_status, coaching_status,
+                 platform)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (player_id, f"https://{platform}/g/{i}",
+                 f'[White "x"]\n[Black "y"]\n\n1. e4 c5 *',
+                 "white", 1100, 1050, f"opp_{platform}_{i}", "win",
+                 "600", "rapid",
+                 f"2026-05-{20-i:02d}", "complete", "complete", platform),
+            )
+            gid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+            conn.execute(
+                """INSERT INTO game_coaching
+                (game_id, provider, narrative, key_lesson, practical_focus,
+                 player_feedback)
+                VALUES (?, ?, ?, ?, ?, ?)""",
+                (gid, "openai:gpt-5.5-pro-2026-04-23",
+                 f"Narrative {i}", f"Lesson {i}", f"Focus {i}",
+                 f"Feedback {i}"),
+            )
+        conn.commit()
+        conn.close()
+
+    def test_first_review_creates_journal_entry(self, db_path):
+        from unittest.mock import patch
+        conn = init_db(db_path)
+        pid = ensure_player(conn, "evan", display_name="Evan", age=9, rating=1100)
+        conn.close()
+        self._seed_coached_games(db_path, pid, n=3)
+
+        with patch("src.llm_providers.call_provider", return_value="Review body."):
+            compute_recent_form_review(pid, db_path=db_path, provider="openai")
+
+        conn = init_db(db_path)
+        rows = conn.execute(
+            "SELECT * FROM journal_entries WHERE player_id = ?", (pid,)
+        ).fetchall()
+        conn.close()
+        assert len(rows) == 1
+        assert rows[0]["kind"] == "review"
+        assert rows[0]["platform"] == "chess.com"
+        assert rows[0]["body"] == "Review body."
+        assert rows[0]["provider"] == "openai:gpt-5.5-pro-2026-04-23"
+
+    def test_second_review_accumulates(self, db_path):
+        """Calling compute_recent_form_review twice produces TWO journal rows,
+        not one replaced row. This is the core v1.10.0 behavior change."""
+        from unittest.mock import patch
+        conn = init_db(db_path)
+        pid = ensure_player(conn, "evan", display_name="Evan", age=9, rating=1100)
+        conn.close()
+        self._seed_coached_games(db_path, pid, n=3)
+
+        with patch("src.llm_providers.call_provider", return_value="First."):
+            compute_recent_form_review(pid, db_path=db_path, provider="openai")
+        with patch("src.llm_providers.call_provider", return_value="Second."):
+            compute_recent_form_review(pid, db_path=db_path, provider="openai")
+
+        conn = init_db(db_path)
+        rows = conn.execute(
+            "SELECT body FROM journal_entries WHERE player_id = ? ORDER BY id",
+            (pid,),
+        ).fetchall()
+        conn.close()
+        assert [r["body"] for r in rows] == ["First.", "Second."]
+
+    def test_platform_filter_scopes_to_chess_com(self, db_path):
+        """When platform='chess.com', only chess.com games feed the prompt."""
+        from unittest.mock import patch
+        conn = init_db(db_path)
+        pid = ensure_player(conn, "evan", display_name="Evan", age=9, rating=1100)
+        conn.close()
+        # Seed 3 chess.com + 2 lichess
+        self._seed_coached_games(db_path, pid, n=3, platform="chess.com")
+        self._seed_coached_games(db_path, pid, n=2, platform="lichess")
+
+        captured = []
+        with patch("src.llm_providers.call_provider",
+                   side_effect=lambda p, prompt, **kw: captured.append(prompt) or "ok"):
+            compute_recent_form_review(
+                pid, db_path=db_path, provider="openai", platform="chess.com",
+            )
+        # The games table block should mention 3 games, not 5
+        # (one "### Game N" heading per game, plus the table header at top)
+        assert captured[0].count("### Game ") == 3
+
+    def test_default_platform_uses_most_played(self, db_path):
+        """When platform=None, falls back to most-played per-player."""
+        from unittest.mock import patch
+        conn = init_db(db_path)
+        pid = ensure_player(conn, "lichkid", display_name="L", age=10, rating=1500)
+        conn.close()
+        # 1 chess.com + 3 lichess → most-played is lichess
+        self._seed_coached_games(db_path, pid, n=1, platform="chess.com")
+        self._seed_coached_games(db_path, pid, n=3, platform="lichess")
+
+        with patch("src.llm_providers.call_provider", return_value="ok"):
+            compute_recent_form_review(pid, db_path=db_path, provider="openai")
+
+        conn = init_db(db_path)
+        row = conn.execute(
+            "SELECT platform FROM journal_entries WHERE player_id = ?",
+            (pid,),
+        ).fetchone()
+        conn.close()
+        assert row["platform"] == "lichess"
+
+    def test_refs_json_populated_when_opponent_named(self, db_path):
+        """If the LLM names a recent opponent, refs_json captures that game ID."""
+        from unittest.mock import patch
+        conn = init_db(db_path)
+        pid = ensure_player(conn, "evan", display_name="Evan", age=9, rating=1100)
+        conn.close()
+        self._seed_coached_games(db_path, pid, n=3)
+
+        # _seed_coached_games names opponents 'opp_<platform>_<i>'
+        mock = "Your game against opp_chess.com_0 showed great fighting spirit."
+        with patch("src.llm_providers.call_provider", return_value=mock):
+            compute_recent_form_review(pid, db_path=db_path, provider="openai")
+
+        conn = init_db(db_path)
+        row = conn.execute(
+            "SELECT refs_json FROM journal_entries WHERE player_id = ?", (pid,)
+        ).fetchone()
+        conn.close()
+        import json as _json
+        refs = _json.loads(row["refs_json"])
+        assert len(refs) >= 1  # opp0 is one of the seeded games
 

@@ -4,6 +4,100 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.10.0] - 2026-05-26
+
+### Added
+- **Journal — new top-level tab for chronological coaching reviews.**
+  Bernard pushed for a sharper conceptual split: the Patterns page should
+  be the stats *overview* (charts, present-tense aggregates, Coaching
+  Summary), while a new Journal page should be the narrative *evolution*
+  — a chronological diary that names specific games and accumulates over
+  time.
+
+  Today's "Regenerate" button on Recent Form Review *replaces* the
+  previous text. That's fine for a stats card but a non-starter for a
+  diary; the whole point of a journal is the accumulation. v1.10.0 fixes
+  that architecturally.
+
+  What's new:
+  - **New `/[player]/journal` page** in the player nav, between Patterns
+    and Hunt.
+  - **`journal_entries` table** with `kind` (review / note / tournament_game)
+    and `platform` (chess.com / lichess / tournament) columns. Forward-
+    compatible with v1.10.1 parent notes and v1.11.0 tournament games.
+  - **Recent Form Review now INSERTS a new journal entry per generation**
+    instead of UPDATE-ing a single column. Reviews accumulate
+    chronologically — generate as many as you want, all are preserved.
+  - **Timeline at top of Journal**: reuses the v1.7.2/v1.7.3 platform-
+    aware rating-progression chart. v1.10.1 will add entry-dot
+    annotations on the line; for now the chart + the dated feed below
+    let you correlate visually.
+  - **Entry feed** with clickable "referenced games" pills — when the
+    LLM names an opponent or a date in the review, the corresponding
+    `games.id` is parsed out and rendered as a link to that game's
+    detail page.
+
+- **Platform-aware reviews (forward-compat for v1.10.1 / v1.11.0).** New
+  `platform` parameter on `compute_recent_form_review()`. Defaults to
+  the player's most-played analyzed platform — same default-selection
+  logic as the v1.7.2 Rating Progression chart. Avoids the cross-platform
+  rating-pool noise we already fixed there. v1.10.1 will add a chip-row
+  filter at the top of Journal; the backend already supports it.
+
+- **New API endpoints**:
+  - `GET /api/journal?player=X&platform=Y&kind=Z&limit=N` — returns
+    chronological entries newest-first plus per-platform counts.
+  - `POST /api/journal/review` — canonical endpoint for generating a
+    new review entry. Accepts optional `platform`. The v1.9.0
+    `/api/recent-form-review` endpoint is kept as an alias.
+
+- **One-time migration on `init_db()`**: each player who had a non-null
+  `player_patterns.recent_form_review` gets their existing review
+  promoted into a journal entry (kind='review', platform='chess.com',
+  created_at preserved from `recent_form_review_updated_at`). Idempotent:
+  re-running `init_db()` doesn't duplicate. No data loss; the legacy
+  column stays populated for backward-compat.
+
+### Changed
+- **Patterns page**: Recent Form Review card removed. Replaced with a
+  small emerald-bordered banner: *"📖 Looking for the Recent Form Review?
+  It moved to its own tab. Open Journal →"* Keeps users from getting
+  lost during the transition. Drop the banner in a future release once
+  the move is known.
+
+### Tests
+- 18 new backend tests in `tests/test_patterns.py` and
+  `tests/test_dashboard_server.py`:
+  - `TestMostPlayedPlatform` (3) — default-platform fallback logic
+  - `TestParseReferencedGameIds` (5) — opponent / date matching for
+    the clickable game pills
+  - `TestJournalEntryCreation` (5) — first review creates an entry,
+    second review accumulates (not replaces), platform filter scopes
+    correctly, default platform uses most-played, refs_json populated
+  - `TestJournalAPI` (5) — GET endpoint shape, platform filter,
+    unknown player handling, empty state
+- Backend total: 396 → **414 tests**. Frontend unchanged at 91.
+
+### Migration
+- Automatic on first `init_db()` call after upgrade. No manual step
+  required — the next time you start `python main.py serve` or run any
+  CLI command, your existing review is promoted into a journal entry.
+- Backward-compat: `player_patterns.recent_form_review` column stays
+  populated for any tooling still reading it. Source of truth is now
+  `journal_entries`.
+
+### Recommended next step
+After upgrading:
+1. Restart `python main.py serve`, hard-reload your browser
+2. Click the new **Journal** tab on any player's page
+3. Your existing review will appear as the first entry (migrated)
+4. Click "Generate Review" to add a new entry — the old one stays
+
+The Patterns page Coaching Summary is unchanged (that's the stats
+overview; Journal is the evolution).
+
+---
+
 ## [1.9.0] - 2026-05-25
 
 ### Added

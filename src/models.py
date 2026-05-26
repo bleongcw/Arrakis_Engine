@@ -222,6 +222,39 @@ def _migrate(conn: sqlite3.Connection):
         conn.execute("ALTER TABLE players ADD COLUMN is_active INTEGER DEFAULT 1")
         conn.commit()
 
+    # v1.10.0: one-time migration of player_patterns.recent_form_review (v1.9.0
+    # field) into the new journal_entries table. The legacy column stays
+    # populated for backward-compat but new generations write to journal_entries.
+    # Idempotent: only inserts if no journal entry exists for the player.
+    existing = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='journal_entries'"
+    ).fetchone()
+    if existing:
+        # Migrate one entry per player who has a non-null recent_form_review
+        rows = conn.execute(
+            """SELECT pp.player_id, pp.recent_form_review,
+                      pp.recent_form_review_updated_at, pp.updated_at
+            FROM player_patterns pp
+            WHERE pp.recent_form_review IS NOT NULL AND pp.recent_form_review != ''"""
+        ).fetchall()
+        for r in rows:
+            already = conn.execute(
+                "SELECT 1 FROM journal_entries WHERE player_id = ? AND kind = 'review' LIMIT 1",
+                (r["player_id"],),
+            ).fetchone()
+            if already:
+                continue
+            created_at = r["recent_form_review_updated_at"] or r["updated_at"]
+            conn.execute(
+                """INSERT INTO journal_entries
+                (player_id, kind, platform, body, refs_json, provider,
+                 metadata_json, created_at)
+                VALUES (?, 'review', 'chess.com', ?, NULL, NULL,
+                        '{"migrated_from": "player_patterns.recent_form_review"}', ?)""",
+                (r["player_id"], r["recent_form_review"], created_at),
+            )
+        conn.commit()
+
     # v1.4.1 Hunter Mode: opponent_cache table for cached opponent profiles.
     # Schema is minimal; profile data is stored as a JSON blob, similar to
     # player_patterns.stats_json. Idempotent — safe to run on existing DBs.
@@ -347,6 +380,26 @@ CREATE TABLE IF NOT EXISTS player_patterns (
     updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE(player_id, period_start, period_end)
 );
+
+-- v1.10.0: journal_entries — chronological diary of LLM reviews + (later)
+-- parent notes + (v1.11.0+) tournament games from photo uploads. Each entry
+-- is tagged with a platform so the Journal can scope by chess.com / lichess /
+-- tournament etc.
+CREATE TABLE IF NOT EXISTS journal_entries (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    player_id       INTEGER NOT NULL REFERENCES players(id),
+    kind            TEXT NOT NULL,        -- 'review' (v1.10.0), 'note' (v1.10.1+),
+                                          -- 'tournament_game' (v1.11.0+)
+    platform        TEXT NOT NULL DEFAULT 'chess.com',  -- chess.com / lichess / tournament
+    body            TEXT,                 -- LLM text or note body
+    refs_json       TEXT,                 -- JSON array of referenced game IDs
+    provider        TEXT,                 -- e.g. 'openai:gpt-5.5-pro-2026-04-23' (NULL for manual notes)
+    metadata_json   TEXT,                 -- forward-compat slot (window, attachments path, etc.)
+    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_journal_entries_player_date
+    ON journal_entries(player_id, created_at DESC);
 """
 
 

@@ -9,6 +9,10 @@ const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard", playerScoped: false },
   { href: "/games", label: "Games", playerScoped: true },
   { href: "/patterns", label: "Patterns", playerScoped: true },
+  // v1.10.0: Journal — chronological diary of LLM reviews + (later) parent notes
+  // + (v1.11.0) tournament games. Sits between Patterns (stats overview) and
+  // Hunt (opponent prep) because it's the narrative companion to Patterns.
+  { href: "/journal", label: "Journal", playerScoped: true },
   { href: "/hunt", label: "Hunt", playerScoped: true },
   { href: "/reports", label: "Reports", playerScoped: true },
 ];

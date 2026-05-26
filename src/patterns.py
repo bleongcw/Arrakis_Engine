@@ -1872,6 +1872,61 @@ def _build_recent_lessons_block(games: list[dict]) -> str:
     return "\n".join(parts)
 
 
+def _most_played_platform(conn, player_id: int) -> str:
+    """Return the platform the player has the most analyzed games on.
+
+    Used as the default scope for the Recent Form Review when no explicit
+    platform is requested. Mirrors the v1.7.2 Rating Progression chart's
+    default-platform logic. Falls back to 'chess.com' when there are no
+    analyzed games yet.
+    """
+    row = conn.execute(
+        """SELECT platform, COUNT(*) AS n
+        FROM games
+        WHERE player_id = ? AND analysis_status = 'complete'
+        GROUP BY platform
+        ORDER BY n DESC
+        LIMIT 1""",
+        (player_id,),
+    ).fetchone()
+    return (row["platform"] if row and row["platform"] else "chess.com")
+
+
+def _parse_referenced_game_ids(
+    review_text: str, candidate_games: list[dict]
+) -> list[int]:
+    """Best-effort scan of the review text to find game IDs the LLM mentioned.
+
+    The review prompt instructs the LLM to name games by date + opponent
+    (e.g. "Your win against sarcasta on 2026-05-24"). This helper scans
+    the generated text for those markers and resolves them back to game
+    IDs from the candidate set we passed in.
+
+    Returns a deduped list of game IDs that were mentioned. Empty list
+    when no matches found — not an error condition.
+    """
+    if not review_text or not candidate_games:
+        return []
+    found: list[int] = []
+    text_lower = review_text.lower()
+    for g in candidate_games:
+        gid = g.get("id")
+        if gid is None or gid in found:
+            continue
+        opp = (g.get("opponent_username") or "").lower()
+        date = (g.get("date_played") or "")[:10]
+        # Match either the opponent name OR the YYYY-MM-DD date string.
+        # Strong signal: BOTH appear. Weak signal: either one alone.
+        # We accept either to keep recall high — false positives are
+        # harmless (just a clickable pill).
+        if opp and opp in text_lower:
+            found.append(gid)
+            continue
+        if date and date in review_text:
+            found.append(gid)
+    return found
+
+
 def compute_recent_form_review(
     player_id: int,
     db_path: str | None = None,
@@ -1879,19 +1934,30 @@ def compute_recent_form_review(
     model: str | None = None,
     window: int = DEFAULT_REVIEW_WINDOW,
     config: dict | None = None,
+    platform: str | None = None,
 ) -> str:
     """Generate the LLM-powered Recent Form Review across the last N coached games.
 
-    Pulls the most-recent ``window`` coached games for the player, builds a
-    prompt that combines the per-game lessons + the measured trajectory,
-    calls the LLM, stores the result in
-    ``player_patterns.recent_form_review`` + ``recent_form_review_updated_at``,
-    and returns the review text.
+    Pulls the most-recent ``window`` coached games for the player on the
+    given ``platform``, builds a prompt that combines the per-game lessons
+    + the measured trajectory, calls the LLM, and persists the result.
 
-    Returns empty string if no coached games exist for the player.
-    Raises ValueError if the player is not found.
+    v1.10.0 changed the persistence model: each call INSERTS a new row into
+    ``journal_entries`` (kind='review') rather than UPDATE-ing a single
+    field on ``player_patterns``. Reviews now accumulate chronologically.
+    The legacy ``player_patterns.recent_form_review`` column is still
+    written for backward-compat but is no longer the source of truth.
 
-    v1.9.0+
+    Args:
+        platform: Scope the review to one platform ('chess.com' / 'lichess' /
+            'tournament' / ...). When None (default), uses the player's
+            most-played analyzed platform — same default-selection logic as
+            the v1.7.2 Rating Progression chart.
+
+    Returns the review text. Returns "" if no coached games exist on the
+    chosen platform. Raises ValueError if the player is not found.
+
+    v1.9.0+ / v1.10.0 platform-aware
     """
     from src.llm_providers import call_provider, resolve_model
     from src.tiers import get_tier
@@ -1905,24 +1971,32 @@ def compute_recent_form_review(
         conn.close()
         raise ValueError(f"Player {player_id} not found")
 
-    # Fetch last N coached games (ordered most-recent first)
+    # v1.10.0: resolve platform default
+    if platform is None:
+        platform = _most_played_platform(conn, player_id)
+
+    # Fetch last N coached games on this platform (most-recent first)
     rows = conn.execute(
         """SELECT g.id, g.date_played, g.player_color, g.result,
-                  g.opponent_username, g.time_class, g.pgn,
+                  g.opponent_username, g.time_class, g.pgn, g.platform,
                   gc.key_lesson, gc.practical_focus, gc.player_feedback
            FROM games g
            JOIN game_coaching gc ON gc.game_id = g.id
            WHERE g.player_id = ?
              AND g.analysis_status = 'complete'
              AND gc.player_feedback IS NOT NULL
+             AND g.platform = ?
            ORDER BY g.date_played DESC
            LIMIT ?""",
-        (player_id, window),
+        (player_id, platform, window),
     ).fetchall()
 
     if not rows:
         conn.close()
-        logger.info("No coached games for player %d — skipping review", player_id)
+        logger.info(
+            "No coached games on platform=%s for player %d — skipping review",
+            platform, player_id,
+        )
         return ""
 
     games = []
@@ -1962,14 +2036,31 @@ def compute_recent_form_review(
     coaching_config = (config or {}).get("coaching", {}) if config else {}
     used_model = resolve_model(provider, model, coaching_config)
     logger.info(
-        "Generating recent form review for player %d (window=%d) with %s:%s...",
-        player_id, len(games), provider, used_model,
+        "Generating recent form review for player %d (platform=%s, window=%d) with %s:%s...",
+        player_id, platform, len(games), provider, used_model,
     )
     review = call_provider(
         provider, prompt, model=used_model, coaching_config=coaching_config
     )
 
-    # Persist on the most-recent player_patterns row
+    # v1.10.0: INSERT a new journal entry instead of UPDATE-ing the legacy column
+    refs = _parse_referenced_game_ids(review, games)
+    provider_model = f"{provider}:{used_model}"
+    conn.execute(
+        """INSERT INTO journal_entries
+        (player_id, kind, platform, body, refs_json, provider,
+         metadata_json, created_at)
+        VALUES (?, 'review', ?, ?, ?, ?, ?, datetime('now'))""",
+        (
+            player_id, platform, review,
+            json.dumps(refs),
+            provider_model,
+            json.dumps({"window": window, "model": used_model}),
+        ),
+    )
+
+    # Keep legacy column populated for backward-compat (any tooling still
+    # reading it sees the latest review). Source of truth is journal_entries.
     row = conn.execute(
         """SELECT id FROM player_patterns
         WHERE player_id = ? ORDER BY updated_at DESC LIMIT 1""",
@@ -1983,7 +2074,7 @@ def compute_recent_form_review(
             (review, row["id"]),
         )
     else:
-        # No patterns row yet — create a minimal one so the review has somewhere to live
+        # No patterns row yet — create a minimal one so legacy reads work
         now = datetime.now()
         conn.execute(
             """INSERT INTO player_patterns
