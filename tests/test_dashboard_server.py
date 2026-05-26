@@ -218,6 +218,179 @@ class TestJournalAPI:
         assert data_li["entries"][0]["body"] == "lichess review"
 
 
+class TestJournalNoteEndpoints:
+    """v1.12.0: POST/PUT/DELETE /api/journal/note for parent-authored notes."""
+
+    def _post(self, base_url, path, body):
+        import urllib.request
+        req = urllib.request.Request(
+            base_url + path,
+            data=json.dumps(body).encode(),
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req) as resp:
+            return resp.status, json.loads(resp.read().decode())
+
+    def _put(self, base_url, path, body):
+        import urllib.request
+        req = urllib.request.Request(
+            base_url + path,
+            data=json.dumps(body).encode(),
+            method="PUT",
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req) as resp:
+            return resp.status, json.loads(resp.read().decode())
+
+    def _delete(self, base_url, path):
+        import urllib.request
+        req = urllib.request.Request(base_url + path, method="DELETE")
+        with urllib.request.urlopen(req) as resp:
+            return resp.status, json.loads(resp.read().decode())
+
+    def _post_raw(self, base_url, path, body):
+        """POST variant that returns errors without raising — needed for 4xx."""
+        import urllib.request
+        import urllib.error
+        req = urllib.request.Request(
+            base_url + path,
+            data=json.dumps(body).encode(),
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return resp.status, json.loads(resp.read().decode())
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read().decode())
+
+    def test_create_note(self, live_server):
+        status, data = self._post(
+            live_server, "/api/journal/note",
+            {"player": "testplayer", "body": "Round 3 tournament win!"},
+        )
+        assert status == 200
+        assert data["entry"]["kind"] == "note"
+        assert data["entry"]["body"] == "Round 3 tournament win!"
+        assert data["entry"]["platform"] == "chess.com"
+        assert data["entry"]["provider"] is None
+        # response shape matches /api/journal entry shape
+        assert "refs" in data["entry"]
+        assert "metadata" in data["entry"]
+
+    def test_create_note_missing_player_returns_400(self, live_server):
+        status, _ = self._post_raw(
+            live_server, "/api/journal/note", {"body": "x"}
+        )
+        assert status == 400
+
+    def test_create_note_unknown_player_returns_404(self, live_server):
+        status, _ = self._post_raw(
+            live_server, "/api/journal/note",
+            {"player": "nobody", "body": "x"},
+        )
+        assert status == 404
+
+    def test_create_note_empty_body_returns_400(self, live_server):
+        status, _ = self._post_raw(
+            live_server, "/api/journal/note",
+            {"player": "testplayer", "body": "   "},
+        )
+        assert status == 400
+
+    def test_update_note_changes_body(self, live_server, db_with_data):
+        # Seed a note
+        status, data = self._post(
+            live_server, "/api/journal/note",
+            {"player": "testplayer", "body": "First."},
+        )
+        nid = data["entry"]["id"]
+
+        status, data = self._put(
+            live_server, f"/api/journal/note/{nid}", {"body": "Second."},
+        )
+        assert status == 200
+        assert data["entry"]["body"] == "Second."
+
+    def test_update_note_refuses_to_edit_reviews(self, live_server, db_with_data):
+        """Reviews are immutable through the note endpoint."""
+        import sqlite3
+        import urllib.error
+        conn = sqlite3.connect(db_with_data)
+        pid = conn.execute(
+            "SELECT id FROM players WHERE username = 'testplayer'"
+        ).fetchone()[0]
+        cur = conn.execute(
+            "INSERT INTO journal_entries (player_id, kind, platform, body, created_at) "
+            "VALUES (?, 'review', 'chess.com', 'a review', datetime('now'))",
+            (pid,),
+        )
+        review_id = cur.lastrowid
+        conn.commit()
+        conn.close()
+
+        import urllib.request
+        req = urllib.request.Request(
+            live_server + f"/api/journal/note/{review_id}",
+            data=json.dumps({"body": "hacked"}).encode(),
+            method="PUT",
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            urllib.request.urlopen(req)
+            assert False, "expected 400 error"
+        except urllib.error.HTTPError as e:
+            assert e.code == 400
+            err = json.loads(e.read().decode())
+            assert "only 'note' entries" in err["error"]
+
+    def test_delete_note_removes_row(self, live_server, db_with_data):
+        status, data = self._post(
+            live_server, "/api/journal/note",
+            {"player": "testplayer", "body": "to be deleted"},
+        )
+        nid = data["entry"]["id"]
+
+        status, data = self._delete(live_server, f"/api/journal/note/{nid}")
+        assert status == 200
+        assert data["status"] == "deleted"
+        assert data["id"] == nid
+
+        # Confirm GET no longer returns it
+        listing = api_get(live_server, "/api/journal?player=testplayer")
+        ids = [e["id"] for e in listing["entries"]]
+        assert nid not in ids
+
+    def test_delete_note_refuses_to_delete_reviews(self, live_server, db_with_data):
+        """Reviews are protected from the note delete path."""
+        import sqlite3
+        import urllib.error
+        conn = sqlite3.connect(db_with_data)
+        pid = conn.execute(
+            "SELECT id FROM players WHERE username = 'testplayer'"
+        ).fetchone()[0]
+        cur = conn.execute(
+            "INSERT INTO journal_entries (player_id, kind, platform, body, created_at) "
+            "VALUES (?, 'review', 'chess.com', 'protected', datetime('now'))",
+            (pid,),
+        )
+        review_id = cur.lastrowid
+        conn.commit()
+        conn.close()
+
+        import urllib.request
+        req = urllib.request.Request(
+            live_server + f"/api/journal/note/{review_id}",
+            method="DELETE",
+        )
+        try:
+            urllib.request.urlopen(req)
+            assert False, "expected 400 error"
+        except urllib.error.HTTPError as e:
+            assert e.code == 400
+
+
 class TestCorsHeaders:
     def test_response_has_cors(self, live_server):
         """API responses should include CORS headers."""

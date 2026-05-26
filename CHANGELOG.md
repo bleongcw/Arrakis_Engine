@@ -4,6 +4,99 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.12.0] - 2026-05-26
+
+### Added
+- **Parent Note entry type — write your own observations in the
+  Journal.** v1.11.0 polished the Journal feed but everything in it
+  was LLM-generated. v1.12.0 lets you add your own entries alongside
+  the AI reviews — tournament context, weekend recap, anything worth
+  remembering. Notes share the same chronological feed, the same
+  vertical timeline rail, and the same per-platform scoping as
+  reviews. They just have a 📝 blue node instead of a 📖 emerald one.
+
+  Core flow:
+  - New **"📝 Add Note"** button next to "Generate Review" at the top
+    of the Journal page. Equal weight — notes are a first-class
+    action.
+  - Click → an inline form expands (not a modal, so it doesn't fight
+    with the sticky day-group headers). Type the body in the
+    textarea, Cmd/Ctrl+Enter to post, Escape to cancel.
+  - Submit → the note lands at the top of the feed, smoothly scrolls
+    into view, and pulses for 2 seconds — same UX as a freshly
+    generated review.
+  - 4000-character soft limit with a live counter (matches the
+    backend `MAX_NOTE_BODY_LEN`).
+
+  Edit + delete:
+  - Each note card gets **Edit** and **Delete** links in its header
+    (notes only — reviews stay immutable through the UI).
+  - Edit → swaps the body for a textarea; Save/Cancel. Body-only edit;
+    `kind`, `platform`, `created_at` stay locked so the timeline order
+    can't be rewritten.
+  - Delete → confirmation dialog → DELETE the row. Reviews are
+    protected at both the API and helper level — attempting to delete
+    a review via the note endpoint returns 400.
+
+- **CLI command `python main.py note`** for quick text entry from the
+  terminal:
+  ```
+  python main.py note --player evanleongxinyu "Round 3 win against Sarah!"
+  python main.py note --player bernardleong --platform lichess "Crushed in the Italian"
+  ```
+
+- **New `src/journal.py` module** with `create_note`, `update_note`,
+  `delete_note` helpers. Centralizes note write logic outside
+  `patterns.py` (which was getting large). Reused by the API endpoints
+  and the CLI command.
+
+- **New API endpoints** (mirroring REST conventions):
+  - `POST /api/journal/note` — `{player, body, platform?}` → creates
+    note, returns the full entry shape (matching `GET /api/journal`).
+  - `PUT /api/journal/note/<id>` — `{body}` → updates body. Guards
+    against editing non-note entries.
+  - `DELETE /api/journal/note/<id>` — removes the note. Guards against
+    deleting reviews.
+
+### Schema
+- **No changes.** v1.10.0's `journal_entries` table already has
+  `kind`, `platform`, `body`, `provider` (NULL for notes), `created_at`,
+  and `metadata_json` — every column v1.12.0 needs.
+
+### Tests
+- **+42 tests** (414 → 439 backend, 134 → 151 frontend):
+  - `tests/test_journal.py` (NEW, 17 tests) — `create_note` happy path
+    + whitespace + platform handling + empty/None/oversize/unknown-player
+    rejection; `update_note` body-only updates + strip + same rejections
+    + refusal to edit reviews; `delete_note` removes rows + refusal
+    to delete reviews.
+  - `tests/test_dashboard_server.py` (+8 tests, `TestJournalNoteEndpoints`)
+    — POST/PUT/DELETE happy paths, missing-player 400, unknown-player
+    404, empty-body 400, review-edit 400, review-delete 400.
+  - `frontend/components/journal/__tests__/add-note-form.test.tsx`
+    (NEW, 9 tests) — collapsed default, opens on click, validates
+    empty body, calls API, surfaces server error, Cancel clears,
+    whitespace rejection, char counter.
+  - `frontend/components/journal/__tests__/entry-card.test.tsx` (+8
+    tests) — no Edit/Delete on reviews, both visible on notes, edit
+    flow, cancel restores original, Save guards on empty, Delete
+    requires confirm.
+
+### Migration
+- None. Pure additive change on top of v1.10.0's schema.
+
+### Roadmap renumbering (public version)
+Per Bernard's product call, tournament-game support via photo upload +
+OCR + full Stockfish/coach pipeline integration (originally planned
+as v1.13.0 public) **moves to the commercial Atreides version only**.
+See `CONTRIBUTING.md` "Features reserved for the commercial version"
+for details.
+
+Future public v1.13.0+ continues with Journal polish, coaching prompt
+quality work, and analyzer/coach improvements.
+
+---
+
 ## [1.11.0] - 2026-05-26
 
 ### Changed

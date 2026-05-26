@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { RatingProgressionChart } from "@/components/patterns/rating-progression-chart";
 import { DayGroup } from "@/components/journal/day-group";
 import { EntryCard } from "@/components/journal/entry-card";
+import { AddNoteForm } from "@/components/journal/add-note-form";
 import { usePlayerContext } from "@/app/providers";
 import {
   fetchJournal,
@@ -151,7 +152,7 @@ export default function JournalPage() {
             new one whenever you want a fresh take on the last 10 games.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           {providerSelector}
           <Button
             size="sm"
@@ -160,6 +161,19 @@ export default function JournalPage() {
           >
             {generating ? "Generating…" : "Generate Review"}
           </Button>
+          {/* v1.12.0: parent note action, equal weight to Generate Review.
+              Toggles into an inline form on click. */}
+          {player && (
+            <AddNoteForm
+              player={player}
+              onCreated={(entry) => {
+                // Same pattern as a freshly-generated review:
+                // refetch the feed and pulse-highlight the new entry
+                setPulseEntryId(entry.id);
+                loadJournal();
+              }}
+            />
+          )}
         </div>
       </div>
       {generating && (
@@ -224,6 +238,8 @@ export default function JournalPage() {
                     games={games}
                     defaultExpanded={globalIndex < EXPANDED_HEAD_COUNT}
                     pulseOnMount={e.id === pulseEntryId}
+                    // v1.12.0: refetch feed after a note is edited/deleted
+                    onChanged={loadJournal}
                   />
                 );
               })}

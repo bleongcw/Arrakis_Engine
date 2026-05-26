@@ -154,6 +154,14 @@ Practically, this means contributions made under the CLA may be incorporated int
 
 If you have questions about how a specific contribution would be treated under the dual-licensing model — or you'd prefer to contribute only under AGPL-3.0 with no commercial relicensing — open a discussion before submitting the PR.
 
+### Features reserved for the commercial version (Atreides)
+
+Some features are planned for the **commercial Atreides version only** and will not land in the open-source AGPL-3.0 repository. As of v1.12.0 this list includes:
+
+- **Tournament-game support via photo upload + OCR.** Take a snapshot of a hand-written tournament scoresheet, extract the moves via a vision LLM, render the game on an interactive chessboard, and (commercial flavor) feed the game through the full Stockfish analyzer + LLM coach + trajectory pipeline alongside chess.com and lichess games.
+
+These features rely on infrastructure (Vision-LLM API budget, OCR error-correction UX, multi-image stitching for long games, possibly cloud-side image handling) that doesn't fit the single-user local-first AGPL release. The public roadmap continues with v1.13.0+ features focused on the Journal, coaching prompt quality, and existing analyzer/coach improvements; tournament support lives elsewhere.
+
 ## Reporting Issues
 
 - Use GitHub Issues for bug reports and feature requests

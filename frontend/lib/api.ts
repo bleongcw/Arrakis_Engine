@@ -127,6 +127,55 @@ export async function fetchJournal(
   return fetchJSON(`${BASE}/journal?${params.toString()}`);
 }
 
+/** v1.12.0: Parent-authored journal note. No LLM call. */
+export async function createJournalNote(
+  player: string,
+  body: string,
+  platform: string = "chess.com"
+): Promise<{ entry: JournalEntry }> {
+  const res = await fetch(`${BASE}/journal/note`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ player, body, platform }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Create note failed: ${res.status}`);
+  }
+  return res.json();
+}
+
+/** v1.12.0: Edit an existing note's body. Reviews are not editable. */
+export async function updateJournalNote(
+  entryId: number,
+  body: string
+): Promise<{ entry: JournalEntry }> {
+  const res = await fetch(`${BASE}/journal/note/${entryId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ body }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Update note failed: ${res.status}`);
+  }
+  return res.json();
+}
+
+/** v1.12.0: Delete a note. Reviews are not deletable through this path. */
+export async function deleteJournalNote(
+  entryId: number
+): Promise<{ status: string; id: number }> {
+  const res = await fetch(`${BASE}/journal/note/${entryId}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Delete note failed: ${res.status}`);
+  }
+  return res.json();
+}
+
 // ── Pipeline API ─────────────────────────────────────────
 
 export async function fetchPipelineStatus(): Promise<PipelineState> {

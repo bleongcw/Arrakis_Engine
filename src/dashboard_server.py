@@ -91,6 +91,9 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             self._handle_schedule_interval(body)
         elif path == "/api/hunt/refresh":
             self._handle_hunt_refresh(body)
+        elif path == "/api/journal/note":
+            # v1.12.0: parent-authored note
+            self._handle_create_note(body)
         else:
             self._send_json({"error": "Not found"}, 404)
 
@@ -111,6 +114,11 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         elif path == "/api/settings/coaching":
             self._handle_update_coaching_settings(body)
         else:
+            note_match = re.match(r"^/api/journal/note/(\d+)$", path)
+            if note_match:
+                # v1.12.0: update parent note body
+                self._handle_update_note(int(note_match.group(1)), body)
+                return
             self._send_json({"error": "Not found"}, 404)
 
     def do_DELETE(self):
@@ -120,8 +128,13 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         player_match = re.match(r"^/api/players/(\d+)$", path)
         if player_match:
             self._handle_delete_player(int(player_match.group(1)))
-        else:
-            self._send_json({"error": "Not found"}, 404)
+            return
+        note_match = re.match(r"^/api/journal/note/(\d+)$", path)
+        if note_match:
+            # v1.12.0: delete parent note
+            self._handle_delete_note(int(note_match.group(1)))
+            return
+        self._send_json({"error": "Not found"}, 404)
 
     def do_OPTIONS(self):
         """Handle CORS preflight requests."""
@@ -296,6 +309,108 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             "platform": platform,
             "message": f"Recent form review started for {player_username} (last {window} games).",
         })
+
+    # ── v1.12.0: Journal Note CRUD ──────────────────────────────
+
+    def _handle_create_note(self, body):
+        """POST /api/journal/note — create a parent-authored note entry."""
+        from src import journal as journal_mod
+
+        player_username = body.get("player")
+        note_body = body.get("body")
+        platform = body.get("platform") or "chess.com"
+
+        if not player_username:
+            self._send_json({"error": "player required"}, 400)
+            return
+
+        conn = self._get_conn()
+        try:
+            row = conn.execute(
+                "SELECT id FROM players WHERE username = ?",
+                (player_username,),
+            ).fetchone()
+            if not row:
+                self._send_json({"error": f"Player {player_username} not found"}, 404)
+                return
+            player_id = row["id"]
+        finally:
+            conn.close()
+
+        try:
+            entry = journal_mod.create_note(
+                player_id, note_body, platform=platform,
+                db_path=self.db_path,
+            )
+        except ValueError as e:
+            self._send_json({"error": str(e)}, 400)
+            return
+
+        # Decode refs_json / metadata_json so the response matches the
+        # GET /api/journal entry shape the client expects
+        if entry.get("refs_json"):
+            try:
+                entry["refs"] = json.loads(entry["refs_json"])
+            except (json.JSONDecodeError, TypeError):
+                entry["refs"] = []
+        else:
+            entry["refs"] = []
+        if entry.get("metadata_json"):
+            try:
+                entry["metadata"] = json.loads(entry["metadata_json"])
+            except (json.JSONDecodeError, TypeError):
+                entry["metadata"] = {}
+        else:
+            entry["metadata"] = {}
+        entry.pop("refs_json", None)
+        entry.pop("metadata_json", None)
+        self._send_json({"entry": entry})
+
+    def _handle_update_note(self, entry_id: int, body):
+        """PUT /api/journal/note/<id> — update note body (notes only)."""
+        from src import journal as journal_mod
+
+        new_body = body.get("body")
+        try:
+            entry = journal_mod.update_note(
+                entry_id, new_body, db_path=self.db_path,
+            )
+        except ValueError as e:
+            msg = str(e)
+            status = 404 if "not found" in msg.lower() else 400
+            self._send_json({"error": msg}, status)
+            return
+
+        if entry.get("refs_json"):
+            try:
+                entry["refs"] = json.loads(entry["refs_json"])
+            except (json.JSONDecodeError, TypeError):
+                entry["refs"] = []
+        else:
+            entry["refs"] = []
+        if entry.get("metadata_json"):
+            try:
+                entry["metadata"] = json.loads(entry["metadata_json"])
+            except (json.JSONDecodeError, TypeError):
+                entry["metadata"] = {}
+        else:
+            entry["metadata"] = {}
+        entry.pop("refs_json", None)
+        entry.pop("metadata_json", None)
+        self._send_json({"entry": entry})
+
+    def _handle_delete_note(self, entry_id: int):
+        """DELETE /api/journal/note/<id> — delete a note entry (notes only)."""
+        from src import journal as journal_mod
+
+        try:
+            journal_mod.delete_note(entry_id, db_path=self.db_path)
+        except ValueError as e:
+            msg = str(e)
+            status = 404 if "not found" in msg.lower() else 400
+            self._send_json({"error": msg}, status)
+            return
+        self._send_json({"status": "deleted", "id": entry_id})
 
     # ── Player CRUD handlers ────────────────────────────────────
 

@@ -1,13 +1,15 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { EntryCard } from "../entry-card";
 import type { JournalEntry } from "@/lib/api";
 import type { GameListItem } from "@/lib/types";
+import * as api from "@/lib/api";
 
 // `Element.prototype.scrollIntoView` is not implemented in jsdom — the
 // EntryCard calls it when `pulseOnMount=true`. Mock it so the test runs.
 beforeEach(() => {
   Element.prototype.scrollIntoView = vi.fn();
+  vi.restoreAllMocks();
 });
 
 const baseEntry: JournalEntry = {
@@ -108,5 +110,132 @@ describe("EntryCard", () => {
   it("does NOT scroll when pulseOnMount=false (default)", () => {
     render(<EntryCard entry={baseEntry} player="evan" games={baseGames} />);
     expect(Element.prototype.scrollIntoView).not.toHaveBeenCalled();
+  });
+});
+
+// ─── v1.12.0: edit + delete actions for notes ─────────────────────
+
+const noteEntry: JournalEntry = {
+  ...baseEntry,
+  kind: "note",
+  provider: null, // notes have no LLM provider
+  body: "Round 3 of the Saturday tournament. Evan beat Sarah!",
+};
+
+describe("EntryCard — note edit/delete (v1.12.0)", () => {
+  it("does NOT show Edit/Delete buttons on review entries", () => {
+    render(<EntryCard entry={baseEntry} player="evan" games={baseGames} />);
+    expect(screen.queryByRole("button", { name: /Edit note/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Delete note/ })).not.toBeInTheDocument();
+  });
+
+  it("shows Edit/Delete buttons on note entries", () => {
+    render(<EntryCard entry={noteEntry} player="evan" games={baseGames} />);
+    expect(screen.getByRole("button", { name: /Edit note/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Delete note/ })).toBeInTheDocument();
+  });
+
+  it("clicking Edit swaps the body for a textarea", () => {
+    render(<EntryCard entry={noteEntry} player="evan" games={baseGames} />);
+    fireEvent.click(screen.getByRole("button", { name: /Edit note/ }));
+    const ta = screen.getByLabelText(/Edit note body/i) as HTMLTextAreaElement;
+    expect(ta).toBeInTheDocument();
+    expect(ta.value).toBe(noteEntry.body);
+  });
+
+  it("Save calls updateJournalNote and onChanged", async () => {
+    const onChanged = vi.fn();
+    const updateSpy = vi.spyOn(api, "updateJournalNote").mockResolvedValue({
+      entry: { ...noteEntry, body: "Edited body." },
+    });
+
+    render(
+      <EntryCard
+        entry={noteEntry}
+        player="evan"
+        games={baseGames}
+        onChanged={onChanged}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Edit note/ }));
+    fireEvent.change(screen.getByLabelText(/Edit note body/i), {
+      target: { value: "Edited body." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Save/ }));
+
+    await waitFor(() => {
+      expect(updateSpy).toHaveBeenCalledWith(noteEntry.id, "Edited body.");
+    });
+    await waitFor(() => {
+      expect(onChanged).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("Cancel restores the original body and exits edit mode", () => {
+    render(<EntryCard entry={noteEntry} player="evan" games={baseGames} />);
+    fireEvent.click(screen.getByRole("button", { name: /Edit note/ }));
+    fireEvent.change(screen.getByLabelText(/Edit note body/i), {
+      target: { value: "discarded edit" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Cancel/ }));
+    // Edit mode dismissed
+    expect(screen.queryByLabelText(/Edit note body/i)).not.toBeInTheDocument();
+    // Original body still visible
+    expect(screen.getByText(noteEntry.body!)).toBeInTheDocument();
+  });
+
+  it("Save is disabled when textarea is empty", () => {
+    render(<EntryCard entry={noteEntry} player="evan" games={baseGames} />);
+    fireEvent.click(screen.getByRole("button", { name: /Edit note/ }));
+    fireEvent.change(screen.getByLabelText(/Edit note body/i), {
+      target: { value: "   " },
+    });
+    expect(screen.getByRole("button", { name: /Save/ })).toBeDisabled();
+  });
+
+  it("Delete calls deleteJournalNote after user confirms", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const deleteSpy = vi.spyOn(api, "deleteJournalNote").mockResolvedValue({
+      status: "deleted",
+      id: noteEntry.id,
+    });
+    const onChanged = vi.fn();
+
+    render(
+      <EntryCard
+        entry={noteEntry}
+        player="evan"
+        games={baseGames}
+        onChanged={onChanged}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Delete note/ }));
+
+    expect(confirmSpy).toHaveBeenCalled();
+    await waitFor(() => {
+      expect(deleteSpy).toHaveBeenCalledWith(noteEntry.id);
+    });
+    await waitFor(() => {
+      expect(onChanged).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("Delete does NOT call API when user cancels the confirm", () => {
+    vi.spyOn(window, "confirm").mockReturnValue(false);
+    const deleteSpy = vi.spyOn(api, "deleteJournalNote");
+    const onChanged = vi.fn();
+
+    render(
+      <EntryCard
+        entry={noteEntry}
+        player="evan"
+        games={baseGames}
+        onChanged={onChanged}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Delete note/ }));
+
+    expect(deleteSpy).not.toHaveBeenCalled();
+    expect(onChanged).not.toHaveBeenCalled();
   });
 });

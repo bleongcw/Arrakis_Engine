@@ -167,6 +167,42 @@ def cmd_patterns(args, config):
     print(f"Updated patterns for {count} players.")
 
 
+def cmd_note(args, config):
+    """v1.12.0: Append a parent-authored note to the player's Journal.
+
+    No LLM call — this is pure user-written text. Use for parent
+    observations alongside the LLM-generated reviews:
+
+        python main.py note --player evanleongxinyu \\
+            "Round 3 of the Saturday tournament. Evan beat Sarah 4-0."
+    """
+    from src import journal as journal_mod
+    from src.models import init_db
+
+    db_path = config["database"]["path"]
+    username = args.player
+    body = args.body.strip() if args.body else ""
+    platform = args.platform or "chess.com"
+
+    conn = init_db(db_path)
+    row = conn.execute(
+        "SELECT id FROM players WHERE username = ?", (username,)
+    ).fetchone()
+    conn.close()
+    if not row:
+        print(f"ERROR: player '{username}' not found")
+        return
+
+    try:
+        entry = journal_mod.create_note(
+            row["id"], body, platform=platform, db_path=db_path,
+        )
+        print(f"Created note id={entry['id']} for {username} "
+              f"({len(body)} chars, platform={platform})")
+    except ValueError as e:
+        print(f"ERROR: {e}")
+
+
 def cmd_review(args, config):
     """v1.9.0: Generate the Recent Form Review (last N coached games) for a player.
 
@@ -578,6 +614,23 @@ def main():
     # patterns
     patterns_parser = subparsers.add_parser("patterns", help="Update pattern tracking")
 
+    # note (v1.12.0) — quick parent-authored journal entry from the CLI
+    note_parser = subparsers.add_parser(
+        "note",
+        help="(v1.12.0) Append a parent-authored note to the player's Journal",
+    )
+    note_parser.add_argument(
+        "--player", required=True,
+        help="Username to attach the note to (e.g. evanleongxinyu)",
+    )
+    note_parser.add_argument(
+        "--platform", default="chess.com",
+        help="Platform tag for the note (default: chess.com)",
+    )
+    note_parser.add_argument(
+        "body", help="Note body text (wrap in quotes)",
+    )
+
     # review (v1.9.0) — LLM-generated narrative across the last N coached games
     review_parser = subparsers.add_parser(
         "review",
@@ -683,6 +736,8 @@ def main():
         cmd_patterns(args, config)
     elif args.command == "review":
         cmd_review(args, config)
+    elif args.command == "note":
+        cmd_note(args, config)
     elif args.command == "export-json":
         cmd_export_json(args, config)
     elif args.command == "report":
