@@ -21,6 +21,8 @@ from src.patterns import (
     _compute_comeback_collapse,
     _compute_opening_acpl,
     _compute_tactical_misses,
+    _compute_motif_summary,
+    _format_motif_summary_for_prompt,
     _compute_repertoire_consistency,
     _acpl_trend_direction,
     _find_best_phase,
@@ -400,6 +402,373 @@ class TestComputeTacticalMisses:
     def test_empty(self):
         result = _compute_tactical_misses([], {})
         assert result["miss_rate"] == 0
+
+
+# ── v1.15.0 motif-aware pattern aggregation ───────────────────────────────
+
+
+def _today() -> str:
+    from datetime import datetime
+    return datetime.now().strftime("%Y-%m-%d")
+
+
+def _days_ago(n: int) -> str:
+    from datetime import datetime, timedelta
+    return (datetime.now() - timedelta(days=n)).strftime("%Y-%m-%d")
+
+
+def _mj(played=None, best=None, missed=None) -> str:
+    """Helper: build a motifs_json string the way analyzer.py writes it."""
+    return json.dumps({
+        "played": played or [],
+        "best": best or [],
+        "missed": missed or [],
+    })
+
+
+class TestComputeMotifSummary:
+    """v1.15.0: cross-game motif aggregation from move_analysis.motifs_json."""
+
+    def test_empty_returns_zero_counts(self):
+        result = _compute_motif_summary([], {}, period_days=30)
+        assert result["total_critical_moves"] == 0
+        assert result["top_missed"] is None
+        assert result["top_missed_count"] == 0
+        # by_motif always lists all 8 identifiers, even when empty, with 0s
+        assert len(result["by_motif"]) == 8
+        for entry in result["by_motif"]:
+            assert entry["missed"] == 0
+            assert entry["found"] == 0
+            assert entry["miss_rate"] == 0.0
+
+    def test_no_motifs_json_contributes_nothing(self):
+        # Game in window but every move has motifs_json=NULL → still empty
+        games = [{"id": 1, "player_color": "white", "date_played": _today()}]
+        moves = {1: [
+            {"side": "white", "move_number": 10, "motifs_json": None},
+            {"side": "white", "move_number": 20, "motifs_json": None},
+        ]}
+        result = _compute_motif_summary(games, moves, period_days=30)
+        assert result["total_critical_moves"] == 0
+        assert result["top_missed"] is None
+
+    def test_aggregates_missed_per_motif(self):
+        # Two critical moves: one missed a fork, one missed a pin
+        games = [{"id": 1, "player_color": "white", "date_played": _today()}]
+        moves = {1: [
+            {"side": "white", "move_number": 10,
+             "motifs_json": _mj(played=[], best=["fork"], missed=["fork"])},
+            {"side": "white", "move_number": 20,
+             "motifs_json": _mj(played=[], best=["pin"], missed=["pin"])},
+        ]}
+        result = _compute_motif_summary(games, moves, period_days=30)
+        assert result["total_critical_moves"] == 2
+        by = {e["motif"]: e for e in result["by_motif"]}
+        assert by["fork"]["missed"] == 1
+        assert by["pin"]["missed"] == 1
+        assert by["fork"]["found"] == 0
+        # miss_rate is 100% when only missed (no found)
+        assert by["fork"]["miss_rate"] == 100.0
+        # Sorted by missed-desc; fork and pin tied → either could be first.
+        assert result["top_missed"] in ("fork", "pin")
+        assert result["top_missed_count"] == 1
+
+    def test_found_when_played_and_best_overlap(self):
+        # Player executed the same fork the engine wanted → counts as found
+        games = [{"id": 1, "player_color": "white", "date_played": _today()}]
+        moves = {1: [
+            {"side": "white", "move_number": 10,
+             "motifs_json": _mj(played=["fork"], best=["fork"], missed=[])},
+        ]}
+        result = _compute_motif_summary(games, moves, period_days=30)
+        by = {e["motif"]: e for e in result["by_motif"]}
+        assert by["fork"]["found"] == 1
+        assert by["fork"]["missed"] == 0
+        # No missed → top_missed remains None
+        assert result["top_missed"] is None
+        assert result["top_missed_count"] == 0
+
+    def test_player_side_only(self):
+        # Opponent's missed fork must NOT count for the player.
+        games = [{"id": 1, "player_color": "white", "date_played": _today()}]
+        moves = {1: [
+            {"side": "black", "move_number": 11,  # opponent
+             "motifs_json": _mj(played=[], best=["fork"], missed=["fork"])},
+            {"side": "white", "move_number": 12,  # player
+             "motifs_json": _mj(played=[], best=["pin"], missed=["pin"])},
+        ]}
+        result = _compute_motif_summary(games, moves, period_days=30)
+        by = {e["motif"]: e for e in result["by_motif"]}
+        assert by["fork"]["missed"] == 0   # opponent — ignored
+        assert by["pin"]["missed"] == 1    # player — counted
+        assert result["total_critical_moves"] == 1
+
+    def test_30_day_window_excludes_old_games(self):
+        # Two games: one in window, one 60 days old
+        games = [
+            {"id": 1, "player_color": "white", "date_played": _today()},
+            {"id": 2, "player_color": "white", "date_played": _days_ago(60)},
+        ]
+        moves = {
+            1: [{"side": "white", "move_number": 10,
+                 "motifs_json": _mj(best=["fork"], missed=["fork"])}],
+            2: [{"side": "white", "move_number": 10,
+                 "motifs_json": _mj(best=["pin"], missed=["pin"])}],
+        }
+        result = _compute_motif_summary(games, moves, period_days=30)
+        by = {e["motif"]: e for e in result["by_motif"]}
+        assert by["fork"]["missed"] == 1     # in window
+        assert by["pin"]["missed"] == 0      # excluded
+        assert result["total_critical_moves"] == 1
+
+    def test_null_date_played_excluded(self):
+        games = [{"id": 1, "player_color": "white", "date_played": None}]
+        moves = {1: [{"side": "white", "move_number": 10,
+                      "motifs_json": _mj(best=["fork"], missed=["fork"])}]}
+        result = _compute_motif_summary(games, moves, period_days=30)
+        assert result["total_critical_moves"] == 0
+
+    def test_top_missed_picks_max(self):
+        # 3 missed forks, 1 missed pin → top_missed = "fork"
+        games = [{"id": 1, "player_color": "white", "date_played": _today()}]
+        moves = {1: [
+            {"side": "white", "move_number": 10,
+             "motifs_json": _mj(best=["fork"], missed=["fork"])},
+            {"side": "white", "move_number": 12,
+             "motifs_json": _mj(best=["fork"], missed=["fork"])},
+            {"side": "white", "move_number": 14,
+             "motifs_json": _mj(best=["fork"], missed=["fork"])},
+            {"side": "white", "move_number": 16,
+             "motifs_json": _mj(best=["pin"], missed=["pin"])},
+        ]}
+        result = _compute_motif_summary(games, moves, period_days=30)
+        assert result["top_missed"] == "fork"
+        assert result["top_missed_count"] == 3
+        # by_motif sorted missed-desc → fork must be first non-zero
+        first = next(e for e in result["by_motif"] if e["missed"] > 0)
+        assert first["motif"] == "fork"
+
+    def test_played_only_motifs_not_credited_as_found(self):
+        # Player executed "fork" but engine wanted "pin" — neither found
+        # for fork (best didn't have it) nor missed (it wasn't in `missed`).
+        games = [{"id": 1, "player_color": "white", "date_played": _today()}]
+        moves = {1: [
+            {"side": "white", "move_number": 10,
+             "motifs_json": _mj(played=["fork"], best=["pin"], missed=["pin"])},
+        ]}
+        result = _compute_motif_summary(games, moves, period_days=30)
+        by = {e["motif"]: e for e in result["by_motif"]}
+        assert by["fork"]["found"] == 0   # not in best → no credit
+        assert by["pin"]["missed"] == 1
+
+    def test_malformed_motifs_json_is_ignored(self):
+        # Corrupt JSON must not crash; the move is silently skipped
+        games = [{"id": 1, "player_color": "white", "date_played": _today()}]
+        moves = {1: [
+            {"side": "white", "move_number": 10, "motifs_json": "not json"},
+            {"side": "white", "move_number": 12,
+             "motifs_json": _mj(best=["fork"], missed=["fork"])},
+        ]}
+        result = _compute_motif_summary(games, moves, period_days=30)
+        # Only the valid move counted
+        assert result["total_critical_moves"] == 1
+
+    def test_unknown_motif_identifier_ignored(self):
+        # Future / unknown motif strings don't blow up — silently dropped
+        games = [{"id": 1, "player_color": "white", "date_played": _today()}]
+        moves = {1: [
+            {"side": "white", "move_number": 10,
+             "motifs_json": _mj(best=["zugzwang"], missed=["zugzwang"])},
+        ]}
+        result = _compute_motif_summary(games, moves, period_days=30)
+        # Move counts toward total_critical_moves, but no per-motif bucket
+        # exists for "zugzwang" so it contributes zero to all 8 known motifs.
+        assert result["total_critical_moves"] == 1
+        assert result["top_missed"] is None
+
+
+class TestMotifSummaryInPlayerPatterns:
+    """Confirm _compute_motif_summary is wired into compute_player_patterns."""
+
+    def test_full_pipeline_emits_motif_summary(self, db_path):
+        conn = init_db(db_path)
+        pid = ensure_player(conn, "motifkid", display_name="Motif Kid",
+                            age=10, rating=1100)
+        # One analyzed game with a missed-fork critical move
+        conn.execute(
+            """INSERT INTO games
+            (player_id, game_url, pgn, player_color, player_rating,
+             opponent_rating, result, time_control, time_class, date_played,
+             analysis_status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (pid, "https://chess.com/g/m1",
+             '[White "motifkid"]\n[Black "opp"]\n[Opening "Italian Game"]\n\n1. e4 e5 *',
+             "white", 1100, 1050, "loss", "600", "rapid", _today(), "complete"),
+        )
+        gid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        conn.execute(
+            """INSERT INTO move_analysis
+            (game_id, move_number, side, move_played, best_move,
+             eval_before_cp, eval_after_cp, swing_cp,
+             win_prob_before, win_prob_after, classification, pv_line,
+             motifs_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (gid, 18, "white", "Qh4", "Nxf7", 100, -200, 300,
+             65.0, 30.0, "blunder", "Nxf7 Kxf7",
+             _mj(best=["fork"], missed=["fork"])),
+        )
+        conn.commit()
+        conn.close()
+
+        stats = compute_player_patterns(pid, db_path=db_path)
+        assert "motif_summary" in stats
+        ms = stats["motif_summary"]
+        assert ms["period_days"] == 30
+        assert ms["total_critical_moves"] == 1
+        assert ms["top_missed"] == "fork"
+        assert ms["top_missed_count"] == 1
+
+
+class TestFormatMotifSummaryForPrompt:
+    """v1.15.0: the helper that converts motif_summary → LLM prompt lines."""
+
+    def test_empty_returns_placeholder(self):
+        text = _format_motif_summary_for_prompt({})
+        assert "No motif data" in text
+
+    def test_zero_critical_moves_returns_placeholder(self):
+        text = _format_motif_summary_for_prompt({"total_critical_moves": 0})
+        assert "No motif data" in text
+
+    def test_below_5_threshold_no_headline(self):
+        # top_missed_count = 3 < 5 → no Headline line; bullet list only
+        text = _format_motif_summary_for_prompt({
+            "total_critical_moves": 4,
+            "top_missed": "fork", "top_missed_count": 3,
+            "by_motif": [
+                {"motif": "fork", "missed": 3, "found": 0, "miss_rate": 100.0},
+                {"motif": "pin", "missed": 1, "found": 0, "miss_rate": 100.0},
+            ],
+        })
+        assert "Headline" not in text
+        assert "fork: missed 3" in text
+
+    def test_at_or_above_5_threshold_includes_headline(self):
+        text = _format_motif_summary_for_prompt({
+            "total_critical_moves": 10,
+            "top_missed": "fork", "top_missed_count": 8,
+            "by_motif": [
+                {"motif": "fork", "missed": 8, "found": 1, "miss_rate": 88.9},
+            ],
+        })
+        assert "Headline" in text
+        assert "fork" in text
+        assert "8 instances" in text
+
+    def test_skips_zero_count_motifs(self):
+        text = _format_motif_summary_for_prompt({
+            "total_critical_moves": 1,
+            "top_missed": "fork", "top_missed_count": 1,
+            "by_motif": [
+                {"motif": "fork", "missed": 1, "found": 0, "miss_rate": 100.0},
+                {"motif": "pin", "missed": 0, "found": 0, "miss_rate": 0.0},
+            ],
+        })
+        assert "fork" in text
+        # Zero-count motifs (pin) must NOT show up as bullet lines
+        for line in text.splitlines():
+            if line.strip().startswith("- pin"):
+                pytest.fail("Zero-count motif should be skipped: %r" % line)
+
+
+class TestTrendPromptWiring:
+    """Source-grep guards so the motif slot can't be silently removed
+    from TREND_PROMPT or generate_trend_summary."""
+
+    def test_trend_prompt_has_motif_section(self):
+        from src.patterns import TREND_PROMPT
+        assert "## Recurring Tactical Themes" in TREND_PROMPT
+        assert "{motif_summary_text}" in TREND_PROMPT
+
+    def test_trend_prompt_practice_rule_cites_motif_gate(self):
+        from src.patterns import TREND_PROMPT
+        # The Paragraph-3 rule must reference the 5-instance gate AND
+        # name at least one motif type so the rule is actionable.
+        assert "5 instances" in TREND_PROMPT or ">= 5" in TREND_PROMPT
+        assert "fork" in TREND_PROMPT
+
+    def test_generate_trend_summary_passes_motif_text(self):
+        import inspect
+        from src.patterns import generate_trend_summary
+        src = inspect.getsource(generate_trend_summary)
+        assert "_format_motif_summary_for_prompt" in src
+        assert "motif_summary_text=" in src
+
+
+class TestBuildTrajectoryBlockMotifSection:
+    """v1.15.0: trajectory block grows a recurring-themes section when
+    motif_summary has at least one critical move recorded."""
+
+    def test_motif_section_emitted_with_data(self, db_path):
+        conn = init_db(db_path)
+        pid = ensure_player(conn, "ev15", display_name="Evan15",
+                            age=9, rating=1100)
+        stats = {
+            "total_games": 50,
+            "phase_analysis": {"middlegame": {"acpl": 70, "moves": 200}},
+            "consistency": {"mean_acpl": 60, "total_games": 50, "rating": "Stable"},
+            "motif_summary": {
+                "period_days": 30,
+                "total_critical_moves": 12,
+                "top_missed": "fork", "top_missed_count": 8,
+                "by_motif": [
+                    {"motif": "fork", "missed": 8, "found": 3, "miss_rate": 72.7},
+                    {"motif": "pin", "missed": 2, "found": 1, "miss_rate": 66.7},
+                    {"motif": "skewer", "missed": 0, "found": 0, "miss_rate": 0.0},
+                ],
+            },
+        }
+        conn.execute(
+            """INSERT INTO player_patterns
+            (player_id, period_start, period_end, stats_json, updated_at)
+            VALUES (?, ?, ?, ?, datetime('now'))""",
+            (pid, "2026-04-01", "2026-04-30", json.dumps(stats)),
+        )
+        conn.commit()
+        block, diag = build_trajectory_block(conn, pid)
+        conn.close()
+        assert "Recurring tactical themes" in block
+        assert "Most-missed: fork" in block
+        assert "8 instances" in block
+        assert "pin" in block  # appears in "Also recurring"
+        assert diag["motif_top_missed"] == "fork"
+
+    def test_motif_section_skipped_when_zero(self, db_path):
+        conn = init_db(db_path)
+        pid = ensure_player(conn, "newkid15", display_name="New",
+                            age=9, rating=1100)
+        stats = {
+            "total_games": 5,
+            "phase_analysis": {"middlegame": {"acpl": 70}},
+            "consistency": {"mean_acpl": 60, "total_games": 5, "rating": "Stable"},
+            "motif_summary": {
+                "period_days": 30,
+                "total_critical_moves": 0,
+                "top_missed": None, "top_missed_count": 0,
+                "by_motif": [],
+            },
+        }
+        conn.execute(
+            """INSERT INTO player_patterns
+            (player_id, period_start, period_end, stats_json, updated_at)
+            VALUES (?, ?, ?, ?, datetime('now'))""",
+            (pid, "2026-04-01", "2026-04-30", json.dumps(stats)),
+        )
+        conn.commit()
+        block, diag = build_trajectory_block(conn, pid)
+        conn.close()
+        assert "Recurring tactical themes" not in block
+        assert diag["motif_top_missed"] is None
 
 
 class TestComputeRepertoireConsistency:

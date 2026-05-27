@@ -3,6 +3,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { GameCoaching } from "@/lib/types";
 import { parseSectionedFeedback } from "@/lib/feedback-sections";
+import { MOTIF_LABELS } from "@/lib/motifs";
 
 interface CoachingPanelsProps {
   coaching: GameCoaching | null;
@@ -282,16 +283,9 @@ export function CoachingPanels({ coaching }: CoachingPanelsProps) {
 // the best move did), amber chips for "missed" (themes the player
 // didn't take). Silent row when both arrays are empty/missing — keeps
 // pre-v1.14.0 entries visually unchanged.
-const MOTIF_LABELS: Record<string, { icon: string; label: string }> = {
-  fork: { icon: "🍴", label: "fork" },
-  pin: { icon: "📌", label: "pin" },
-  skewer: { icon: "🗡", label: "skewer" },
-  discovered_check: { icon: "💥", label: "discovered check" },
-  mate_threat: { icon: "🎯", label: "mate threat" },
-  removing_defender: { icon: "🛡", label: "removing defender" },
-  hanging_piece: { icon: "🎁", label: "hanging piece" },
-  trapped_piece: { icon: "🪤", label: "trapped piece" },
-};
+//
+// v1.15.0: MOTIF_LABELS lifted to `@/lib/motifs` so the Patterns-page
+// MotifThemes card shares the same icon + label map.
 
 function MotifBadgeRow({
   found,

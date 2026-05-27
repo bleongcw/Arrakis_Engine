@@ -120,6 +120,10 @@ def compute_player_patterns(player_id: int, db_path: str | None = None,
         "opening_acpl": _compute_opening_acpl(games, moves_by_game),
         "opening_repertoire": _compute_opening_repertoire(games, moves_by_game),
         "tactical_misses": _compute_tactical_misses(games, moves_by_game),
+        # v1.15.0: per-motif aggregation across the same 30-day window.
+        # Empty when no games have motifs_json yet (pre-v1.14.0 or
+        # not-yet-rescanned). See _compute_motif_summary docstring.
+        "motif_summary": _compute_motif_summary(games, moves_by_game, period_days),
         "repertoire_consistency": _compute_repertoire_consistency(games),
         # Time pressure analysis
         "time_pressure": _compute_time_pressure(games, moves_by_game),
@@ -1451,6 +1455,159 @@ def _compute_opening_acpl(games: list[dict],
     return result
 
 
+# ── v1.15.0 Motif Aggregation ─────────────────────────────────────────────
+
+# Canonical 8 motif identifiers from src/motifs.py. Hard-coded here (not
+# imported) to keep patterns.py free of motif-detection imports — the
+# detector module is heavy (chess.Board work). Order is alphabetical, NOT
+# specificity order — sorts happen downstream by missed-count.
+_MOTIF_IDENTIFIERS = (
+    "discovered_check",
+    "fork",
+    "hanging_piece",
+    "mate_threat",
+    "pin",
+    "removing_defender",
+    "skewer",
+    "trapped_piece",
+)
+
+
+def _compute_motif_summary(games: list[dict],
+                           moves_by_game: dict[int, list[dict]],
+                           period_days: int = 30) -> dict:
+    """Per-motif missed/found counts across the player's recent games.
+
+    Aggregates `move_analysis.motifs_json` (populated for critical moves
+    since v1.14.0) into a cross-game view: for each of the 8 motif
+    identifiers, how often did the player MISS the theme (their move
+    didn't execute it but the engine's best move did) vs. FIND it
+    (both the played move and best move executed it).
+
+    Scope:
+      - Player-side moves only (`m["side"] == g["player_color"]`).
+      - Games within the last ``period_days`` (matches the 30-day
+        window stored on player_patterns).
+      - Games with NULL `date_played` are excluded as out-of-window
+        (defensive — mirrors `_compute_acpl_trend`).
+      - Moves without `motifs_json` (non-critical, or pre-v1.14.0
+        rows that haven't been rescanned) contribute nothing.
+
+    Counting semantics:
+      - `missed`: per-instance count of identifiers appearing in
+        `motifs_json["missed"]`. This is the strongest "you didn't
+        see it" signal — engine's best move had the theme, yours
+        didn't.
+      - `found`: per-instance count of identifiers appearing in BOTH
+        `motifs_json["played"]` and `motifs_json["best"]`. The player
+        executed the same theme the engine wanted.
+      - Identifiers appearing only in `played` (not `best`) are
+        ignored — the player executed a theme but the engine
+        preferred a different idea, so the "credit" is ambiguous.
+      - `miss_rate` = missed / (missed + found) * 100.
+
+    Returned dict shape (stable v1.15.0 contract — consumed by
+    `generate_trend_summary`, `build_trajectory_block`, and the
+    frontend `<MotifThemes>` card):
+      {
+        "period_days": 30,
+        "total_critical_moves": N,        # moves with motifs_json in window
+        "by_motif": [                     # sorted: missed desc, then found desc
+            {"motif": "fork", "missed": 8, "found": 3, "miss_rate": 72.7},
+            ...
+        ],
+        "top_missed": "fork" | None,      # motif with highest missed; None if 0
+        "top_missed_count": 8,            # 0 when top_missed is None
+      }
+
+    Empty/degenerate cases:
+      - No games or no motifs_json anywhere → `total_critical_moves: 0`,
+        `by_motif: []`, `top_missed: None`, `top_missed_count: 0`.
+
+    v1.15.0+
+    """
+    cutoff_date = (datetime.now() - timedelta(days=period_days)).strftime("%Y-%m-%d")
+
+    missed_counts: dict[str, int] = {m: 0 for m in _MOTIF_IDENTIFIERS}
+    found_counts: dict[str, int] = {m: 0 for m in _MOTIF_IDENTIFIERS}
+    total_critical_moves = 0
+
+    for g in games:
+        date_played = g.get("date_played")
+        if not date_played or date_played[:10] < cutoff_date:
+            # NULL or older than the window → skip.
+            continue
+
+        player_color = g.get("player_color")
+        if player_color not in ("white", "black"):
+            continue
+
+        game_moves = moves_by_game.get(g["id"], [])
+        for m in game_moves:
+            if m.get("side") != player_color:
+                continue
+            raw = m.get("motifs_json")
+            if not raw:
+                continue
+            try:
+                parsed = json.loads(raw)
+            except (TypeError, ValueError):
+                continue
+            if not isinstance(parsed, dict):
+                continue
+
+            total_critical_moves += 1
+
+            played = parsed.get("played") or []
+            best = parsed.get("best") or []
+            missed = parsed.get("missed") or []
+
+            if not isinstance(played, list):
+                played = []
+            if not isinstance(best, list):
+                best = []
+            if not isinstance(missed, list):
+                missed = []
+
+            played_set = set(played)
+            best_set = set(best)
+
+            for motif in missed:
+                if motif in missed_counts:
+                    missed_counts[motif] += 1
+            for motif in best_set & played_set:
+                if motif in found_counts:
+                    found_counts[motif] += 1
+
+    by_motif: list[dict] = []
+    for motif in _MOTIF_IDENTIFIERS:
+        m = missed_counts[motif]
+        f = found_counts[motif]
+        denom = m + f
+        miss_rate = round(m / denom * 100, 1) if denom else 0.0
+        by_motif.append({
+            "motif": motif,
+            "missed": m,
+            "found": f,
+            "miss_rate": miss_rate,
+        })
+
+    # Sort: most-missed first, then most-found as tiebreaker.
+    by_motif.sort(key=lambda x: (-x["missed"], -x["found"]))
+
+    top = by_motif[0] if by_motif else None
+    top_missed = top["motif"] if top and top["missed"] > 0 else None
+    top_missed_count = top["missed"] if top and top["missed"] > 0 else 0
+
+    return {
+        "period_days": period_days,
+        "total_critical_moves": total_critical_moves,
+        "by_motif": by_motif,
+        "top_missed": top_missed,
+        "top_missed_count": top_missed_count,
+    }
+
+
 def _compute_tactical_misses(games: list[dict],
                              moves_by_game: dict[int, list[dict]]) -> dict:
     """Tactical Miss Rate.
@@ -1650,6 +1807,9 @@ TREND_PROMPT = """You are a professional chess coach reviewing a player's recent
 ## ACPL Trend (weekly)
 {acpl_trend_text}
 
+## Recurring Tactical Themes (last 30 days)
+{motif_summary_text}
+
 ## Instructions
 Write a 3-4 paragraph coaching summary for {name}. This is a progress review, not a single-game analysis.
 
@@ -1658,11 +1818,45 @@ Requirements:
 - Paragraph 1: Overall progress and what's going well. Be specific with numbers.
 - Paragraph 2: Areas that need improvement. Reference the weakest phase, common mistakes, or tactical misses.
 - Paragraph 3: 3 specific, actionable practice recommendations appropriate for a {age}-year-old {tier_label}-level player.
+  - v1.15.0: When the Recurring Tactical Themes section shows a clear top miss (>= 5 instances), make ONE of the 3 practice recommendations specifically about that motif (name it: "fork puzzles", "pin exercises", etc.). If no theme has reached 5 instances, ignore this rule and pick 3 general recommendations.
 - Paragraph 4: Encouragement and growth mindset message.
 - Keep language age-appropriate for {age} years old.
 - Be warm but professional. Concrete, not vague.
 
 Respond with ONLY the text paragraphs, no JSON, no headers, no markdown formatting."""
+
+
+def _format_motif_summary_for_prompt(motif_summary: dict) -> str:
+    """v1.15.0: format the motif_summary aggregate as plain lines for the
+    LLM prompt. One line per non-zero motif, sorted missed-desc, plus a
+    headline if any motif has reached the ≥5 instance "clear top" bar.
+
+    Returns "  No motif data yet — coach more games or run rescan-motifs."
+    when the aggregate has zero critical moves in the window. The leading
+    indentation matches the rest of the prompt's bullet styling.
+    """
+    if not motif_summary or motif_summary.get("total_critical_moves", 0) == 0:
+        return "  No motif data yet — coach more games or run rescan-motifs."
+
+    by_motif = motif_summary.get("by_motif") or []
+    nonzero = [e for e in by_motif if (e.get("missed", 0) + e.get("found", 0)) > 0]
+    if not nonzero:
+        return "  No motif data yet — coach more games or run rescan-motifs."
+
+    lines = []
+    top = motif_summary.get("top_missed")
+    top_count = motif_summary.get("top_missed_count", 0)
+    if top and top_count >= 5:
+        lines.append(
+            f"  Headline: {top} is the most-missed theme ({top_count} instances in the last 30 days)."
+        )
+
+    for e in nonzero:
+        lines.append(
+            f"  - {e['motif']}: missed {e['missed']}× / found {e['found']}× "
+            f"({e['miss_rate']}% miss rate)"
+        )
+    return "\n".join(lines)
 
 
 def generate_trend_summary(player_id: int, db_path: str | None = None,
@@ -1723,6 +1917,11 @@ def generate_trend_summary(player_id: int, db_path: str | None = None,
     else:
         acpl_trend_text = "  No trend data available"
 
+    # v1.15.0: Build motif summary text from the per-motif aggregate.
+    motif_summary_text = _format_motif_summary_for_prompt(
+        stats.get("motif_summary") or {}
+    )
+
     def _safe_get(d, *keys, default="N/A"):
         for k in keys:
             if isinstance(d, dict):
@@ -1763,6 +1962,7 @@ def generate_trend_summary(player_id: int, db_path: str | None = None,
         collapse_rate=_safe_get(comeback, "collapses", "collapse_rate", default=0),
         repertoire_rating=_safe_get(repertoire, "white", "rating", default="N/A"),
         acpl_trend_text=acpl_trend_text,
+        motif_summary_text=motif_summary_text,
     )
 
     # Call LLM
@@ -2193,6 +2393,7 @@ def build_trajectory_block(
     comeback = stats.get("comeback_collapse") or {}
     repertoire = stats.get("repertoire_consistency") or {}
     acpl_trend = stats.get("acpl_trend") or []
+    motif_summary = stats.get("motif_summary") or {}
 
     worst_phase = _find_worst_phase(phase)
     best_phase = _find_best_phase(phase)
@@ -2262,11 +2463,37 @@ def build_trajectory_block(
     lines.append(f"- ACPL trend direction (last 4 weeks): {trend_direction}")
     lines.append("")
 
+    # v1.15.0: recurring tactical themes block (only when motif data exists).
+    motif_top = motif_summary.get("top_missed")
+    motif_top_count = motif_summary.get("top_missed_count", 0)
+    motif_total = motif_summary.get("total_critical_moves", 0)
+    if motif_total > 0:
+        nonzero_motifs = [
+            e for e in (motif_summary.get("by_motif") or [])
+            if (e.get("missed", 0) + e.get("found", 0)) > 0
+        ]
+        if nonzero_motifs:
+            lines.append("**Recurring tactical themes (last 30 days):**")
+            if motif_top and motif_top_count > 0:
+                lines.append(
+                    f"- Most-missed: {motif_top} ({motif_top_count} instances)"
+                )
+            also = [
+                f"{e['motif']} ({e['missed']})"
+                for e in nonzero_motifs
+                if e["motif"] != motif_top and e["missed"] > 0
+            ]
+            if also:
+                lines.append(f"- Also recurring: {', '.join(also[:4])}")
+            lines.append("")
+
     diag = {
         "trajectory_injected": True,
         "trajectory_age_days": age_days,
         "weakest_phase": worst_phase if worst_phase != "N/A" else None,
         "trend_direction": trend_direction,
+        # v1.15.0: most-missed motif tag (None when no critical moves).
+        "motif_top_missed": motif_top if motif_top_count > 0 else None,
     }
     return "\n".join(lines), diag
 

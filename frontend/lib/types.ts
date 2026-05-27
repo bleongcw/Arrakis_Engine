@@ -264,6 +264,20 @@ export interface PatternStats {
   opening_acpl?: unknown;
   opening_repertoire?: OpeningRepertoireData;
   tactical_misses?: unknown;
+  // v1.15.0: per-motif aggregation across the same 30-day window.
+  // Drives the <MotifThemes> Patterns card.
+  motif_summary?: {
+    period_days: number;
+    total_critical_moves: number;
+    by_motif: Array<{
+      motif: string;
+      missed: number;
+      found: number;
+      miss_rate: number;
+    }>;
+    top_missed: string | null;
+    top_missed_count: number;
+  };
   repertoire_consistency?: unknown;
   // Time pressure
   time_pressure?: TimePressureStats | null;

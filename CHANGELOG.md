@@ -4,6 +4,105 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.15.0] - 2026-05-28
+
+### Added
+- **Motif-aware pattern aggregation.** v1.14.0 tagged every critical move
+  with named tactical themes (fork, pin, skewer, etc.) but the data
+  stayed invisible at the cross-game level. v1.15.0 aggregates those
+  per-move tags into a player-level "Tactical Themes" insight surface —
+  the Patterns page can now answer *"which themes do you miss most?"*,
+  not just *"how often do you miss tactics?"*
+
+  New **Tactical Themes** card on the Patterns page, paired side-by-
+  side with the existing Tactical Awareness card:
+  - Hero stat: the most-missed theme + its 30-day instance count
+    (e.g. *"🍴 fork — 8"*)
+  - Per-motif bar row, sorted missed-desc — emerald fill = themes you
+    executed correctly when the engine wanted them, amber fill =
+    themes the best move had that yours didn't
+  - Zero-count motifs filtered out; empty-state copy when no
+    critical moves have motif data yet (e.g. before `rescan-motifs`
+    has populated history)
+
+- **Backend aggregation (`src/patterns.py::_compute_motif_summary`).**
+  Pure Python, no new DB query — derives from the existing
+  `move_analysis.motifs_json` column already pulled into
+  `compute_player_patterns`'s `moves_by_game` dict. Counts
+  player-side critical moves only, within the same 30-day window
+  the rest of the Patterns page uses. Returns a stable shape
+  consumed by the prompt formatter, the trajectory block, and the
+  frontend card:
+  ```python
+  {
+    "period_days": 30,
+    "total_critical_moves": N,
+    "by_motif": [{"motif", "missed", "found", "miss_rate"}, ...],  # all 8, sorted
+    "top_missed": "fork" | None,
+    "top_missed_count": int,
+  }
+  ```
+  Pre-v1.14.0 games (NULL `motifs_json`) and games with missing
+  `date_played` are silently skipped — the card just becomes more
+  accurate as more games get rescanned.
+
+- **LLM trend summary** (`src/patterns.py::TREND_PROMPT`) gains a new
+  *Recurring Tactical Themes (last 30 days)* section. When a single
+  motif crosses 5 missed instances in the window, the prompt now
+  explicitly asks the LLM to make ONE of the three Paragraph-3
+  practice recommendations specifically about that theme (e.g.
+  *"set a weekly goal of solving 10 fork puzzles"*). Below the
+  threshold, the rule is ignored — avoids over-recommending practice
+  on a single missed fork.
+
+- **Per-game coaching trajectory block**
+  (`src/patterns.py::build_trajectory_block`) gains a *Recurring
+  tactical themes* section listing the most-missed motif and up to
+  4 also-recurring runners-up. The per-game coach can now ground
+  feedback in cross-game patterns: *"forks have been your biggest
+  blind spot — 8 missed in the last 30 days; this game's move 18
+  was another one"*. Diagnostic dict gains a `motif_top_missed`
+  key for `coaching_meta_json` introspection.
+
+- **Frontend shared motif map (`frontend/lib/motifs.ts`).** Lifted the
+  `MOTIF_LABELS` map from `coaching-panels.tsx` into a shared module
+  so the new MotifThemes Patterns card uses the same 8 emoji + label
+  pairs as the per-game Critical Moments badges. Single source of
+  truth — no drift between the two surfaces.
+
+- **No schema migration.** v1.15.0 derives from data the v1.14.0
+  schema already stores. Running `python main.py rescan-motifs
+  --player <username>` once is the recommended pre-step to backfill
+  motif tags on historical games, then `python main.py patterns`
+  to recompute the aggregate.
+
+### Tests
+- 22 new backend tests in `tests/test_patterns.py`:
+  - `TestComputeMotifSummary` (10 cases) — empty / aggregation /
+    player-side-only / 30-day window / NULL date / top-missed picker /
+    played-only / malformed JSON / unknown identifier
+  - `TestMotifSummaryInPlayerPatterns` (1 case) — full pipeline
+    through `compute_player_patterns` with a real `motifs_json` row
+  - `TestFormatMotifSummaryForPrompt` (5 cases) — empty / zero / under
+    threshold / at-threshold / zero-count filtering
+  - `TestTrendPromptWiring` (3 cases) — source-grep guards on
+    `TREND_PROMPT` + `generate_trend_summary` so the new motif slot
+    can't be silently removed in a future refactor
+  - `TestBuildTrajectoryBlockMotifSection` (3 cases) — motif block
+    emitted when data exists, skipped when zero, `motif_top_missed`
+    diag wired correctly
+- 6 new frontend tests in
+  `frontend/components/patterns/__tests__/motif-themes.test.tsx`:
+  - Renders nothing when prop is undefined (pre-v1.15.0 patterns row)
+  - Empty-state copy when `total_critical_moves === 0`
+  - Top-missed hero number renders correctly
+  - One row per non-zero motif with emoji + label
+  - Per-row miss-rate + count display
+  - Rows sorted missed-desc
+- Backend total: 487 → **509**. Frontend total: 173 → **179**.
+
+---
+
 ## [1.14.1] - 2026-05-28
 
 ### Fixed

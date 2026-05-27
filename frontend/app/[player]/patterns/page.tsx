@@ -18,6 +18,7 @@ import { CriticalPositions } from "@/components/patterns/critical-positions";
 import { ComebackCollapse } from "@/components/patterns/comeback-collapse";
 import { OpeningACPL } from "@/components/patterns/opening-acpl";
 import { TacticalMisses } from "@/components/patterns/tactical-misses";
+import { MotifThemes } from "@/components/patterns/motif-themes";
 import { RepertoireConsistency } from "@/components/patterns/repertoire-consistency";
 import { OpeningRepertoireTracker } from "@/components/patterns/opening-repertoire-tracker";
 import { TimePressure } from "@/components/patterns/time-pressure";
@@ -198,16 +199,26 @@ export default function PatternsPage() {
         </Card>
       </div>
 
-      {/* Critical Positions + Tactical Misses side by side */}
+      {/* v1.15.0: Critical Positions now stands alone full-width above
+          the new Tactical Themes pairing. Tactical Misses pairs with
+          Motif Themes because they're conceptually paired (miss-rate
+          vs. which themes are missed). */}
+      <Card>
+        <CardContent className="pt-6">
+          <CriticalPositions data={stats.critical_positions as any} />
+        </CardContent>
+      </Card>
+
+      {/* Tactical Awareness + Tactical Themes side by side */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card>
           <CardContent className="pt-6">
-            <CriticalPositions data={stats.critical_positions as any} />
+            <TacticalMisses data={stats.tactical_misses as any} />
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-6">
-            <TacticalMisses data={stats.tactical_misses as any} />
+            <MotifThemes data={stats.motif_summary} />
           </CardContent>
         </Card>
       </div>
