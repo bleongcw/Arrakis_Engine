@@ -23,7 +23,6 @@ from src.harvester import harvest_player
 from src.analyzer import analyze_pending
 from src.coach import coach_pending
 from src.patterns import update_patterns
-from src.export import export_json
 from src.report import generate_report
 from src.models import init_db
 
@@ -259,12 +258,8 @@ def cmd_review(args, config):
             print(f"  ✗ {t['username']}: ERROR — {e}")
 
 
-def cmd_export_json(args, config):
-    """Export data to JSON for the dashboard."""
-    db_path = config["database"]["path"]
-    counts = export_json(output_dir="dashboard/data", db_path=db_path)
-    print(f"Exported: {counts['players']} players, {counts['games']} games, "
-          f"{counts['patterns']} pattern records.")
+# v1.13.3: cmd_export_json removed — the Next.js frontend reads live
+# from /api/* instead of static JSON exports.
 
 
 def cmd_report(args, config):
@@ -294,7 +289,7 @@ def cmd_dashboard(args, config):
     port = args.port or 8000
 
     from src.dashboard_server import run_dashboard
-    run_dashboard(db_path=db_path, port=port, config=config, static_dir="dashboard")
+    run_dashboard(db_path=db_path, port=port, config=config)
 
 
 def cmd_serve(args, config):
@@ -356,7 +351,6 @@ def cmd_serve(args, config):
             "db_path": db_path,
             "port": api_port,
             "config": config,
-            "static_dir": "dashboard",
             "api_only_banner": False,   # we'll print the unified banner ourselves
         },
         daemon=True,
@@ -539,16 +533,13 @@ def cmd_run_all(args, config):
     print("\n=== Step 2/5: Analyzing games ===")
     cmd_analyze(args, config)
 
-    print("\n=== Step 3/5: Coaching games ===")
+    print("\n=== Step 3/4: Coaching games ===")
     cmd_coach(args, config)
 
-    print("\n=== Step 4/5: Updating patterns ===")
+    print("\n=== Step 4/4: Updating patterns ===")
     cmd_patterns(args, config)
 
-    print("\n=== Step 5/5: Exporting JSON ===")
-    cmd_export_json(args, config)
-
-    print("\nPipeline complete! Run 'python main.py dashboard' to view results.")
+    print("\nPipeline complete! Run 'python main.py serve' to view results.")
 
 
 def main():
@@ -651,9 +642,6 @@ def main():
              "(default: 10, range 3-30)",
     )
 
-    # export-json
-    export_parser = subparsers.add_parser("export-json", help="Export data to JSON for dashboard")
-
     # report
     report_parser = subparsers.add_parser("report", help="Generate coaching reports")
     report_parser.add_argument("--player", action="append", help="Username(s) to report on")
@@ -738,8 +726,6 @@ def main():
         cmd_review(args, config)
     elif args.command == "note":
         cmd_note(args, config)
-    elif args.command == "export-json":
-        cmd_export_json(args, config)
     elif args.command == "report":
         cmd_report(args, config)
     elif args.command == "dashboard":

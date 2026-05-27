@@ -37,8 +37,13 @@ def dict_from_row(row):
     return dict(row) if row else None
 
 
-class DashboardHandler(http.server.SimpleHTTPRequestHandler):
-    """HTTP handler that routes /api/* to SQLite queries."""
+class DashboardHandler(http.server.BaseHTTPRequestHandler):
+    """HTTP handler that routes /api/* to SQLite queries.
+
+    v1.13.3: switched from SimpleHTTPRequestHandler to BaseHTTPRequestHandler
+    — the backend is API-only. The Next.js frontend on port 3000 serves
+    every UI asset; this server only ever needs to answer /api/* paths.
+    Non-/api paths return 404."""
 
     def __init__(self, *args, db_path=None, config=None, **kwargs):
         self.db_path = db_path
@@ -52,7 +57,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         if path.startswith("/api/"):
             self._handle_api(path, parse_qs(parsed.query))
         else:
-            super().do_GET()
+            self._send_json({"error": "Not found"}, 404)
 
     def do_POST(self):
         parsed = urlparse(self.path)
@@ -1630,7 +1635,6 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
 
 
 def run_dashboard(db_path: str, port: int = 8000, config: dict | None = None,
-                  static_dir: str = "dashboard",
                   api_only_banner: bool = True):
     """Start the live dashboard server.
 
@@ -1652,8 +1656,7 @@ def run_dashboard(db_path: str, port: int = 8000, config: dict | None = None,
     _scheduler_manager = SchedulerManager(config, db_path)
     _scheduler_manager.start()
 
-    handler = partial(DashboardHandler, directory=static_dir, db_path=db_path,
-                      config=config)
+    handler = partial(DashboardHandler, db_path=db_path, config=config)
     with http.server.HTTPServer(("", port), handler) as httpd:
         if api_only_banner:
             sched_config = config.get("schedule", {})

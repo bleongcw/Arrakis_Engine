@@ -401,7 +401,6 @@ database:
 | `python main.py analyze` | Run Stockfish analysis on all pending games |
 | `python main.py coach` | Generate LLM coaching insights (supports `--limit`, `--provider`, `--history`) |
 | `python main.py patterns` | Compute cross-game pattern statistics |
-| `python main.py export-json` | Export database to JSON for the web dashboard |
 | `python main.py report` | Generate Markdown coaching reports |
 | `python main.py serve` | **(v1.5.0)** Launch backend + frontend together (recommended for end users; supports `--port`, `--frontend-port`, `--install`) |
 | `python main.py dashboard` | Launch only the API backend (use `serve` for the full app) |
@@ -507,7 +506,7 @@ cd frontend && pnpm install && pnpm dev
 
 ```bash
 python main.py run-all
-# Executes: harvest → analyze → coach → patterns → export-json
+# Executes: harvest → analyze → coach → patterns
 ```
 
 ### Verbose logging
@@ -533,12 +532,11 @@ python main.py analyze
 # 3. Generate coaching insights
 python main.py coach
 
-# 4. Compute patterns and export
+# 4. Compute cross-game patterns
 python main.py patterns
-python main.py export-json
 
 # 5. View results
-python main.py dashboard
+python main.py serve
 ```
 
 ### Weekly routine

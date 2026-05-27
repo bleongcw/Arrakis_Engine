@@ -4,6 +4,65 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.13.3] - 2026-05-27
+
+### Removed
+- **`export_json` and the static-file dashboard path are gone.** The
+  Next.js frontend at `frontend/` has been the only consumer of
+  Arrakis data since the v1.0 dashboard migration — it pulls live
+  from `/api/*`. The legacy static-HTML dashboard (and its companion
+  JSON-export pipeline) had no consumers but the code lived on as
+  dead weight.
+
+  Deletions:
+  - `src/export.py` — `export_json()` function (wrote
+    players/games/patterns JSON files into `dashboard/data/`).
+  - `tests/test_export.py` — 7 unit tests for `export_json` (using
+    `tmp_path` so the tests passed but tested a feature no consumer
+    used).
+  - `cmd_export_json` and the `export-json` subparser in `main.py`.
+  - The `static_dir` parameter from `run_dashboard()` in
+    `src/dashboard_server.py` and the matching `static_dir="dashboard"`
+    arguments from `cmd_dashboard` and `cmd_serve` in `main.py`.
+  - The static-file serving fallback in `DashboardHandler.do_GET` —
+    non-`/api/` paths now return 404 directly (the Next.js frontend
+    on port 3000 serves every UI asset; the backend on port 8000 is
+    API-only).
+  - Run-all pipeline's "Step 5/5: Exporting JSON" is gone — now
+    runs as 4 steps (harvest → analyze → coach → patterns) ending
+    with a "run `python main.py serve` to view results" hint.
+  - README references to `export-json` (3 occurrences) and the local
+    `dashboard/` / `dashboard-legacy/` directories themselves (the
+    latter were untracked artifacts of the pre-Next.js dashboard
+    that local installs had been regenerating).
+
+### Changed
+- **`DashboardHandler` base class switched from
+  `SimpleHTTPRequestHandler` to `BaseHTTPRequestHandler`.** The
+  backend never served static files in practice — the Next.js
+  frontend handles all UI on port 3000. The new base class makes
+  that explicit: only `/api/*` is routable, everything else is 404.
+  The `directory=` kwarg is gone from the `DashboardHandler`
+  constructor signature.
+
+### Tests
+- 463 backend → **456** (−7 from removed `test_export.py`).
+- Frontend unchanged at 165.
+- `tests/test_dashboard_server.py` fixture updated to drop the
+  `directory="dashboard"` kwarg.
+
+### Migration
+- None for end users. The `export-json` CLI subcommand is gone — if
+  any external scripting was calling it, it'll get
+  `main.py: error: invalid choice: 'export-json'`. Internal pipelines
+  using `run-all` keep working (just one fewer step).
+- Local `dashboard/` and `dashboard-legacy/` directories can be
+  deleted to reclaim ~13 MB (they were never tracked in git;
+  whatever's left locally is JSON regenerations from before this
+  patch and is safe to remove).
+
+---
+
 ## [1.13.2] - 2026-05-27
 
 ### Added

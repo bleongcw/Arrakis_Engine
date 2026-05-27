@@ -67,7 +67,8 @@ def live_server(db_with_data):
     from src.dashboard_server import DashboardHandler
 
     port = 18765
-    handler = partial(DashboardHandler, directory="dashboard", db_path=db_with_data)
+    # v1.13.3: handler is BaseHTTPRequestHandler-based — no `directory` kwarg
+    handler = partial(DashboardHandler, db_path=db_with_data)
     httpd = http.server.HTTPServer(("127.0.0.1", port), handler)
 
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
