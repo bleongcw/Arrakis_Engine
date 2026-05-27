@@ -2,6 +2,7 @@
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { GameCoaching } from "@/lib/types";
+import { parseSectionedFeedback } from "@/lib/feedback-sections";
 
 interface CoachingPanelsProps {
   coaching: GameCoaching | null;
@@ -137,7 +138,10 @@ export function CoachingPanels({ coaching }: CoachingPanelsProps) {
         </CardContent>
       </Card>
 
-      {/* Player Feedback */}
+      {/* Player Feedback — v1.13.0+ phase-structured 5-section render.
+          Legacy pre-v1.13.0 entries (no `## ` headings) fall back to a
+          single section with empty heading and the full body as one
+          block, matching the pre-v1.13.0 look exactly. */}
       {coaching.player_feedback && (
         <Card className="border-l-4 border-l-green-500">
           <CardHeader className="pb-2">
@@ -146,9 +150,23 @@ export function CoachingPanels({ coaching }: CoachingPanelsProps) {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-sm leading-relaxed whitespace-pre-wrap">
-              {toText(coaching.player_feedback)}
-            </div>
+            {parseSectionedFeedback(coaching.player_feedback).map((section, i) => (
+              <section key={i} className="mb-4 last:mb-0">
+                {section.heading && (
+                  <h4 className="text-sm font-semibold mb-2 text-green-600 dark:text-green-400">
+                    {section.heading}
+                  </h4>
+                )}
+                {section.body.map((p, j) => (
+                  <p
+                    key={j}
+                    className="text-sm leading-relaxed whitespace-pre-wrap mb-2 last:mb-0"
+                  >
+                    {p}
+                  </p>
+                ))}
+              </section>
+            ))}
           </CardContent>
         </Card>
       )}

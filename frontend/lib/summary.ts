@@ -54,7 +54,10 @@ export function parseTrendSummary(summary: string | null | undefined): string[] 
 /**
  * Replace the two-character sequence `\` + `n` (and `\` + `r\n`) with real
  * newlines. Leaves already-real newlines untouched.
+ *
+ * Exported so other parsers handling LLM-produced text (v1.13.0 feedback
+ * section parser, etc.) can reuse the same normalization.
  */
-function unescapeNewlines(s: string): string {
+export function unescapeNewlines(s: string): string {
   return s.replace(/\\r\\n/g, "\n").replace(/\\n/g, "\n");
 }

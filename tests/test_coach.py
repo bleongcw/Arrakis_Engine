@@ -671,3 +671,199 @@ class TestTrajectoryInjection:
             "coach_game must call build_trajectory_block"
         assert "player_trajectory=player_trajectory" in source, \
             "coach_game must pass player_trajectory into the prompt format()"
+
+
+# --- v1.13.0: phase-structured player_feedback + trap awareness ---
+
+
+class TestPhaseClassificationSummary:
+    """v1.13.0: per-phase breakdown of player move-quality classifications."""
+
+    def test_empty_moves_returns_zero_counts(self):
+        from src.coach import _phase_classification_summary
+        out = _phase_classification_summary([], "white")
+        # Headers + zero counts + "(none)" for mistake/blunder moves
+        assert "Opening (moves 1-15)" in out
+        assert "Middlegame (moves 16-30)" in out
+        assert "Endgame (moves 31+)" in out
+        assert "0 inaccuracies, 0 mistakes, 0 blunders" in out
+        assert "(none)" in out
+
+    def test_filters_to_player_color_only(self):
+        from src.coach import _phase_classification_summary
+        moves = [
+            {"side": "white", "move_number": 5, "classification": "blunder"},
+            {"side": "black", "move_number": 5, "classification": "blunder"},
+        ]
+        out = _phase_classification_summary(moves, "white")
+        # Only the white blunder counts → opening shows 1 blunder
+        assert "1 blunders" in out
+        # Move number 5 in opening
+        assert "5 (blunder)" in out
+
+    def test_counts_by_phase_correctly(self):
+        from src.coach import _phase_classification_summary
+        moves = [
+            {"side": "white", "move_number": 5, "classification": "inaccuracy"},
+            {"side": "white", "move_number": 18, "classification": "mistake"},
+            {"side": "white", "move_number": 25, "classification": "blunder"},
+            {"side": "white", "move_number": 35, "classification": "mistake"},
+            {"side": "white", "move_number": 40, "classification": "inaccuracy"},
+        ]
+        out = _phase_classification_summary(moves, "white")
+        # Opening: 1 inaccuracy
+        assert "1 inaccuracies, 0 mistakes, 0 blunders" in out
+        # Middlegame: 1 mistake + 1 blunder (no inaccuracies)
+        assert "0 inaccuracies, 1 mistakes, 1 blunders" in out
+        # Endgame: 1 inaccuracy + 1 mistake
+        assert "1 inaccuracies, 1 mistakes, 0 blunders" in out
+
+    def test_mistake_blunder_move_numbers_listed(self):
+        from src.coach import _phase_classification_summary
+        moves = [
+            {"side": "white", "move_number": 18, "classification": "mistake"},
+            {"side": "white", "move_number": 25, "classification": "blunder"},
+            # Inaccuracies should NOT appear in the move-number list
+            {"side": "white", "move_number": 20, "classification": "inaccuracy"},
+        ]
+        out = _phase_classification_summary(moves, "white")
+        assert "18 (mistake)" in out
+        assert "25 (blunder)" in out
+        # Inaccuracy moves not listed in the flagged list
+        assert "20 (inaccuracy)" not in out
+
+    def test_ignores_unknown_classifications(self):
+        from src.coach import _phase_classification_summary
+        moves = [
+            {"side": "white", "move_number": 5, "classification": "excellent"},
+            {"side": "white", "move_number": 6, "classification": "good"},
+            {"side": "white", "move_number": 7, "classification": None},
+        ]
+        out = _phase_classification_summary(moves, "white")
+        # All counts remain zero
+        assert out.count("0 inaccuracies, 0 mistakes, 0 blunders") == 3
+
+
+class TestTrapsForOpening:
+    """v1.13.0: trap-awareness helper — finds well-known traps that share
+    the same opening prefix as this game."""
+
+    def test_empty_pgn_returns_empty(self):
+        from src.coach import _traps_for_opening
+        assert _traps_for_opening("") == []
+        assert _traps_for_opening(None or "") == []
+
+    def test_italian_game_finds_italian_traps(self):
+        """Italian Game (1.e4 e5 2.Nf3 Nc6 3.Bc4 Bc5) shares the first 5
+        plies with several Italian-family traps in the library."""
+        from src.coach import _traps_for_opening
+        pgn = (
+            '[Event "?"]\n[White "x"]\n[Black "y"]\n\n'
+            '1. e4 e5 2. Nf3 Nc6 3. Bc4 Bc5 4. d3 *'
+        )
+        traps = _traps_for_opening(pgn, max_results=5)
+        # Should find at least one Italian Game trap
+        assert len(traps) >= 1
+        names = [t.get("name", "") for t in traps]
+        assert any("Italian Game" in n for n in names), (
+            f"expected at least one Italian Game trap, got {names}"
+        )
+
+    def test_ruy_lopez_finds_ruy_traps_not_italian(self):
+        """Ruy Lopez (1.e4 e5 2.Nf3 Nc6 3.Bb5) diverges from Italian at
+        move 3 — should find Ruy traps, NOT Italian ones (longest-prefix
+        match means Italian traps share only 4 plies vs Ruy's 5)."""
+        from src.coach import _traps_for_opening
+        pgn = (
+            '[Event "?"]\n[White "x"]\n[Black "y"]\n\n'
+            '1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 *'
+        )
+        traps = _traps_for_opening(pgn, max_results=5)
+        assert len(traps) >= 1
+        names = [t.get("name", "") for t in traps]
+        # All matches should be Ruy Lopez (deeper prefix match wins)
+        assert all("Ruy Lopez" in n for n in names), (
+            f"expected only Ruy Lopez traps, got {names}"
+        )
+
+    def test_offbook_opening_returns_empty(self):
+        """Bizarre opening (1.a4 h5) doesn't match any trap library entry."""
+        from src.coach import _traps_for_opening
+        pgn = (
+            '[Event "?"]\n[White "x"]\n[Black "y"]\n\n'
+            '1. a4 h5 2. h4 a5 *'
+        )
+        assert _traps_for_opening(pgn) == []
+
+    def test_max_results_honored(self):
+        from src.coach import _traps_for_opening
+        pgn = (
+            '[Event "?"]\n\n1. e4 e5 2. Nf3 Nc6 3. Bc4 Bc5 *'
+        )
+        traps = _traps_for_opening(pgn, max_results=1)
+        assert len(traps) <= 1
+
+    def test_unparseable_pgn_returns_empty(self):
+        from src.coach import _traps_for_opening
+        assert _traps_for_opening("not a real pgn") == []
+
+
+class TestFormatRelevantTrapsBlock:
+    """v1.13.0: text rendering for the prompt's trap-awareness section."""
+
+    def test_empty_traps_renders_fallback(self):
+        from src.coach import _format_relevant_traps_block
+        out = _format_relevant_traps_block([])
+        assert "no well-known traps" in out
+
+    def test_renders_trap_name_eco_depth(self):
+        from src.coach import _format_relevant_traps_block
+        traps = [
+            {
+                "name": "Italian Game: Fried Liver Attack",
+                "eco": "C57",
+                "depth": 11,
+                "moves_san": "1. e4 e5 2. Nf3 Nc6 3. Bc4 Nf6 4. Ng5 d5 5. exd5 Nxd5 6. Nxf7",
+            },
+        ]
+        out = _format_relevant_traps_block(traps)
+        assert "Italian Game: Fried Liver Attack" in out
+        assert "C57" in out
+        assert "11 plies" in out
+
+
+class TestCoachGameWiresPhaseTraps:
+    """Source-grep guard: confirms the new helpers are passed into
+    GAME_COACHING_PROMPT.format(). Mirrors test_coach_game_wires_history_count."""
+
+    def test_phase_summary_wired(self):
+        from src import coach as coach_mod
+        import inspect
+        source = inspect.getsource(coach_mod.coach_game)
+        assert "_phase_classification_summary" in source, \
+            "coach_game must call _phase_classification_summary"
+        assert "phase_classification_summary=phase_classification_summary" in source, \
+            "coach_game must pass phase_classification_summary into format()"
+
+    def test_traps_for_opening_wired(self):
+        from src import coach as coach_mod
+        import inspect
+        source = inspect.getsource(coach_mod.coach_game)
+        assert "_traps_for_opening" in source, \
+            "coach_game must call _traps_for_opening"
+        assert "relevant_traps_block=relevant_traps_block" in source, \
+            "coach_game must pass relevant_traps_block into format()"
+
+    def test_prompt_template_has_5_section_spec(self):
+        """The 5 markdown section headings must all be in the prompt template."""
+        from src.coach import GAME_COACHING_PROMPT
+        for heading in [
+            "## ♟ Opening",
+            "## ⚔ Middlegame",
+            "## ♔ Endgame",
+            "## 🪤 Watch Out For",
+            "## 🎯 Top 3 Improvements",
+        ]:
+            assert heading in GAME_COACHING_PROMPT, (
+                f"prompt template missing required section heading: {heading}"
+            )

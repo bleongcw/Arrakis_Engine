@@ -4,6 +4,111 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.13.0] - 2026-05-27
+
+### Changed
+- **"Feedback to the Player" now reads phase-by-phase with explicit
+  trap awareness.** Bernard observed that the green-bordered
+  "Feedback to the Player" card on each game's detail page felt
+  generic — it mixed opening / middlegame / endgame observations
+  together, didn't reliably call out specific move numbers, didn't
+  discuss opening theory deviation, and never analyzed which traps
+  the opponent could have unleashed in the chosen opening.
+
+  v1.13.0 restructures the field's content into a 5-section markdown
+  format that the per-game LLM is required to produce in exact order:
+
+  - **♟ Opening** — what opening was played and how the player's
+    moves compared to standard theory (exact match / slight
+    deviation / off-book early), with 1-2 specific opening moves
+    cited if they meaningfully illustrate the deviation.
+  - **⚔ Middlegame** — key middlegame moments, with 1-2 specific
+    mistakes or blunders named by move number. The LLM gets a
+    pre-computed move-quality breakdown so it can't invent move
+    numbers.
+  - **♔ Endgame** — conversion quality assessment, or a clear note
+    that the game ended in the middlegame.
+  - **🪤 Watch Out For (Trap Awareness)** — names one well-known
+    trap from the opening played that the opponent *could* have
+    unleashed, with a one-line refutation. Forward-looking,
+    educational, not retrospective.
+  - **🎯 Top 3 Improvements** — exactly 3 concrete, observable
+    next-game focuses (e.g. "Find one knight outpost before move
+    15" — not "Play more accurately").
+
+  No DB schema change. `game_coaching.player_feedback` stays the
+  same TEXT column with new structured content. Existing pre-v1.13.0
+  coached games keep their freeform feedback in the DB and continue
+  to render as a single block — the frontend parser detects "no
+  `##` headings" and falls back to the legacy layout. To get the
+  new structure on old games, click "Re-coach" on the game-detail
+  page or run `python main.py coach <game_id>`.
+
+### Added
+- **`src/coach.py::_phase_classification_summary(moves, player_color)`**
+  — returns a per-phase breakdown (opening / middlegame / endgame)
+  of the player's move-quality counts (inaccuracies, mistakes,
+  blunders) plus the specific move numbers where mistakes and
+  blunders happened. Injected into the prompt as a new
+  `## Move Quality by Phase` block so the LLM can ground statements
+  like "your 18.Qh4 was a mistake" without hallucinating.
+
+- **`src/coach.py::_traps_for_opening(pgn, max=3)`** — looks up
+  to 3 well-known traps from `frontend/public/data/traps.json` that
+  share this game's opening prefix. Uses longest-common-prefix
+  matching (minimum 4 plies) so the most specific opening match
+  wins — Ruy Lopez (5 plies) beats generic 1.e4 e5 (4 plies).
+  Injected into the prompt as `## Trap Awareness`. Graceful empty
+  case for off-book openings.
+
+- **`frontend/lib/feedback-sections.ts::parseSectionedFeedback`**
+  — new parser that splits the markdown-sectioned `player_feedback`
+  text into ordered `FeedbackSection[]` objects. Reuses the v1.8.2
+  `unescapeNewlines` helper from `summary.ts` so the OpenAI
+  Responses-API escape leak doesn't break heading detection.
+  Graceful fallback for legacy single-block feedback.
+
+- **`frontend/components/game-detail/coaching-panels.tsx`** — the
+  "Feedback to the Player" card's `<CardContent>` now renders each
+  section with a styled emerald-600 heading (only when present)
+  followed by the section's paragraphs. Legacy entries render
+  exactly as before because the parser returns a single section
+  with empty heading + the full body.
+
+### Tests
+- **+16 backend tests** in `tests/test_coach.py`:
+  - `TestPhaseClassificationSummary` (5) — empty, player-color
+    filter, per-phase counts, mistake/blunder move-number lists,
+    ignored-classification handling
+  - `TestTrapsForOpening` (6) — empty PGN, Italian Game finds
+    Italian traps, Ruy Lopez finds Ruy traps (not Italian — proves
+    LCP sort works), off-book returns empty, max_results honored,
+    unparseable PGN
+  - `TestFormatRelevantTrapsBlock` (2) — empty fallback, full
+    rendering with eco/depth/name
+  - `TestCoachGameWiresPhaseTraps` (3) — source-grep guards
+    confirming the new helpers are wired into `coach_game()` and
+    the prompt template carries all 5 required section headings
+- **+15 frontend tests** across 2 files:
+  - `frontend/lib/__tests__/feedback-sections.test.ts` (11) —
+    empty input, 5-section parse, section ordering, body text
+    integrity, legacy single-block fallback, v1.8.2 escape-leak
+    handling, preamble dropping, bonus-heading forward-compat,
+    paragraph-break preservation, whitespace trimming
+  - `frontend/components/game-detail/__tests__/coaching-panels.test.tsx`
+    (4, NEW file) — renders 5 headings for v1.13.0 entry, renders
+    section bodies, legacy entry renders with no headings, null
+    feedback omits the card entirely
+- **Backend total: 439 → 455. Frontend total: 150 → 165.**
+
+### Migration
+- None. Pure additive change. Existing coached games keep their
+  pre-v1.13.0 feedback text unchanged and continue to render
+  correctly via the parser's legacy-fallback branch. The new
+  5-section structure appears on newly-coached games only.
+
+---
+
 ## [1.12.0] - 2026-05-26
 
 ### Added

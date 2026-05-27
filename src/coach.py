@@ -50,6 +50,11 @@ This game has been classified as: **{game_type}**
 - For tips and advice, do NOT always use the same phrasing patterns like "Next time you see X, try Y." Mix it up: ask questions ("What if you tried...?"), use challenges ("See if you can spot..."), share coach secrets ("Here's a trick strong players use..."), use stories ("Imagine your pieces are a team and...").
 {previous_coaching_guidance}
 {player_trajectory}
+{phase_classification_summary}
+
+## Trap Awareness (well-known traps your opponent could have played in this opening)
+{relevant_traps_block}
+
 ## Trajectory-Aware Coaching
 - Where the trajectory snapshot above (if present) shows measurable progress, acknowledge it concretely (e.g. "your endgame conversion has been climbing — this game shows why").
 - If this game illustrates a weakness that the trajectory flags as recurring, note the recurrence GENTLY — once, in passing. Don't re-lecture the player on it.
@@ -116,26 +121,51 @@ Produce a JSON response with these exact keys:
    - "opening_summary": 2-3 sentences explaining the opening choice. For white: was the system appropriate? Did they develop pieces logically? For black: did they play the correct response to white's opening? Where did they first deviate from good play?
    - "opening_tip": One specific, actionable tip about this opening for a {age}-year-old.
 
-7. "player_feedback" — A personal letter to the child (2-3 paragraphs) written directly to them.
-   This is the most important section — it should feel like a kind, encouraging coach talking
-   to a {age}-year-old {tier_label}-level player after their game.
+7. "player_feedback" — A structured phase-by-phase coaching review for the child,
+   written directly to them. Address {name} by name. Use "you" throughout.
 
-   REQUIREMENTS:
-   - Address {name} by name. Use "you" throughout.
-   - Start by celebrating what they did well — find at least 2 specific good decisions.
-   - Frame every mistake as a growth opportunity, but VARY how you do this. Do not always use
-     "Next time you see X, try Y." Mix approaches: questions, challenges, stories, analogies.
-   - Include 2-4 practical, actionable tips (vary the number — not always exactly 3).
-     Pick tips that are DIFFERENT from any listed in the coaching history below.
-     If the player has been working on something from a previous game, acknowledge progress
-     or gently remind them if the same issue appeared again.
-   - End with encouragement, but vary the style — sometimes a challenge for next game,
-     sometimes a compliment about their growth, sometimes a fun chess fact or quote.
+   OUTPUT FORMAT (v1.13.0+): The value of "player_feedback" must be a single string
+   containing EXACTLY these 5 markdown sections in this order, separated by blank
+   lines, using these exact headings. Do NOT skip any heading. Do NOT add extra
+   headings beyond these 5. Do NOT change the emoji/text in the headings.
+
+   ## ♟ Opening
+   2-3 sentences. Name the opening that was played (use the opening_analysis you
+   produced for key #6 as the source of truth). Note how the player's moves
+   compared to the standard theory of this opening — exact match, slight deviation,
+   off-book early. Reference 1-2 specific opening moves only if they meaningfully
+   illustrate the deviation. Build on opening_analysis; do NOT repeat its exact wording.
+
+   ## ⚔ Middlegame
+   2-3 sentences. Identify the key middlegame moments. Name 1-2 specific mistakes
+   or blunders by move number. CRITICAL: only use move numbers that appear in the
+   "Move Quality by Phase" section above — do NOT invent move numbers. Explain
+   why each was wrong in age-appropriate language.
+
+   ## ♔ Endgame
+   1-2 sentences. If the game reached an endgame (moves >30): assess conversion
+   quality, technique, king activity. If the game ended before move 30: write
+   exactly: "This game ended in the middlegame — no endgame technique needed today."
+
+   ## 🪤 Watch Out For (Trap Awareness)
+   1-2 sentences. Pick ONE trap from the "Trap Awareness" section above that's most
+   relevant — name it, describe in one sentence what the opponent could have done
+   to spring it, and what move would have refuted it. If no traps were listed in
+   the context above, write exactly: "Your opponent didn't have any well-known
+   traps available in this opening — but stay alert for tactics on every move."
+
+   ## 🎯 Top 3 Improvements
+   A numbered list (1., 2., 3.) of exactly 3 specific things to focus on next game.
+   Each item is ONE sentence, concrete, observable. Good: "Find one knight outpost
+   before move 15." Bad: "Play more accurately." Pick items DIFFERENT from any
+   listed in the coaching history. If the player has been working on something
+   from a previous game, item 1 can acknowledge progress or gently remind them.
+
+   GENERAL REQUIREMENTS (across all 5 sections):
    - Match language to a {age}-year-old at {tier_label} level: {language_level}
    - Be warm but not patronizing. Respect their intelligence while keeping it accessible.
    - Reference specific moves from THIS game to make it personal, not generic.
-   - CRITICALLY: If coaching history is provided, DO NOT repeat the same praise patterns,
-     the same tips, or the same closing encouragements. Be creative and fresh each time.
+   - If coaching history is provided, DO NOT repeat the same praise patterns or tips.
 
 8. "coach_notes" — Technical summary for the chess coach. Use precise chess terminology.
    Include: opening assessment, critical tactical moments, endgame technique (if applicable),
@@ -456,6 +486,169 @@ def _count_history_games(history_text: str) -> int:
     return history_text.count("### Game ")
 
 
+# ---------------------------------------------------------------------------
+# v1.13.0: phase-structured player_feedback context
+# ---------------------------------------------------------------------------
+#
+# Two pieces of prompt context the LLM previously had to infer from the
+# raw moves list — now pre-computed for accuracy:
+#
+#   1. _phase_classification_summary — per-phase counts + the specific
+#      move numbers where mistakes/blunders happened. Stops the LLM
+#      inventing move numbers and gives it a structured spine for the
+#      Middlegame / Endgame sections of the new player_feedback.
+#
+#   2. _traps_for_opening — looks UP into the v1.4.0 trap library to
+#      find well-known traps that share the same opening prefix as
+#      this game. Answers "what trap could the opponent have unleashed
+#      in this opening?" — the inverse of the existing _match_trap
+#      direction (which asks "did my game match a trap line?").
+
+# How many plies of the game's opening prefix we compare against trap
+# library entries. 6 plies = 3 full moves — captures the named-opening
+# family (Italian / Sicilian / French / etc.) without being so specific
+# that only the exact main line matches.
+_TRAP_OPENING_PREFIX_PLIES = 6
+
+# Minimum number of matching plies for a trap to count as "same opening
+# family." 4 plies = 2 full moves — covers cases like Scholar's Mate
+# starting 1.e4 e5 2.Bc4 where the trap diverges from the player's
+# choice on move 3 but they're still in the same opening territory.
+_TRAP_OPENING_MIN_MATCH_PLIES = 4
+
+
+def _phase_classification_summary(moves: list[dict], player_color: str) -> str:
+    """Per-phase breakdown of the player's move-quality classifications.
+
+    Returns a markdown text block listing, for each game phase, how many
+    inaccuracies / mistakes / blunders the player committed, plus the
+    specific move numbers where mistakes and blunders happened. The LLM
+    uses this to ground statements like "your 18.Qh4 was a mistake"
+    without inventing move numbers.
+
+    v1.13.0+
+    """
+    from src.patterns import _classify_game_phase
+
+    # phase → {classification → count}, plus phase → [move_numbers] for mistake+blunder
+    counts: dict[str, dict[str, int]] = {
+        "opening": {"inaccuracy": 0, "mistake": 0, "blunder": 0},
+        "middlegame": {"inaccuracy": 0, "mistake": 0, "blunder": 0},
+        "endgame": {"inaccuracy": 0, "mistake": 0, "blunder": 0},
+    }
+    flagged: dict[str, list[tuple[int, str]]] = {
+        "opening": [],
+        "middlegame": [],
+        "endgame": [],
+    }
+
+    for m in moves:
+        if m.get("side") != player_color:
+            continue
+        cls = m.get("classification")
+        if cls not in ("inaccuracy", "mistake", "blunder"):
+            continue
+        phase = _classify_game_phase(m.get("move_number", 0))
+        counts[phase][cls] += 1
+        if cls in ("mistake", "blunder"):
+            flagged[phase].append((m.get("move_number", 0), cls))
+
+    def _phase_line(phase: str, label: str) -> str:
+        c = counts[phase]
+        f = flagged[phase]
+        flagged_str = (
+            ", ".join(f"{mn} ({cls})" for mn, cls in f) if f else "(none)"
+        )
+        return (
+            f"- {label}: {c['inaccuracy']} inaccuracies, "
+            f"{c['mistake']} mistakes, {c['blunder']} blunders\n"
+            f"  → mistake/blunder moves: {flagged_str}"
+        )
+
+    return (
+        "## Move Quality by Phase (your moves only)\n"
+        + _phase_line("opening", "Opening (moves 1-15)") + "\n"
+        + _phase_line("middlegame", "Middlegame (moves 16-30)") + "\n"
+        + _phase_line("endgame", "Endgame (moves 31+)")
+    )
+
+
+def _traps_for_opening(pgn_text: str, max_results: int = 3) -> list[dict]:
+    """Find well-known traps that share this game's opening prefix.
+
+    Returns up to ``max_results`` trap library entries whose `moves`
+    array begins with the SAME opening as this game's first
+    ``_TRAP_OPENING_PREFIX_PLIES`` plies. Used by the v1.13.0
+    "Watch Out For (Trap Awareness)" section of player_feedback.
+
+    Different from _match_trap (which asks "did my game match a
+    trap?") — this asks "what traps could the opponent have unleashed
+    from this opening?" Forward-looking, not retrospective.
+
+    Returns [] if no traps share the opening (rare openings, off-book
+    early). The prompt handles the empty case gracefully.
+    """
+    from src.patterns import _extract_san_moves, _load_trap_library
+
+    if not pgn_text:
+        return []
+
+    game_prefix = _extract_san_moves(
+        pgn_text, max_moves=_TRAP_OPENING_PREFIX_PLIES
+    )
+    if len(game_prefix) < _TRAP_OPENING_MIN_MATCH_PLIES:
+        return []
+
+    library = _load_trap_library()
+    if not library:
+        return []
+
+    # Collect (lcp, entry) pairs for any trap with a sufficient prefix match,
+    # then sort by LCP descending so we prefer specific opening matches
+    # (5 plies — Italian Bc4) over generic ones (4 plies — any 1.e4 e5 with
+    # both knights developed). Library is already depth-sorted internally,
+    # so for equal LCP we naturally get the deepest trap first.
+    candidates: list[tuple[int, dict]] = []
+    for entry in library:
+        sig = entry.get("moves") or []
+        if len(sig) < _TRAP_OPENING_MIN_MATCH_PLIES:
+            continue
+        cap = min(len(game_prefix), len(sig), _TRAP_OPENING_PREFIX_PLIES)
+        lcp = 0
+        for i in range(cap):
+            if game_prefix[i] == sig[i]:
+                lcp += 1
+            else:
+                break
+        if lcp >= _TRAP_OPENING_MIN_MATCH_PLIES:
+            candidates.append((lcp, entry))
+    # Stable sort by -lcp keeps depth-order within each LCP tier
+    candidates.sort(key=lambda x: -x[0])
+    return [entry for _lcp, entry in candidates[:max_results]]
+
+
+def _format_relevant_traps_block(traps: list[dict]) -> str:
+    """Render the trap-awareness context block for the coaching prompt."""
+    if not traps:
+        return (
+            "(no well-known traps share this opening prefix — the position "
+            "is off-book from the trap library)"
+        )
+    lines = []
+    for t in traps:
+        name = t.get("name", "Unknown trap")
+        eco = t.get("eco", "?")
+        depth = t.get("depth") or len(t.get("moves") or [])
+        # First 8 plies of the trap's SAN string for context
+        moves_san = (t.get("moves_san") or "")[:120]
+        if len(t.get("moves_san", "") or "") > 120:
+            moves_san += "…"
+        lines.append(
+            f"- {name} ({eco}, {depth} plies deep) — line: {moves_san}"
+        )
+    return "\n".join(lines)
+
+
 def coach_game(game_id: int, provider: str | None = "claude",
                model: str | None = None, db_path: str | None = None,
                config: dict | None = None,
@@ -633,6 +826,18 @@ def coach_game(game_id: int, provider: str | None = "claude",
     else:
         custom_instructions_section = ""
 
+    # v1.13.0: phase-classification summary + trap-awareness context.
+    # These give the LLM grounded move-number lists and opening-specific
+    # trap candidates so the new 5-section player_feedback can reference
+    # mistakes accurately and name relevant traps the opponent could
+    # have unleashed.
+    phase_classification_summary = _phase_classification_summary(
+        moves, game["player_color"]
+    )
+    relevant_traps_block = _format_relevant_traps_block(
+        _traps_for_opening(game["pgn"] or "")
+    )
+
     prompt = GAME_COACHING_PROMPT.format(
         name=name,
         age=age,
@@ -647,6 +852,8 @@ def coach_game(game_id: int, provider: str | None = "claude",
         game_type_guidance=game_type_guidance,
         previous_coaching_guidance=previous_coaching_guidance,
         player_trajectory=player_trajectory,
+        phase_classification_summary=phase_classification_summary,
+        relevant_traps_block=relevant_traps_block,
         tone_modifier=tone_modifier,
         detail_modifier=detail_modifier,
         focus_modifier=focus_modifier,
