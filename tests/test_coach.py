@@ -985,3 +985,91 @@ class TestCoachGameWiresValidator:
             "coach_game must persist feedback_structure_compliant in meta"
         assert "feedback_missing_headings" in source, \
             "coach_game must persist feedback_missing_headings in meta"
+
+
+# --- v1.14.0: tactical motif tags surfaced in the critical-moments prompt block ---
+
+
+class TestBuildCriticalMomentsMotifs:
+    """v1.14.0: _build_critical_moments surfaces motifs_json data into
+    the LLM-visible block so the prompt can cite tactical themes by name."""
+
+    def test_legacy_moves_without_motifs_still_render(self):
+        from src.coach import _build_critical_moments
+        moves = [
+            {
+                "move_number": 18, "side": "black", "move_played": "Qh4",
+                "best_move": "Nd4", "swing_cp": 250,
+                "win_prob_before": 60.0, "win_prob_after": 40.0,
+                "motifs_json": None,
+            }
+        ]
+        out = _build_critical_moments(moves, top_n=1)
+        # Renders without the tactical motifs annotation when motifs_json is null
+        assert "tactical motifs" not in out
+        assert "Move 18" in out
+
+    def test_moves_with_motifs_surface_to_block(self):
+        from src.coach import _build_critical_moments
+        import json as _json
+        moves = [
+            {
+                "move_number": 18, "side": "black", "move_played": "Qh4",
+                "best_move": "Nxf7", "swing_cp": 800,
+                "win_prob_before": 70.0, "win_prob_after": 30.0,
+                "motifs_json": _json.dumps({
+                    "played": [],
+                    "best": ["fork"],
+                    "missed": ["fork"],
+                }),
+            }
+        ]
+        out = _build_critical_moments(moves, top_n=1)
+        assert "tactical motifs" in out
+        assert "MISSED: fork" in out
+
+    def test_played_motifs_surface_too(self):
+        """If the player played a hanging-piece capture, the prompt shows it."""
+        from src.coach import _build_critical_moments
+        import json as _json
+        moves = [
+            {
+                "move_number": 22, "side": "white", "move_played": "Nxe5",
+                "best_move": "Nxe5", "swing_cp": 0,
+                "win_prob_before": 55.0, "win_prob_after": 60.0,
+                "motifs_json": _json.dumps({
+                    "played": ["hanging_piece"],
+                    "best": ["hanging_piece"],
+                    "missed": [],
+                }),
+            }
+        ]
+        out = _build_critical_moments(moves, top_n=1)
+        assert "PLAYED: hanging_piece" in out
+
+    def test_handles_malformed_motifs_json_gracefully(self):
+        """Don't crash if motifs_json is malformed (legacy bad data, etc.)."""
+        from src.coach import _build_critical_moments
+        moves = [
+            {
+                "move_number": 18, "side": "black", "move_played": "Qh4",
+                "best_move": "Nd4", "swing_cp": 250,
+                "win_prob_before": 60.0, "win_prob_after": 40.0,
+                "motifs_json": "not json at all {{{",
+            }
+        ]
+        # Should render without crashing — motifs annotation just skipped
+        out = _build_critical_moments(moves, top_n=1)
+        assert "Move 18" in out
+        assert "tactical motifs" not in out
+
+    def test_prompt_template_specifies_motifs_fields(self):
+        """The critical_moments JSON schema in the prompt must instruct the LLM
+        about the motifs_found / motifs_missed fields (v1.14.0)."""
+        from src.coach import GAME_COACHING_PROMPT
+        assert "motifs_found" in GAME_COACHING_PROMPT
+        assert "motifs_missed" in GAME_COACHING_PROMPT
+        # And must list the valid motif identifiers so the LLM doesn't invent
+        assert "fork" in GAME_COACHING_PROMPT
+        assert "pin" in GAME_COACHING_PROMPT
+        assert "discovered_check" in GAME_COACHING_PROMPT

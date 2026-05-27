@@ -4,6 +4,118 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.14.0] - 2026-05-28
+
+### Added
+- **Tactical motif tagging on critical moves.** The biggest analyzer-layer
+  unlock since v1.0 — Stockfish tells us *what* the best move is and the
+  centipawn loss, but not *why* it's best. v1.14.0 layers a new tactical-
+  motif detector on top of every critical move so coaching can cite themes
+  by name:
+  *"At move 18 you missed a knight fork on f7 that would have won the queen"*
+  instead of the vague *"the engine prefers a different move here."*
+
+  Eight motifs detected, all on positions with `|cp_loss| ≥ 50cp` (the
+  inaccuracy threshold and above):
+  - **🍴 fork** — moving piece attacks ≥2 enemy pieces of greater value,
+    none safely defended
+  - **📌 pin** — moving piece pins an enemy piece against its king
+  - **🗡 skewer** — sliding piece attacks an enemy piece with a more
+    valuable piece directly behind it
+  - **💥 discovered check** — moving piece reveals a check from a
+    different attacker (or double check)
+  - **🎯 mate threat** — move IS checkmate, or PV continuation reaches
+    checkmate within its horizon
+  - **🛡 removing the defender** — capturing the sole defender of an
+    otherwise-safe enemy piece, leaving it hanging
+  - **🎁 hanging piece** — capturing an enemy piece worth more than yours
+    (or equal-value with no recapture)
+  - **🪤 trapped piece** — newly attacked enemy minor/major piece with no
+    safe destination
+
+  Each detector is a conservative pure function — false negatives are
+  preferred over false positives. The min-value SEE heuristic ensures
+  we only tag captures that actually win material at face value.
+
+- **`src/motifs.py`** — NEW. 8 detectors + `detect_motifs(board, move, pv)`
+  top-level entry. ~500 lines. Pure Python, only depends on `python-chess`.
+  Specificity-ordered (mate threat first → trapped piece last) so the
+  most distinctive label leads when multiple apply.
+
+- **`tests/test_motifs.py`** — NEW. 26 unit tests using hand-crafted FEN
+  positions covering a positive case, a near-miss, and an unrelated case
+  for each motif. All pass on CPython 3.12.
+
+- **Analyzer wiring (`src/analyzer.py`).** Per-move loop now calls
+  `detect_motifs` on every critical move (`|cp_loss| ≥ 50cp`) for both
+  the played move and the engine's best move. Stores
+  `{played: [...], best: [...], missed: [...]}` as
+  `move_analysis.motifs_json`. NULL for sub-threshold moves so the
+  column stays sparse (typically 5–15 rows per game).
+
+- **Coach prompt integration (`src/coach.py`).**
+  `_build_critical_moments` surfaces motif annotations into the
+  LLM-visible critical-moments block — moves with motifs render with
+  `⟶ tactical motifs — MISSED: fork | PLAYED: …`. The
+  `GAME_COACHING_PROMPT` `critical_moments` JSON schema extended with
+  `motifs_found` + `motifs_missed` array fields. The player_feedback
+  Middlegame and Endgame section requirements now include explicit
+  instruction to cite motifs **by name** when annotated (with a
+  motif-id → natural-language mapping), and a *"do NOT invent motifs
+  that aren't tagged"* guardrail.
+
+- **Frontend motif badges (`coaching-panels.tsx`).** New
+  `MotifBadgeRow` component renders on each Critical Moment card.
+  Amber chips for missed motifs ("missed: 🍴 fork"), emerald chips
+  for executed motifs ("found: 📌 pin"). Silent (no row rendered)
+  when both arrays are empty — keeps pre-v1.14.0 entries visually
+  unchanged.
+
+- **`python main.py rescan-motifs`** — NEW backfill CLI. Re-parses
+  each analyzed game's PGN, walks moves, runs `detect_motifs` from
+  the position before each critical move using the existing
+  `move_analysis` row's `best_move` + `pv_line` data. **No Stockfish
+  call, no LLM call** — pure Python, free, ~1–2s per game. Supports
+  `--player X` and `--limit N`.
+  ```
+  python main.py rescan-motifs                          # all analyzed games
+  python main.py rescan-motifs --player evanleongxinyu  # one player
+  python main.py rescan-motifs --limit 10               # smoke test
+  ```
+
+### Schema
+- New `move_analysis.motifs_json TEXT` column. Idempotent
+  `ALTER TABLE` migration in `init_db()`. Pre-v1.14.0 rows have NULL;
+  no data loss.
+
+### Tests
+- **+31 backend tests** (456 → 487):
+  - `tests/test_motifs.py` (26): per-motif unit tests + `detect_motifs`
+    aggregator tests
+  - `tests/test_coach.py::TestBuildCriticalMomentsMotifs` (5):
+    legacy moves render without annotation, populated motifs surface
+    into the block, played motifs render too, malformed `motifs_json`
+    handled gracefully, prompt schema specifies the fields
+- **+4 frontend tests** (165 → 169):
+  - `coaching-panels.test.tsx` extension: motif badges render when
+    populated, silent for legacy entries, found-only when nothing
+    missed, all 8 emoji+label pairs verified
+- Frontend build clean. All existing tests still green.
+
+### Migration
+- **Pre-v1.14.0 entries**: silent. Existing `move_analysis` rows have
+  `motifs_json = NULL`; the frontend treats absent motif arrays as
+  "no motifs" and renders no badge row.
+- **To backfill historical games**: run `python main.py rescan-motifs`
+  once. ~1–2 seconds per game, free (no Stockfish, no LLM). For a
+  full ~1,000-game DB this is ~20–30 minutes.
+- **To get motif-aware coaching on existing games**: after rescan,
+  re-coach the game (`python main.py coach <game_id>` or click
+  Re-coach in the UI). The new prompt context block + frontend badges
+  appear automatically.
+
+---
+
 ## [1.13.3] - 2026-05-27
 
 ### Removed

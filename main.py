@@ -456,6 +456,156 @@ def cmd_fide_update(args, config):
         print(f"  Profile: https://ratings.fide.com/profile/{updated['fide_id']}")
 
 
+def cmd_rescan_motifs(args, config):
+    """v1.14.0: backfill tactical motif tags for existing games.
+
+    Re-parses each analyzed game's PGN, walks the moves, and for each
+    critical move (|swing_cp| >= MOTIF_DETECTION_THRESHOLD_CP) runs the
+    src.motifs detectors using the existing move_analysis row's
+    move_played + best_move + pv_line data. Writes the result to the
+    motifs_json column.
+
+    No Stockfish call — pure Python. ~1-2s per game.
+
+        python main.py rescan-motifs                          # all analyzed games
+        python main.py rescan-motifs --player evanleongxinyu  # one player
+        python main.py rescan-motifs --limit 10               # smoke test
+    """
+    import json
+    import time
+    import chess
+    import chess.pgn
+    import io
+
+    from src.analyzer import MOTIF_DETECTION_THRESHOLD_CP
+    from src.motifs import detect_motifs
+    from src.models import init_db
+
+    db_path = config["database"]["path"]
+    conn = init_db(db_path)
+
+    # Resolve target games
+    sql = ("SELECT g.id, g.pgn, p.username FROM games g "
+           "JOIN players p ON g.player_id = p.id "
+           "WHERE g.analysis_status = 'complete'")
+    params = []
+    if args.player:
+        sql += " AND p.username = ?"
+        params.append(args.player)
+    sql += " ORDER BY g.date_played DESC"
+    if args.limit:
+        sql += f" LIMIT {int(args.limit)}"
+    games = conn.execute(sql, params).fetchall()
+
+    if not games:
+        print("No analyzed games match. Run `python main.py analyze` first.")
+        conn.close()
+        return
+
+    print(f"Rescanning {len(games)} games for tactical motifs "
+          f"(threshold: |cp_loss| ≥ {MOTIF_DETECTION_THRESHOLD_CP}cp)...")
+
+    total_critical = 0
+    total_tagged = 0
+    started = time.time()
+
+    for idx, g in enumerate(games, 1):
+        game_id = g["id"]
+        # Re-parse PGN to walk moves with python-chess
+        pgn_game = chess.pgn.read_game(io.StringIO(g["pgn"] or ""))
+        if pgn_game is None:
+            continue
+        board = pgn_game.board()
+        moves_iter = list(pgn_game.mainline_moves())
+
+        # Fetch existing rows for this game (move_played, best_move, pv_line, swing_cp)
+        rows = conn.execute(
+            """SELECT move_number, side, move_played, best_move, pv_line,
+                      swing_cp FROM move_analysis WHERE game_id = ?
+               ORDER BY move_number,
+               CASE side WHEN 'white' THEN 0 ELSE 1 END""",
+            (game_id,),
+        ).fetchall()
+        rows_by_idx = {i: dict(r) for i, r in enumerate(rows)}
+
+        game_tagged = 0
+        for i, move in enumerate(moves_iter):
+            row = rows_by_idx.get(i)
+            if not row:
+                board.push(move)
+                continue
+            swing = row["swing_cp"] or 0
+            if abs(swing) < MOTIF_DETECTION_THRESHOLD_CP:
+                board.push(move)
+                continue
+            total_critical += 1
+
+            # Detect motifs on the played move
+            board_before = board.copy()
+            played_pv: list = []  # not stored; mate_threat may miss, acceptable
+            played_motifs = detect_motifs(board_before, move, played_pv)
+
+            # Detect motifs on the best move (if different)
+            best_motifs: list[str] = []
+            best_san = row.get("best_move")
+            if best_san and best_san != row["move_played"]:
+                # Parse best_move SAN back into a chess.Move
+                try:
+                    best_move_obj = board_before.parse_san(best_san)
+                except (ValueError, chess.InvalidMoveError, chess.IllegalMoveError):
+                    best_move_obj = None
+                if best_move_obj is not None:
+                    # Reconstruct best_pv from stored pv_line if available
+                    best_pv: list = []
+                    pv_line = row.get("pv_line") or ""
+                    if pv_line:
+                        try:
+                            pv_board = board_before.copy()
+                            for san in pv_line.split():
+                                m = pv_board.parse_san(san)
+                                best_pv.append(m)
+                                pv_board.push(m)
+                            # First entry of pv_line is the best_move itself —
+                            # detect_motifs wants the continuation AFTER best_move.
+                            best_pv = best_pv[1:] if best_pv else []
+                        except (ValueError, chess.InvalidMoveError,
+                                chess.IllegalMoveError):
+                            best_pv = []
+                    best_motifs = detect_motifs(board_before, best_move_obj, best_pv)
+            else:
+                best_motifs = played_motifs
+
+            missed = [m for m in best_motifs if m not in played_motifs]
+            motifs_json = None
+            if played_motifs or best_motifs:
+                motifs_json = json.dumps({
+                    "played": played_motifs,
+                    "best": best_motifs,
+                    "missed": missed,
+                })
+                game_tagged += 1
+                total_tagged += 1
+
+            conn.execute(
+                "UPDATE move_analysis SET motifs_json = ? "
+                "WHERE game_id = ? AND move_number = ? AND side = ?",
+                (motifs_json, game_id, row["move_number"], row["side"]),
+            )
+            board.push(move)
+
+        if idx % 25 == 0 or idx == len(games):
+            elapsed = time.time() - started
+            rate = idx / elapsed if elapsed > 0 else 0
+            print(f"  [{idx}/{len(games)}] {g['username']} game {game_id}: "
+                  f"{game_tagged} tagged. {rate:.1f} games/s")
+
+    conn.commit()
+    conn.close()
+    elapsed = time.time() - started
+    print(f"\nDone. {total_critical} critical moves examined, "
+          f"{total_tagged} tagged with motifs. Elapsed: {elapsed:.1f}s.")
+
+
 def cmd_backfill_acpl(args, config):
     """Recompute per-game ACPL from existing move_analysis data.
 
@@ -683,6 +833,20 @@ def main():
              "correct historical values.",
     )
 
+    # rescan-motifs (v1.14.0) — backfill tactical motif tags on existing games
+    rescan_motifs_parser = subparsers.add_parser(
+        "rescan-motifs",
+        help="(v1.14.0) Backfill tactical motif tags for analyzed games",
+    )
+    rescan_motifs_parser.add_argument(
+        "--player",
+        help="Username to scope to (default: all players)",
+    )
+    rescan_motifs_parser.add_argument(
+        "--limit", type=int, default=0,
+        help="Max games to rescan (default: all)",
+    )
+
     # backfill-clocks
     backfill_parser = subparsers.add_parser("backfill-clocks", help="Backfill clock data from PGN annotations")
 
@@ -738,6 +902,8 @@ def main():
         cmd_fide_update(args, config)
     elif args.command == "backfill-acpl":
         cmd_backfill_acpl(args, config)
+    elif args.command == "rescan-motifs":
+        cmd_rescan_motifs(args, config)
     elif args.command == "backfill-clocks":
         cmd_backfill_clocks(args, config)
     elif args.command == "run-all":

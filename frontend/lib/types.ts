@@ -77,6 +77,15 @@ export interface CriticalMoment {
   what_was_better: string;
   move_played: string;
   best_move: string;
+  /** v1.14.0+: tactical motifs the BEST move executed. Empty / missing for
+   *  pre-v1.14.0 entries or critical moves where the analyzer detected no
+   *  motifs. Values are motif identifiers: "fork", "pin", "skewer",
+   *  "discovered_check", "mate_threat", "removing_defender",
+   *  "hanging_piece", "trapped_piece". */
+  motifs_found?: string[];
+  /** v1.14.0+: motifs the PLAYED move missed (themes the best move had
+   *  that the actual move didn't). Same value set as motifs_found. */
+  motifs_missed?: string[];
 }
 
 /** v1.6.0: meta captured at coaching time — history depth, prompt size,

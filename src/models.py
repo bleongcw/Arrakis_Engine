@@ -195,6 +195,14 @@ def _migrate(conn: sqlite3.Connection):
     if "clock_seconds" not in move_cols:
         conn.execute("ALTER TABLE move_analysis ADD COLUMN clock_seconds REAL")
         conn.commit()
+    if "motifs_json" not in move_cols:
+        # v1.14.0: per-critical-move tactical motif tags (fork/pin/skewer/
+        # discovered_check/mate_threat/removing_defender/hanging_piece/
+        # trapped_piece). Nullable — populated only for critical moves
+        # (|cp_loss| >= 100). Pre-v1.14.0 rows just have NULL; frontend
+        # treats NULL as "no motifs" and renders no badge row.
+        conn.execute("ALTER TABLE move_analysis ADD COLUMN motifs_json TEXT")
+        conn.commit()
 
     pattern_cols = {r[1] for r in conn.execute("PRAGMA table_info(player_patterns)").fetchall()}
     if "trend_summary" not in pattern_cols:

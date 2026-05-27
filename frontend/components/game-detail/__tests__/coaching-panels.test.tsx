@@ -93,3 +93,110 @@ describe("CoachingPanels — v1.13.0 sectioned player_feedback", () => {
     expect(screen.queryByText("Feedback to the Player")).not.toBeInTheDocument();
   });
 });
+
+// ─── v1.14.0: tactical motif badges on Critical Moments cards ───
+
+describe("CoachingPanels — Critical Moments motif badges (v1.14.0)", () => {
+  it("renders motif badges when motifs_missed is populated", () => {
+    const coaching = {
+      ...baseCoaching,
+      critical_moments: [
+        {
+          move_number: 18,
+          side: "black",
+          what_happened: "You moved your queen away from the fight.",
+          what_was_better: "Nxf7 would have won the queen.",
+          move_played: "Qh4",
+          best_move: "Nxf7",
+          motifs_found: ["fork"],
+          motifs_missed: ["fork"],
+        },
+      ],
+    } as GameCoaching;
+    render(<CoachingPanels coaching={coaching} />);
+
+    expect(screen.getByText("Critical Moments")).toBeInTheDocument();
+    // Missed badge appears as "🍴 fork" — getAllByText since "fork" appears
+    // in both the missed and found chips
+    const forkBadges = screen.getAllByText(/🍴 fork/);
+    expect(forkBadges.length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("missed:")).toBeInTheDocument();
+  });
+
+  it("renders nothing motif-related when arrays are empty (legacy entries)", () => {
+    const coaching = {
+      ...baseCoaching,
+      critical_moments: [
+        {
+          move_number: 18,
+          side: "black",
+          what_happened: "x",
+          what_was_better: "y",
+          move_played: "Qh4",
+          best_move: "Nd4",
+          // No motifs_found / motifs_missed (pre-v1.14.0 entry)
+        },
+      ],
+    } as GameCoaching;
+    render(<CoachingPanels coaching={coaching} />);
+
+    expect(screen.queryByText("missed:")).not.toBeInTheDocument();
+    expect(screen.queryByText("found:")).not.toBeInTheDocument();
+    expect(screen.queryByText(/🍴/)).not.toBeInTheDocument();
+  });
+
+  it("renders only found chips when nothing was missed", () => {
+    const coaching = {
+      ...baseCoaching,
+      critical_moments: [
+        {
+          move_number: 25,
+          side: "white",
+          what_happened: "Solid move.",
+          what_was_better: "—",
+          move_played: "Nxe5",
+          best_move: "Nxe5",
+          motifs_found: ["hanging_piece"],
+          motifs_missed: [],
+        },
+      ],
+    } as GameCoaching;
+    render(<CoachingPanels coaching={coaching} />);
+
+    expect(screen.getByText("found:")).toBeInTheDocument();
+    expect(screen.queryByText("missed:")).not.toBeInTheDocument();
+    expect(screen.getByText(/🎁 hanging piece/)).toBeInTheDocument();
+  });
+
+  it("uses the correct emoji+label for each motif identifier", () => {
+    const coaching = {
+      ...baseCoaching,
+      critical_moments: [
+        {
+          move_number: 30,
+          side: "white",
+          what_happened: "x",
+          what_was_better: "y",
+          move_played: "a",
+          best_move: "b",
+          motifs_found: [
+            "fork", "pin", "skewer", "discovered_check",
+            "mate_threat", "removing_defender",
+            "hanging_piece", "trapped_piece",
+          ],
+          motifs_missed: [],
+        },
+      ],
+    } as GameCoaching;
+    render(<CoachingPanels coaching={coaching} />);
+
+    expect(screen.getByText(/🍴 fork/)).toBeInTheDocument();
+    expect(screen.getByText(/📌 pin/)).toBeInTheDocument();
+    expect(screen.getByText(/🗡 skewer/)).toBeInTheDocument();
+    expect(screen.getByText(/💥 discovered check/)).toBeInTheDocument();
+    expect(screen.getByText(/🎯 mate threat/)).toBeInTheDocument();
+    expect(screen.getByText(/🛡 removing defender/)).toBeInTheDocument();
+    expect(screen.getByText(/🎁 hanging piece/)).toBeInTheDocument();
+    expect(screen.getByText(/🪤 trapped piece/)).toBeInTheDocument();
+  });
+});

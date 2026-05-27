@@ -249,6 +249,13 @@ export function CoachingPanels({ coaching }: CoachingPanelsProps) {
                 </div>
                 <div className="text-yellow-500">{m.what_happened}</div>
                 <div className="text-green-500">Better: {m.what_was_better}</div>
+                {/* v1.14.0: tactical motif badges. Silent (no row) when both
+                    motifs_found and motifs_missed are empty — covers pre-v1.14.0
+                    entries + critical moves where no motifs were detected. */}
+                <MotifBadgeRow
+                  found={m.motifs_found}
+                  missed={m.motifs_missed}
+                />
               </div>
             ))}
           </CardContent>
@@ -266,6 +273,76 @@ export function CoachingPanels({ coaching }: CoachingPanelsProps) {
           </div>
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+// v1.14.0: tactical motif badges for a single Critical Moment.
+// Emoji + label per motif identifier; emerald chips for "found" (what
+// the best move did), amber chips for "missed" (themes the player
+// didn't take). Silent row when both arrays are empty/missing — keeps
+// pre-v1.14.0 entries visually unchanged.
+const MOTIF_LABELS: Record<string, { icon: string; label: string }> = {
+  fork: { icon: "🍴", label: "fork" },
+  pin: { icon: "📌", label: "pin" },
+  skewer: { icon: "🗡", label: "skewer" },
+  discovered_check: { icon: "💥", label: "discovered check" },
+  mate_threat: { icon: "🎯", label: "mate threat" },
+  removing_defender: { icon: "🛡", label: "removing defender" },
+  hanging_piece: { icon: "🎁", label: "hanging piece" },
+  trapped_piece: { icon: "🪤", label: "trapped piece" },
+};
+
+function MotifBadgeRow({
+  found,
+  missed,
+}: {
+  found?: string[];
+  missed?: string[];
+}) {
+  const hasFound = found && found.length > 0;
+  const hasMissed = missed && missed.length > 0;
+  if (!hasFound && !hasMissed) return null;
+  const renderBadge = (
+    motif: string,
+    variant: "found" | "missed",
+    idx: number,
+  ) => {
+    const meta = MOTIF_LABELS[motif] ?? { icon: "•", label: motif };
+    const cls =
+      variant === "found"
+        ? "bg-emerald-100 text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-200"
+        : "bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200";
+    return (
+      <span
+        key={`${variant}-${idx}-${motif}`}
+        className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${cls}`}
+        title={
+          variant === "found"
+            ? `The best move executed: ${meta.label}`
+            : `The played move missed this theme: ${meta.label}`
+        }
+      >
+        {meta.icon} {meta.label}
+      </span>
+    );
+  };
+  return (
+    <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+      {hasMissed && (
+        <>
+          <span className="text-[10px] text-muted-foreground">missed:</span>
+          {missed!.map((m, i) => renderBadge(m, "missed", i))}
+        </>
+      )}
+      {hasFound && (
+        <>
+          <span className="text-[10px] text-muted-foreground">
+            {hasMissed ? "· found:" : "found:"}
+          </span>
+          {found!.map((m, i) => renderBadge(m, "found", i))}
+        </>
+      )}
     </div>
   );
 }

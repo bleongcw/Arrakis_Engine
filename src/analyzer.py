@@ -10,6 +10,7 @@ and move classification.
 """
 
 import io
+import json
 import logging
 import math
 import re
@@ -20,7 +21,14 @@ import chess.engine
 import chess.pgn
 
 from src.models import get_connection, init_db
+from src.motifs import detect_motifs
 from src.tiers import get_tier, classify_move as tier_classify_move, TierConfig
+
+# v1.14.0: motif detection is gated on critical moves only — the cp_loss
+# threshold below which we don't bother running detectors. Matches the
+# inaccuracy boundary in the default classification (cp_loss > 50 = at least
+# inaccuracy). Conservative — keeps motif data focused on moves that mattered.
+MOTIF_DETECTION_THRESHOLD_CP = 50
 
 logger = logging.getLogger(__name__)
 
@@ -188,6 +196,11 @@ def analyze_game(game_id: int, pgn_text: str, player_color: str,
         side = "white" if board.turn == chess.WHITE else "black"
         move_san = board.san(move)
 
+        # v1.14.0: snapshot the position BEFORE the move for motif detection.
+        # Cheap copy; only needed for the per-move-loop's tail.
+        board_before = board.copy()
+        best_move_obj = best_info["pv"][0] if best_info.get("pv") else None
+
         # Get best move before playing
         best_info = info  # reuse previous analysis
         best_move_san = None
@@ -260,17 +273,45 @@ def analyze_game(game_id: int, pgn_text: str, player_color: str,
         # Get clock data for this move (index i = half-move index)
         clock_secs = clocks[i] if i < len(clocks) else None
 
+        # v1.14.0: tactical motif detection (gated on critical moves only).
+        # Runs the 8 detectors from src.motifs on BOTH the played move and
+        # the engine's best move when they differ. The "missed" list is the
+        # delta — themes the best move executed that the played move didn't.
+        # Persisted as JSON; NULL for non-critical moves (no motif analysis
+        # was attempted) so the column stays sparse.
+        motifs_json = None
+        if abs(cp_loss) >= MOTIF_DETECTION_THRESHOLD_CP:
+            # played_pv is the continuation Stockfish chose after our move
+            # (already available as `info["pv"]` since we just analyzed the
+            # post-move position above).
+            played_pv = list(info.get("pv") or [])
+            played_motifs = detect_motifs(board_before, move, played_pv)
+            if best_move_obj is not None and best_move_obj != move:
+                # best_pv from best_info["pv"] — first element IS best_move,
+                # rest is the engine's continuation.
+                best_pv = list(best_info.get("pv") or [])[1:]
+                best_motifs = detect_motifs(board_before, best_move_obj, best_pv)
+            else:
+                best_motifs = played_motifs
+            missed = [m for m in best_motifs if m not in played_motifs]
+            if played_motifs or best_motifs:
+                motifs_json = json.dumps({
+                    "played": played_motifs,
+                    "best": best_motifs,
+                    "missed": missed,
+                })
+
         conn.execute(
             """INSERT OR REPLACE INTO move_analysis
             (game_id, move_number, side, move_played, best_move,
              eval_before_cp, eval_after_cp, swing_cp,
              win_prob_before, win_prob_after, classification, pv_line,
-             clock_seconds)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+             clock_seconds, motifs_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (game_id, move_number, side, move_san, best_move_san,
              eval_before_cp, eval_after_cp, swing_cp,
              win_prob_before, win_prob_after, classification, pv_line,
-             clock_secs),
+             clock_secs, motifs_json),
         )
 
         stats["moves"] += 1

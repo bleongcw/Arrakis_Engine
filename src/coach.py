@@ -112,6 +112,17 @@ Produce a JSON response with these exact keys:
    - "what_was_better": 1-2 sentences about the better move
    - "move_played": the move in notation
    - "best_move": the engine's recommended move
+   - "motifs_found": list of strings — tactical themes (v1.14.0) the BEST move executed,
+     COPIED VERBATIM from the "tactical motifs — PLAYED: ..." annotations in the
+     critical-moments context block above. Valid values: "fork", "pin", "skewer",
+     "discovered_check", "mate_threat", "removing_defender", "hanging_piece",
+     "trapped_piece". Empty list if no motifs annotated.
+   - "motifs_missed": list of strings — tactical themes the PLAYED move missed
+     (the delta — themes the best move had but the actual move didn't), also
+     COPIED VERBATIM from the "tactical motifs — MISSED: ..." annotations above.
+     Empty list if no motifs were missed. DO NOT INVENT MOTIF NAMES — if a
+     critical move has no motif annotation in the context block above, both
+     fields must be empty arrays.
 
 6. "opening_analysis" — A JSON object analyzing the opening choice:
    - "opening_name": the name of the opening played (e.g. "Italian Game", "Sicilian Defense")
@@ -141,11 +152,22 @@ Produce a JSON response with these exact keys:
    or blunders by move number. CRITICAL: only use move numbers that appear in the
    "Move Quality by Phase" section above — do NOT invent move numbers. Explain
    why each was wrong in age-appropriate language.
+   v1.14.0+: when a critical move has a tactical motif annotation in the
+   "Critical Moments (biggest eval swings)" block above (look for "tactical
+   motifs — MISSED: fork" etc.), CITE THE MOTIF BY NAME — e.g. "you missed
+   a knight fork on f7" or "your opponent set up a pin you didn't see."
+   Convert motif identifiers to natural language: "fork" → "fork", "pin" →
+   "pin", "skewer" → "skewer", "discovered_check" → "discovered check",
+   "mate_threat" → "mate threat", "removing_defender" → "removing the
+   defender", "hanging_piece" → "free piece capture", "trapped_piece" →
+   "trapped piece." Do NOT invent motifs that aren't annotated.
 
    ## ♔ Endgame
    1-2 sentences. If the game reached an endgame (moves >30): assess conversion
    quality, technique, king activity. If the game ended before move 30: write
    exactly: "This game ended in the middlegame — no endgame technique needed today."
+   v1.14.0+: same motif-citation rule applies — if a critical endgame move has
+   a motif annotation, cite it by name.
 
    ## 🪤 Watch Out For (Trap Awareness)
    1-2 sentences. Pick ONE trap from the "Trap Awareness" section above that's most
@@ -248,16 +270,39 @@ def _format_moves(moves: list[dict]) -> str:
 
 
 def _build_critical_moments(moves: list[dict], top_n: int = 5) -> str:
-    """Extract the top N critical moments by eval swing."""
+    """Extract the top N critical moments by eval swing.
+
+    v1.14.0: surfaces motif tags (motifs_json) when present on a move row —
+    these are the tactical themes (fork/pin/skewer/etc.) detected by the
+    analyzer at analysis time. The LLM uses these to cite specific
+    motifs by name in feedback rather than inferring from raw eval swings.
+    """
     sorted_moves = sorted(moves, key=lambda m: m["swing_cp"] or 0, reverse=True)
     critical = sorted_moves[:top_n]
     lines = []
     for m in critical:
-        lines.append(
+        line = (
             f"  Move {m['move_number']} ({m['side']}): {m['move_played']} "
             f"— lost {m['swing_cp']}cp (win%: {m['win_prob_before']:.1f}% → "
             f"{m['win_prob_after']:.1f}%). Best was {m['best_move'] or '?'}"
         )
+        # v1.14.0: motif tags. motifs_json shape: {played, best, missed}.
+        motifs_raw = m.get("motifs_json")
+        if motifs_raw:
+            try:
+                motifs = json.loads(motifs_raw) if isinstance(motifs_raw, str) else motifs_raw
+                missed = motifs.get("missed") or []
+                played = motifs.get("played") or []
+                tag_parts = []
+                if missed:
+                    tag_parts.append(f"MISSED: {', '.join(missed)}")
+                if played:
+                    tag_parts.append(f"PLAYED: {', '.join(played)}")
+                if tag_parts:
+                    line += f"  ⟶ tactical motifs — {' | '.join(tag_parts)}"
+            except (json.JSONDecodeError, TypeError, AttributeError):
+                pass
+        lines.append(line)
     return "\n".join(lines)
 
 
