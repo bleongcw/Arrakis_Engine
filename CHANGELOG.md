@@ -4,6 +4,53 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.13.1] - 2026-05-27
+
+### Fixed
+- **`config.yaml.example` model defaults were stale.** When v1.7.0
+  bumped the reasoning-model defaults to `gpt-5.5-pro-2026-04-23` and
+  `claude-opus-4-7`, the change landed in `src/llm_providers.py`'s
+  registry but `config.yaml.example` was never updated. Any user who
+  created `config.yaml` from the example after v1.7.0 ended up stuck
+  on the old `gpt-5.4` and `claude-opus-4-6` models.
+
+  This bit on v1.13.0 specifically: the older models don't reliably
+  follow the new structured 5-section markdown output format the
+  v1.13.0 `player_feedback` spec requires, so coaching output showed
+  up as a single freeform paragraph instead of the intended phase-
+  structured layout — the v1.13.0 frontend parser correctly fell back
+  to the legacy single-block render, masking the real cause.
+
+  Fixed `config.yaml.example` to point at the v1.7.0 defaults. Code
+  defaults in `src/llm_providers.py` are unchanged (they were already
+  correct).
+
+### Required user action (existing installs)
+If your local `config.yaml` (gitignored, your personal copy) was
+created before v1.13.1 and points at `openai_model: gpt-5.4` or
+`anthropic_model: claude-opus-4-6`, edit it to match the new defaults:
+
+```yaml
+coaching:
+  anthropic_model: claude-opus-4-7
+  openai_model: gpt-5.5-pro-2026-04-23
+```
+
+Then restart `python main.py serve` and re-coach any game from
+v1.13.0 onward — the 5-section structured "Feedback to the Player"
+will appear correctly with the newer models.
+
+The older models still work, but they don't follow strict format
+specs reliably. If you want to stay on the older models for any
+reason, the frontend parser will gracefully render the freeform
+output as before.
+
+### Tests
+- No new tests. Pure config/docs patch.
+- Backend 455 / frontend 165 unchanged.
+
+---
+
 ## [1.13.0] - 2026-05-27
 
 ### Changed

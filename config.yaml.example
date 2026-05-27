@@ -37,10 +37,14 @@ analysis:
 coaching:
   default_provider: claude                # claude | openai | gemini | grok | mistral | deepseek | qwen | ollama
 
-  # Cloud providers — set API keys in .env
-  anthropic_model: claude-opus-4-6        # Anthropic Claude (ARRAKIS_ANTHROPIC_API_KEY)
-  openai_model: gpt-5.4           # OpenAI ChatGPT (ARRAKIS_OPENAI_API_KEY)
-  gemini_model: gemini-2.5-pro            # Google Gemini (ARRAKIS_GOOGLE_API_KEY)
+  # Cloud providers — set API keys in .env.
+  # v1.7.0 standardized on the newer reasoning models below. Older models
+  # (gpt-5.4, claude-opus-4-6) are not reliable at following structured
+  # output formats like the v1.13.0 phase-by-phase player feedback —
+  # always prefer the values below for best coaching output quality.
+  anthropic_model: claude-opus-4-7              # Anthropic Claude (ARRAKIS_ANTHROPIC_API_KEY)
+  openai_model: gpt-5.5-pro-2026-04-23          # OpenAI ChatGPT (ARRAKIS_OPENAI_API_KEY)
+  gemini_model: gemini-2.5-pro                  # Google Gemini (ARRAKIS_GOOGLE_API_KEY)
   grok_model: grok-3                      # xAI Grok (ARRAKIS_XAI_API_KEY)
   mistral_model: mistral-medium-latest    # Mistral AI (ARRAKIS_MISTRAL_API_KEY)
   deepseek_model: deepseek-reasoner       # DeepSeek Cloud (ARRAKIS_DEEPSEEK_API_KEY)
