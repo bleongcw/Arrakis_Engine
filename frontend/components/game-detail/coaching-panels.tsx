@@ -141,12 +141,33 @@ export function CoachingPanels({ coaching }: CoachingPanelsProps) {
       {/* Player Feedback — v1.13.0+ phase-structured 5-section render.
           Legacy pre-v1.13.0 entries (no `## ` headings) fall back to a
           single section with empty heading and the full body as one
-          block, matching the pre-v1.13.0 look exactly. */}
+          block, matching the pre-v1.13.0 look exactly.
+          v1.13.2+: a ⚠ badge appears in the header when the LLM produced
+          non-compliant output (older or non-reasoning models often skip
+          the strict format spec). */}
       {coaching.player_feedback && (
         <Card className="border-l-4 border-l-green-500">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm text-green-500">
-              Feedback to the Player
+            <CardTitle className="text-sm text-green-500 flex items-center gap-2 flex-wrap">
+              <span>Feedback to the Player</span>
+              {coaching.meta?.feedback_structure_compliant === false && (
+                <span
+                  className="text-[10px] font-normal px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200"
+                  title={
+                    `This brief was produced as freeform text instead of the ` +
+                    `v1.13.0 phase-structured format. The model "` +
+                    (coaching.meta?.model || "unknown") +
+                    `" didn't follow the 5-section spec` +
+                    (coaching.meta?.feedback_missing_headings?.length
+                      ? ` (missing: ${coaching.meta.feedback_missing_headings.join(", ")})`
+                      : "") +
+                    `. Re-coach with a newer reasoning model (claude-opus-4-7 or ` +
+                    `gpt-5.5-pro-2026-04-23) to get the structured layout.`
+                  }
+                >
+                  ⚠ unstructured
+                </span>
+              )}
             </CardTitle>
           </CardHeader>
           <CardContent>

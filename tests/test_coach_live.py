@@ -128,3 +128,68 @@ class TestCoachGameLiveEdgeCases:
         """Unknown provider should raise ValueError."""
         with pytest.raises(ValueError, match="Unknown provider"):
             coach_game(analyzed_game, provider="gemini", db_path=db_path)
+
+
+# ─── v1.13.2: live format-compliance tests per reasoning model ───
+#
+# These call the actual LLM API and assert that the response contains all 5
+# v1.13.0 markdown section headings. Catches format-spec drift at the
+# model level — the v1.13.1 incident (gpt-5.4 silently ignoring the spec
+# while the frontend's legacy fallback masked it) wouldn't have shipped
+# if these had been run.
+#
+# Cost per run: ~$0.10-0.30 per model. Run with: pytest -m live -k Compliance
+
+
+class TestStructuredFeedbackCompliance:
+    """Per-model real-API tests for v1.13.0 player_feedback structure."""
+
+    REQUIRED_HEADINGS = [
+        "## ♟ Opening",
+        "## ⚔ Middlegame",
+        "## ♔ Endgame",
+        "## 🪤 Watch Out For",
+        "## 🎯 Top 3 Improvements",
+    ]
+
+    def _assert_compliant(self, result: dict, provider: str, model: str):
+        """Shared assertion: all 5 required headings must appear in the
+        player_feedback string and the validator's compliance flag must
+        agree."""
+        feedback = result.get("player_feedback") or ""
+        missing = [h for h in self.REQUIRED_HEADINGS if h not in feedback]
+        assert not missing, (
+            f"{provider}:{model} produced non-compliant player_feedback. "
+            f"Missing headings: {missing}\n\n"
+            f"Actual feedback (first 800 chars):\n{feedback[:800]}"
+        )
+        # The validator (called inside coach_game) should agree
+        meta = result.get("meta") or {}
+        assert meta.get("feedback_structure_compliant") is True, (
+            f"validator disagrees with raw heading check for {provider}:{model}"
+        )
+        assert meta.get("feedback_missing_headings") == []
+
+    def test_claude_opus_4_7_compliance(self, db_path, analyzed_game):
+        """Claude opus-4-7 should produce all 5 sections reliably."""
+        if not os.getenv("ARRAKIS_ANTHROPIC_API_KEY"):
+            pytest.skip("ARRAKIS_ANTHROPIC_API_KEY not set")
+        model = "claude-opus-4-7"
+        result = coach_game(
+            analyzed_game, provider="claude", model=model, db_path=db_path,
+        )
+        self._assert_compliant(result, "claude", model)
+
+    def test_gpt_5_5_pro_compliance(self, db_path, analyzed_game):
+        """GPT-5.5-pro should produce all 5 sections reliably.
+
+        This is the test that would have caught the v1.13.1 incident
+        (gpt-5.4 silently degrading the output). With this test in place,
+        any future regression to a non-compliant model would fail loudly."""
+        if not os.getenv("ARRAKIS_OPENAI_API_KEY"):
+            pytest.skip("ARRAKIS_OPENAI_API_KEY not set")
+        model = "gpt-5.5-pro-2026-04-23"
+        result = coach_game(
+            analyzed_game, provider="openai", model=model, db_path=db_path,
+        )
+        self._assert_compliant(result, "openai", model)

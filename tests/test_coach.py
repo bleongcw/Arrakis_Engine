@@ -867,3 +867,121 @@ class TestCoachGameWiresPhaseTraps:
             assert heading in GAME_COACHING_PROMPT, (
                 f"prompt template missing required section heading: {heading}"
             )
+
+
+# --- v1.13.2: player_feedback structure validator ---
+
+
+class TestValidatePlayerFeedbackStructure:
+    """v1.13.2: catches when the LLM ignores the strict 5-section spec.
+
+    The validator's purpose is to surface silent format degradation —
+    typically caused by older / non-reasoning models. Without it, the
+    frontend's legacy single-block fallback masks the problem (the
+    v1.13.1 config-drift incident).
+    """
+
+    def test_fully_compliant_5_section_response(self):
+        from src.coach import _validate_player_feedback_structure
+        text = (
+            "## ♟ Opening\nfoo\n\n"
+            "## ⚔ Middlegame\nbar\n\n"
+            "## ♔ Endgame\nbaz\n\n"
+            "## 🪤 Watch Out For (Trap Awareness)\nquux\n\n"
+            "## 🎯 Top 3 Improvements\n1. x"
+        )
+        result = _validate_player_feedback_structure(text)
+        assert result["compliant"] is True
+        assert result["missing_headings"] == []
+        assert result["headings_found"] == 5
+
+    def test_trap_awareness_heading_variant_accepted(self):
+        """The Watch Out For section uses '🪤 Watch Out For (Trap Awareness)'
+        in the prompt; the validator should accept any heading that STARTS
+        with '🪤 Watch Out For'."""
+        from src.coach import _validate_player_feedback_structure
+        text = (
+            "## ♟ Opening\nx\n"
+            "## ⚔ Middlegame\nx\n"
+            "## ♔ Endgame\nx\n"
+            "## 🪤 Watch Out For (Trap Awareness)\nx\n"
+            "## 🎯 Top 3 Improvements\n1."
+        )
+        assert _validate_player_feedback_structure(text)["compliant"] is True
+
+    def test_legacy_freeform_block_is_non_compliant(self):
+        """Pre-v1.13.0 entries and older-model output (the v1.13.1
+        gpt-5.4 case) have no headings → flagged non-compliant."""
+        from src.coach import _validate_player_feedback_structure
+        text = "Evan Leong, this was a tough win. You did very well..."
+        result = _validate_player_feedback_structure(text)
+        assert result["compliant"] is False
+        assert len(result["missing_headings"]) == 5
+        assert result["headings_found"] == 0
+
+    def test_partial_compliance_lists_missing_headings(self):
+        from src.coach import _validate_player_feedback_structure
+        text = (
+            "## ♟ Opening\nx\n"
+            "## ⚔ Middlegame\nx\n"
+            "## 🎯 Top 3 Improvements\n1."
+        )
+        result = _validate_player_feedback_structure(text)
+        assert result["compliant"] is False
+        assert "♔ Endgame" in result["missing_headings"]
+        assert "🪤 Watch Out For" in result["missing_headings"]
+        # ♟ / ⚔ / 🎯 are present, NOT in missing
+        assert "♟ Opening" not in result["missing_headings"]
+
+    def test_extra_headings_tracked_but_not_failure(self):
+        """LLM-added bonus sections (forward-compat) don't fail
+        compliance — they just appear in extra_headings."""
+        from src.coach import _validate_player_feedback_structure
+        text = (
+            "## ♟ Opening\nx\n"
+            "## ⚔ Middlegame\nx\n"
+            "## ♔ Endgame\nx\n"
+            "## 🪤 Watch Out For\nx\n"
+            "## 🎯 Top 3 Improvements\n1.\n"
+            "## 🎁 Bonus Section\nLLM added an extra."
+        )
+        result = _validate_player_feedback_structure(text)
+        assert result["compliant"] is True
+        assert "🎁 Bonus Section" in result["extra_headings"]
+
+    def test_null_and_empty_input_handled_gracefully(self):
+        from src.coach import _validate_player_feedback_structure
+        for empty in (None, "", "   \n  \t"):
+            result = _validate_player_feedback_structure(empty)
+            assert result["compliant"] is False
+            assert result["headings_found"] == 0
+            # All 5 required headings appear as missing
+            assert len(result["missing_headings"]) == 5
+
+    def test_required_headings_constant_has_all_5(self):
+        """Guard against the constant drifting out of sync with the prompt."""
+        from src.coach import _REQUIRED_FEEDBACK_HEADINGS
+        assert len(_REQUIRED_FEEDBACK_HEADINGS) == 5
+        # Each required heading must also appear in the prompt template
+        from src.coach import GAME_COACHING_PROMPT
+        for h in _REQUIRED_FEEDBACK_HEADINGS:
+            assert f"## {h}" in GAME_COACHING_PROMPT, (
+                f"_REQUIRED_FEEDBACK_HEADINGS includes '{h}' but the prompt "
+                f"template doesn't reference '## {h}'"
+            )
+
+
+class TestCoachGameWiresValidator:
+    """Source-grep guard: confirms the validator is called + its result
+    persisted in coaching_meta_json. Mirror of the trajectory wiring guard."""
+
+    def test_validator_called_and_persisted(self):
+        from src import coach as coach_mod
+        import inspect
+        source = inspect.getsource(coach_mod.coach_game)
+        assert "_validate_player_feedback_structure" in source, \
+            "coach_game must call _validate_player_feedback_structure"
+        assert "feedback_structure_compliant" in source, \
+            "coach_game must persist feedback_structure_compliant in meta"
+        assert "feedback_missing_headings" in source, \
+            "coach_game must persist feedback_missing_headings in meta"

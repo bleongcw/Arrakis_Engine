@@ -4,6 +4,86 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.13.2] - 2026-05-27
+
+### Added
+- **Runtime validator for the v1.13.0 player_feedback structure.** The
+  v1.13.1 config-drift incident — where `gpt-5.4` silently produced
+  freeform text instead of the required 5-section markdown layout, and
+  the frontend's graceful legacy fallback masked the problem — wouldn't
+  have shipped this fix in place.
+
+  New `_validate_player_feedback_structure()` in `src/coach.py` runs
+  after every LLM response, checks that all 5 required headings
+  (♟ Opening / ⚔ Middlegame / ♔ Endgame / 🪤 Watch Out For /
+  🎯 Top 3 Improvements) appear in the response, and:
+
+  - **Logs a WARNING** identifying the model + listing missing
+    headings when output is non-compliant
+  - **Persists compliance state** in `coaching_meta_json`
+    (`feedback_structure_compliant: bool` +
+    `feedback_missing_headings: list[str]`)
+  - **Renders a ⚠ "unstructured" badge** in the "Feedback to the
+    Player" card header when non-compliant, with a tooltip explaining
+    the model mismatch and pointing at the recommended reasoning
+    models (claude-opus-4-7 / gpt-5.5-pro-2026-04-23)
+
+  The validator accepts heading variants — `## 🪤 Watch Out For` matches
+  whether the LLM writes the bare form or the spec's `## 🪤 Watch Out
+  For (Trap Awareness)`. Extra headings the LLM adds are tracked in
+  `extra_headings` but don't fail compliance (graceful forward-compat).
+
+- **Per-provider live integration tests.** New `TestStructuredFeedback
+  Compliance` class in `tests/test_coach_live.py` (marked
+  `@pytest.mark.live`, excluded from default runs). One test per major
+  reasoning model — actually calls the LLM and asserts the response
+  contains all 5 required headings. Cost: ~$0.10–0.30 per model per
+  run.
+
+  Run on demand:
+  ```
+  pytest -m live -k Compliance
+  ```
+
+  Catches format-spec drift at the model level. The v1.13.1 incident
+  would have failed `test_gpt_5_5_pro_compliance` if Bernard had been
+  routing `gpt-5.4` through the GPT-5.5-pro test — the failure message
+  would have shown exactly which headings were missing and which model
+  produced the bad output.
+
+### Changed
+- `coaching_meta_json` schema extended with `feedback_structure_compliant`
+  + `feedback_missing_headings`. Backward-compatible — pre-v1.13.2
+  rows simply don't have these fields and the UI treats `undefined`
+  as "no check performed" (no badge shown).
+- `CoachingMeta` TypeScript interface in `frontend/lib/types.ts`
+  extended with the two new optional fields.
+- `coaching-panels.tsx` "Feedback to the Player" card header gets a
+  small amber ⚠ "unstructured" badge when
+  `meta.feedback_structure_compliant === false`. Silent in all other
+  cases (true, undefined for legacy entries).
+
+### Tests
+- **+8 backend tests** in `tests/test_coach.py`:
+  - `TestValidatePlayerFeedbackStructure` (7) — fully-compliant
+    5-section, trap-awareness heading variant accepted, legacy
+    freeform flagged, partial compliance lists missing, extra
+    headings tracked but not a failure, null/empty input handled,
+    `_REQUIRED_FEEDBACK_HEADINGS` constant kept in sync with the
+    prompt template (cross-reference guard)
+  - `TestCoachGameWiresValidator` (1) — source-grep guard against
+    silent removal of the validator wiring
+- **+2 live tests** in `tests/test_coach_live.py` (default-excluded):
+  per-model real-API compliance for Claude opus-4-7 + GPT-5.5-pro.
+- **Backend total: 455 → 463. Frontend unchanged at 165.**
+
+### Migration
+- None. Pure additive change. The two new `coaching_meta_json` fields
+  appear on newly coached games from v1.13.2 onward; older briefs just
+  don't have the badge.
+
+---
+
 ## [1.13.1] - 2026-05-27
 
 ### Fixed

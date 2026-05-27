@@ -103,6 +103,13 @@ export interface CoachingMeta {
   trajectory_trend_direction?: string | null;
   /** v1.8.0+: rough size of the injected trajectory block. */
   trajectory_tokens_estimate?: number;
+  /** v1.13.2+: true iff the LLM's player_feedback contained all 5 required
+   *  v1.13.0 markdown headings. False when the LLM (often an older or
+   *  non-reasoning model) ignored the structured-output spec. */
+  feedback_structure_compliant?: boolean;
+  /** v1.13.2+: list of required heading names the LLM omitted, e.g.
+   *  ["♔ Endgame", "🎯 Top 3 Improvements"]. Empty when compliant. */
+  feedback_missing_headings?: string[];
 }
 
 export interface GameCoaching {

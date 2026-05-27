@@ -649,6 +649,80 @@ def _format_relevant_traps_block(traps: list[dict]) -> str:
     return "\n".join(lines)
 
 
+# v1.13.0 requires the LLM to emit player_feedback as 5 markdown sections
+# in this exact order using these exact headings (modulo the leading `## `).
+# v1.13.2's validator checks the response for compliance and records the
+# state in coaching_meta_json so silent format drift (older models, prompt
+# regressions, provider quirks) is visible in logs + UI badges instead of
+# being masked by the frontend's legacy single-block fallback.
+_REQUIRED_FEEDBACK_HEADINGS: tuple[str, ...] = (
+    "♟ Opening",
+    "⚔ Middlegame",
+    "♔ Endgame",
+    "🪤 Watch Out For",
+    "🎯 Top 3 Improvements",
+)
+
+
+def _validate_player_feedback_structure(feedback_text: str | None) -> dict:
+    """v1.13.2: check that a player_feedback response has the 5 required
+    markdown headings introduced in v1.13.0.
+
+    Returns a dict suitable for storage in coaching_meta_json:
+
+        {
+          "compliant": bool,               # True iff ALL 5 required present
+          "missing_headings": list[str],   # subset of _REQUIRED_FEEDBACK_HEADINGS
+          "extra_headings":   list[str],   # headings the LLM added beyond the spec
+          "headings_found":   int,         # 0..N for log brevity
+        }
+
+    Heading detection is permissive — accepts `## ♟ Opening` and
+    `## ♟ Opening (anything after)` so the trap-awareness heading variant
+    `## 🪤 Watch Out For (Trap Awareness)` still counts. Case-sensitive on
+    the heading text itself because the emoji + capitalization are spec.
+
+    Returns compliant=False for null/empty input (callers can treat that
+    as "nothing to validate" — legacy entries pre-v1.13.0 just don't get
+    a compliance check).
+    """
+    if not feedback_text:
+        return {
+            "compliant": False,
+            "missing_headings": list(_REQUIRED_FEEDBACK_HEADINGS),
+            "extra_headings": [],
+            "headings_found": 0,
+        }
+
+    # Extract `## <heading>` lines (the heading text after `## `, trimmed)
+    found_headings: list[str] = []
+    for line in feedback_text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("## "):
+            found_headings.append(stripped[3:].strip())
+
+    missing = []
+    for req in _REQUIRED_FEEDBACK_HEADINGS:
+        # A required heading is present if any found heading starts with it
+        # (so "🪤 Watch Out For" matches "🪤 Watch Out For (Trap Awareness)")
+        if not any(h.startswith(req) for h in found_headings):
+            missing.append(req)
+
+    # Anything the LLM added beyond the spec — useful to track forward-compat
+    # drift but not a failure condition.
+    extras: list[str] = []
+    for h in found_headings:
+        if not any(h.startswith(req) for req in _REQUIRED_FEEDBACK_HEADINGS):
+            extras.append(h)
+
+    return {
+        "compliant": len(missing) == 0,
+        "missing_headings": missing,
+        "extra_headings": extras,
+        "headings_found": len(found_headings),
+    }
+
+
 def coach_game(game_id: int, provider: str | None = "claude",
                model: str | None = None, db_path: str | None = None,
                config: dict | None = None,
@@ -940,12 +1014,36 @@ def coach_game(game_id: int, provider: str | None = "claude",
     critical_json = json.dumps(coaching.get("critical_moments", []))
     opening_json = json.dumps(coaching.get("opening_analysis", {}))
 
+    # v1.13.2: validate the player_feedback structure. The v1.13.0 prompt
+    # requires 5 markdown sections (♟ Opening / ⚔ Middlegame / ♔ Endgame /
+    # 🪤 Watch Out For / 🎯 Top 3 Improvements). Older or less-compliant
+    # models silently drop the formatting and produce freeform paragraphs,
+    # which the frontend then renders via the legacy single-block fallback —
+    # masking the format degradation. Logging + meta persistence surfaces
+    # the drift in logs and the UI badge.
+    feedback_validation = _validate_player_feedback_structure(
+        coaching.get("player_feedback")
+    )
+    if not feedback_validation["compliant"]:
+        logger.warning(
+            "Coaching game %d (%s:%s): player_feedback NON-COMPLIANT with "
+            "v1.13.0 5-section spec. Missing %d/%d required headings: %s. "
+            "Consider switching to a newer reasoning model.",
+            game_id, provider, used_model,
+            len(feedback_validation["missing_headings"]),
+            len(_REQUIRED_FEEDBACK_HEADINGS),
+            feedback_validation["missing_headings"],
+        )
+
     # v1.6.0: persist coaching meta (history depth, prompt size, model). Lets
     # the UI show "based on N recent games" stamps and lets us correlate
     # coaching quality with prompt context after the fact.
     # v1.8.0: also persist trajectory injection status + age so the UI can
     # render a "30-day trajectory (Nd old)" stamp and so we can compare
     # coaching quality with/without trajectory after the fact.
+    # v1.13.2: also persist player_feedback structural compliance so the UI
+    # can render a ⚠ badge when the LLM produced freeform output instead
+    # of the required 5-section format.
     meta = {
         "history_games_injected": history_games_injected,
         "history_tokens_estimate": history_tokens_est,
@@ -957,6 +1055,8 @@ def coach_game(game_id: int, provider: str | None = "claude",
         "trajectory_weakest_phase": trajectory_diag.get("weakest_phase"),
         "trajectory_trend_direction": trajectory_diag.get("trend_direction"),
         "trajectory_tokens_estimate": trajectory_tokens_est,
+        "feedback_structure_compliant": feedback_validation["compliant"],
+        "feedback_missing_headings": feedback_validation["missing_headings"],
     }
     meta_json = json.dumps(meta)
     coaching["meta"] = meta  # also surface to the immediate caller's response
