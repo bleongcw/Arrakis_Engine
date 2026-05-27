@@ -4,6 +4,54 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.14.1] - 2026-05-28
+
+### Fixed
+- **Journal Recent Form Review entries showed raw JSON brackets and
+  quoted paragraphs.** Bernard's gpt-5.5-pro-2026-04-23 reviews were
+  rendering as:
+  ```
+  [
+    "Evan Leong, your last 10 games were 6 wins, 4 losses…",
+    "On 2026-05-27 against Giant_Ro…",
+    …
+  ]
+  ```
+  instead of clean paragraphs.
+
+  Root cause: `parseTrendSummary()` in `frontend/lib/summary.ts` only
+  handled JSON *objects* (`{"paragraphs": [...]}` — the older Claude
+  shape) and plain prose. When the LLM emits a JSON *array* of
+  paragraph strings (`["para 1", "para 2", ...]` — what gpt-5.5-pro
+  produces for Journal reviews), the parser fell through to the plain-
+  text branch, which split on `\n\n` boundaries but preserved the
+  brackets and quotes from the JSON serialization, leaking them into
+  the rendered card.
+
+  Fix: added a `trimmed.startsWith("[")` branch that JSON-parses the
+  input as an array and extracts the string elements. Falls through
+  to the plain-text path if the parse fails (so malformed JSON-like
+  input renders as-is rather than crashing).
+
+  No backend change. No DB change. No re-coach needed — existing
+  reviews stored in `journal_entries.body` render correctly on next
+  page load.
+
+### Tests
+- 4 new frontend tests in
+  `frontend/lib/__tests__/summary.test.ts`:
+  - JSON array of strings parses as ordered paragraphs (no bracket/
+    quote leakage)
+  - Pretty-printed JSON array with indentation also parses (the exact
+    shape gpt-5.5-pro emitted)
+  - JSON array with `\n` escape-leak inside paragraphs combines
+    cleanly with the v1.8.2 normalization
+  - Invalid JSON-array-ish input falls through to plain-text path
+    rather than crashing
+- Frontend total: 169 → **173**. Backend unchanged at 487.
+
+---
+
 ## [1.14.0] - 2026-05-28
 
 ### Added

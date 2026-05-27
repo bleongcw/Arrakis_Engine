@@ -117,4 +117,60 @@ describe("parseTrendSummary", () => {
     const mixed = "First.\n\nSecond.\\n\\nThird.";
     expect(parseTrendSummary(mixed)).toEqual(["First.", "Second.", "Third."]);
   });
+
+  // v1.14.1 regression: gpt-5.5-pro returned Journal reviews as JSON arrays
+  // and the parser fell through to plain-text path, leaking '[' / '"' / ']'
+  // into the rendered card.
+
+  it("v1.14.1 — JSON array of strings parses as ordered paragraphs", () => {
+    const jsonArray = JSON.stringify([
+      "Evan Leong, your last 10 games were 6 wins and 4 losses.",
+      "On 2026-05-27 against Giant_Ro, 27...Qxa7 would have helped.",
+      "Your opening is cleaner than your middlegame.",
+      "For next time, try the Five Danger Pauses.",
+    ]);
+    const result = parseTrendSummary(jsonArray);
+    expect(result).toHaveLength(4);
+    expect(result[0]).toContain("Evan Leong");
+    expect(result[3]).toContain("Five Danger Pauses");
+    // No bracket / quote leakage
+    for (const para of result) {
+      expect(para).not.toMatch(/^\[/);
+      expect(para).not.toMatch(/^\"/);
+      expect(para).not.toMatch(/\",?$/);
+    }
+  });
+
+  it("v1.14.1 — pretty-printed JSON array with indentation also parses", () => {
+    // What gpt-5.5-pro actually emitted: pretty-printed with newlines + spaces
+    const prettyArray = `[
+  "First paragraph here.",
+  "Second paragraph here.",
+  "Third paragraph here."
+]`;
+    const result = parseTrendSummary(prettyArray);
+    expect(result).toEqual([
+      "First paragraph here.",
+      "Second paragraph here.",
+      "Third paragraph here.",
+    ]);
+  });
+
+  it("v1.14.1 — JSON array with escape-leak inside paragraphs still normalizes", () => {
+    // Combined v1.8.2 + v1.14.1: array shape AND literal \\n inside the paragraphs
+    const arr = JSON.stringify(["line one\\nline two", "second paragraph"]);
+    const result = parseTrendSummary(arr);
+    expect(result).toEqual(["line one\nline two", "second paragraph"]);
+    // No literal backslash-n survives in any paragraph
+    for (const para of result) {
+      expect(para).not.toContain("\\n");
+    }
+  });
+
+  it("v1.14.1 — invalid JSON-array-ish input falls through to plain-text path", () => {
+    // Starts with [ but isn't valid JSON — must not crash, just render as-is
+    const broken = "[this is not actually valid JSON";
+    const result = parseTrendSummary(broken);
+    expect(result).toEqual([broken]);
+  });
 });

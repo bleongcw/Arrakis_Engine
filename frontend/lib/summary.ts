@@ -3,11 +3,15 @@
 // Licensed under AGPL-3.0. See LICENSE file.
 
 /**
- * Parser for `trend_summary` strings stored on `player_patterns`.
+ * Parser for `trend_summary` strings stored on `player_patterns` (also reused
+ * for Journal Recent Form Review entries since v1.10.0).
  *
  * Backend stores whatever the LLM returns verbatim. The shape varies:
  *  - Plain prose with real `\n\n` paragraph breaks (Claude, Gemini, DeepSeek).
  *  - JSON `{"paragraphs": [...]}` (older Claude runs).
+ *  - JSON array `["para 1", "para 2", ...]` (v1.14.1 — observed on gpt-5.5-pro
+ *    Journal reviews; the LLM serializes the multi-paragraph output as a JSON
+ *    list instead of plain prose).
  *  - Plain prose where `\n` arrives as the **two-character** escape sequence
  *    `\` + `n` instead of a real newline (some ChatGPT / Responses API
  *    runs). Splitting on real `"\n\n"` then silently produces one giant
@@ -15,7 +19,9 @@
  *
  * The fix: normalize literal `\n` sequences to real newlines *before*
  * splitting, and also inside each JSON-extracted paragraph in case the
- * escape leaked through the JSON layer too.
+ * escape leaked through the JSON layer too. v1.14.1 adds the JSON-array
+ * branch (previously fell through to plain-text path which leaked the
+ * brackets and quotes into the rendered card).
  */
 export function parseTrendSummary(summary: string | null | undefined): string[] {
   if (!summary) return [];
@@ -35,6 +41,17 @@ export function parseTrendSummary(summary: string | null | undefined): string[] 
             .flat()
             .filter((v): v is string => typeof v === "string");
         }
+      }
+    } catch {
+      // Fall through to the plain-text path.
+    }
+  } else if (trimmed.startsWith("[")) {
+    // v1.14.1: JSON array of paragraph strings. gpt-5.5-pro emits this shape
+    // for Journal Recent Form Review entries.
+    try {
+      const parsed: unknown = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        candidates = parsed.filter((v): v is string => typeof v === "string");
       }
     } catch {
       // Fall through to the plain-text path.
