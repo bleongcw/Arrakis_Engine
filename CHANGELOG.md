@@ -4,6 +4,55 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.16.2] - 2026-05-29
+
+### Fixed
+- **`UnboundLocalError: cannot access local variable 'best_info'
+  where it is not associated with a value`** in
+  `src/analyzer.py::analyze_game`. The v1.14.0 motif-detection
+  wiring put `best_move_obj = best_info["pv"][0] if best_info.get("pv")
+  else None` BEFORE `best_info = info` in the per-move loop. On the
+  first iteration of every freshly-analyzed game, `best_info` didn't
+  exist yet, raising the error and aborting analysis with
+  `analysis_status='error'` on the games row.
+
+  The bug only triggered on `analyze_game` (new analyses) — never on
+  `rescan-motifs` (which doesn't call `analyze_game`) or on already-
+  analyzed games. Symptom in production: *"Failed to analyze game N:
+  cannot access local variable 'best_info' where it is not associated
+  with a value"* in the analyzer logs, no Stockfish output, game
+  marked errored.
+
+  Why it survived from v1.14.0 ship → v1.16.1: rescan-motifs was the
+  primary motif-data driver during testing; the bug only surfaces on
+  the `analyze` code path, which Bernard hit when a freshly-harvested
+  game (game 976) came through.
+
+  Fix: swap the two lines so `best_info = info` runs first, then
+  derive `best_move_obj` from it.
+
+### Tests
+- New regression lock `TestAnalyzeGameBestInfoOrdering` in
+  `tests/test_analyzer.py`. Static source inspection
+  (`inspect.getsource`) asserts `best_info = info` appears BEFORE
+  `best_info["pv"][0] if best_info.get("pv")`. Zero-cost (no
+  Stockfish needed), runs on every commit, and would have caught
+  the v1.14.0 regression instantly if it had existed back then.
+- Backend: 568 → **569** (+1)
+
+### Recovery for affected games
+
+Any games left in `analysis_status='error'` from this bug can be
+re-analyzed after upgrading:
+
+```bash
+sqlite3 data/chess_coach.db \
+  "UPDATE games SET analysis_status='pending' WHERE analysis_status='error'"
+python main.py analyze
+```
+
+---
+
 ## [1.16.1] - 2026-05-28
 
 ### Added

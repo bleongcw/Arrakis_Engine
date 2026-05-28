@@ -199,10 +199,19 @@ def analyze_game(game_id: int, pgn_text: str, player_color: str,
         # v1.14.0: snapshot the position BEFORE the move for motif detection.
         # Cheap copy; only needed for the per-move-loop's tail.
         board_before = board.copy()
-        best_move_obj = best_info["pv"][0] if best_info.get("pv") else None
 
-        # Get best move before playing
+        # Get best move before playing. `info` was set either by the
+        # initial pre-loop engine.analyse() (first iteration) or by the
+        # previous iteration's post-move analysis (which IS the pre-move
+        # analysis for THIS iteration).
         best_info = info  # reuse previous analysis
+        # v1.16.2 fix: this MUST run after best_info is assigned. The
+        # original v1.14.0 ordering put this line before the assignment,
+        # which raised UnboundLocalError on the first iteration of every
+        # newly-analyzed game (`best_info` not yet defined). Symptom in
+        # production was "Failed to analyze game N: cannot access local
+        # variable 'best_info' where it is not associated with a value".
+        best_move_obj = best_info["pv"][0] if best_info.get("pv") else None
         best_move_san = None
         if best_info.get("pv"):
             try:

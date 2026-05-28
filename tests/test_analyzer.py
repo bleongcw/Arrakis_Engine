@@ -1,10 +1,58 @@
 """Tests for src/analyzer.py"""
 
+import inspect
 from unittest.mock import MagicMock
 
 import pytest
 
-from src.analyzer import cp_to_win_prob, classify_move, score_to_cp, cap_eval, EVAL_CAP
+from src.analyzer import (
+    cp_to_win_prob, classify_move, score_to_cp, cap_eval, EVAL_CAP,
+    analyze_game,
+)
+
+
+class TestAnalyzeGameBestInfoOrdering:
+    """v1.16.2 regression lock for the UnboundLocalError bug.
+
+    The v1.14.0 motif wiring put `best_move_obj = best_info["pv"][0]`
+    BEFORE `best_info = info` in the per-move loop. On the very first
+    iteration of every newly-analyzed game, `best_info` didn't exist
+    yet, raising:
+
+        UnboundLocalError: cannot access local variable 'best_info'
+        where it is not associated with a value
+
+    The bug only triggered on `analyze_game` (new analyses) — never
+    on rescan-motifs (which doesn't call analyze_game). Symptom was
+    silent: 'Failed to analyze game N' in the logs, no Stockfish work,
+    no stack trace surfaced to the user.
+
+    This static test inspects the source of analyze_game and asserts
+    that `best_info = info` appears BEFORE `best_move_obj = best_info`.
+    Static-source check (zero-cost, no Stockfish needed) — runs on
+    every commit and would have caught the v1.14.0 regression
+    instantly.
+    """
+
+    def test_best_info_assigned_before_best_move_obj_read(self):
+        src = inspect.getsource(analyze_game)
+        # Find the two lines of interest
+        assign_idx = src.find("best_info = info")
+        read_idx = src.find('best_info["pv"][0] if best_info.get("pv")')
+        assert assign_idx != -1, (
+            "expected `best_info = info` in analyze_game"
+        )
+        assert read_idx != -1, (
+            "expected `best_info[\"pv\"][0] if best_info.get(\"pv\")` "
+            "in analyze_game"
+        )
+        assert assign_idx < read_idx, (
+            f"v1.16.2 regression: `best_info = info` (idx {assign_idx}) "
+            f"must come BEFORE the line that reads best_info to derive "
+            f"best_move_obj (idx {read_idx}). Otherwise the first loop "
+            f"iteration raises UnboundLocalError on freshly-analyzed "
+            f"games."
+        )
 
 
 class TestCpToWinProb:
