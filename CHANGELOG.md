@@ -4,6 +4,47 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.15.2] - 2026-05-28
+
+### Added
+- **`python main.py trend` CLI subcommand** — closes a long-standing
+  ergonomic gap. `generate_trend_summary` has existed since v1.9.0
+  but was only reachable via `POST /api/trend-summary` or the
+  Patterns page "Refresh Summary" button. Every other LLM-generating
+  pipeline (`coach`, `review`, `patterns`, `analyze`) had a matching
+  CLI subcommand; `trend` finally joins them.
+
+  Mirrors `cmd_review`'s shape exactly:
+  ```bash
+  python main.py trend --player evanleongxinyu --provider openai
+  python main.py trend                                  # all active players
+  python main.py trend --player evan --player estella   # multiple
+  python main.py trend --player evan --model gpt-5.5    # model override
+  ```
+
+  Same provider list as the rest of the LLM CLI surface (claude /
+  openai / gemini / grok / mistral / deepseek / qwen / ollama).
+  Defaults to `coaching.default_provider` from `config.yaml`.
+  Handles "player not found" and "no pattern stats yet" gracefully
+  — emits a per-target ✓/✗ line, never crashes on partial failure.
+
+  Prereq: `python main.py patterns` must have run at least once
+  so there's a `stats_json` row to summarize. (The CLI's error
+  message points this out when the row is missing.)
+
+  Especially useful right after v1.15.1's skewer recalibration —
+  one command regenerates the LLM narrative so it picks up the
+  corrected top-missed motif.
+
+### Tests
+- No new tests — `cmd_trend` is pure CLI plumbing over the
+  already-tested `generate_trend_summary` (v1.15.0 wired the
+  motif data; v1.9.0 ships the core path). Verified end-to-end
+  manually against Evan's live data. Backend total unchanged at
+  **513**. Frontend unchanged at **179**.
+
+---
+
 ## [1.15.1] - 2026-05-28
 
 ### Fixed

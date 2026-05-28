@@ -258,6 +258,73 @@ def cmd_review(args, config):
             print(f"  ✗ {t['username']}: ERROR — {e}")
 
 
+def cmd_trend(args, config):
+    """v1.15.2: Regenerate the LLM-powered trend summary for a player.
+
+    Closes the ergonomic gap from v1.9.0 onward: generate_trend_summary
+    was only reachable via the POST /api/trend-summary endpoint (or the
+    Patterns page "Refresh Summary" button), even though every other
+    LLM-generating pipeline (coach / review / patterns / analyze) had a
+    matching CLI subcommand. v1.15.2 brings trend in line.
+
+    Mirrors cmd_review's shape — accepts --player (repeatable) plus
+    --provider/--model. Calls patterns.generate_trend_summary which
+    writes the result to player_patterns.trend_summary.
+
+    Prereq: `python main.py patterns` must have run at least once so
+    there's a stats_json row to summarize. ~$0.02-0.05 per call with
+    Claude / gpt-5.5-pro; free with ollama.
+    """
+    from src.patterns import generate_trend_summary
+    from src.models import init_db
+
+    db_path = config["database"]["path"]
+    provider = args.provider or config.get("coaching", {}).get("default_provider", "claude")
+    players_arg = args.player or []
+
+    conn = init_db(db_path)
+    if players_arg:
+        targets = []
+        for username in players_arg:
+            row = conn.execute(
+                "SELECT id, username, display_name FROM players WHERE username = ?",
+                (username,),
+            ).fetchone()
+            if not row:
+                print(f"WARN: player '{username}' not found — skipping")
+                continue
+            targets.append(dict(row))
+    else:
+        # All active players
+        rows = conn.execute(
+            "SELECT id, username, display_name FROM players WHERE is_active = 1"
+        ).fetchall()
+        targets = [dict(r) for r in rows]
+    conn.close()
+
+    if not targets:
+        print("No target players found.")
+        return
+
+    print(f"Generating trend summary for {len(targets)} player(s) using {provider}...")
+
+    for t in targets:
+        try:
+            summary = generate_trend_summary(
+                t["id"], db_path=db_path, provider=provider, model=args.model,
+            )
+            if summary:
+                preview = summary.replace("\n", " ")[:120]
+                print(f"  ✓ {t['username']} ({len(summary)} chars): {preview}…")
+            else:
+                print(f"  — {t['username']}: empty summary returned")
+        except ValueError as e:
+            # Most common: "No pattern stats for player N. Run patterns first."
+            print(f"  ✗ {t['username']}: {e}")
+        except Exception as e:
+            print(f"  ✗ {t['username']}: ERROR — {e}")
+
+
 # v1.13.3: cmd_export_json removed — the Next.js frontend reads live
 # from /api/* instead of static JSON exports.
 
@@ -792,6 +859,25 @@ def main():
              "(default: 10, range 3-30)",
     )
 
+    # trend (v1.15.2) — LLM-powered 30-day stats narrative
+    trend_parser = subparsers.add_parser(
+        "trend",
+        help="(v1.15.2) Regenerate the LLM trend summary for one or all players",
+    )
+    trend_parser.add_argument(
+        "--player", action="append",
+        help="Username (repeat for multiple). Default: all active players.",
+    )
+    trend_parser.add_argument(
+        "--provider", choices=["claude", "openai", "gemini", "grok",
+                               "mistral", "deepseek", "qwen", "ollama"],
+        help="LLM provider (default: from coaching.default_provider)",
+    )
+    trend_parser.add_argument(
+        "--model",
+        help="Override the model name (default: provider-specific resolution)",
+    )
+
     # report
     report_parser = subparsers.add_parser("report", help="Generate coaching reports")
     report_parser.add_argument("--player", action="append", help="Username(s) to report on")
@@ -888,6 +974,8 @@ def main():
         cmd_patterns(args, config)
     elif args.command == "review":
         cmd_review(args, config)
+    elif args.command == "trend":
+        cmd_trend(args, config)
     elif args.command == "note":
         cmd_note(args, config)
     elif args.command == "report":
