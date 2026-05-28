@@ -1810,6 +1810,16 @@ TREND_PROMPT = """You are a professional chess coach reviewing a player's recent
 ## Recurring Tactical Themes (last 30 days)
 {motif_summary_text}
 
+## Output format (REQUIRED — read carefully)
+Your reply must be PLAIN TEXT ONLY:
+- 3 or 4 paragraphs separated by blank lines (one blank line between paragraphs)
+- NO JSON, NO arrays, NO objects. Do not wrap your output in `[...]` or `{{...}}`
+- NO markdown headings (no `#`, `##`), NO bullet lists (no `-`, `*`, `1.`), NO code fences
+- NO preamble like "Sure," / "Certainly," / "Here is your summary:" — start directly with the first sentence of paragraph 1
+- NO trailing commentary
+
+The FIRST CHARACTER of your reply must be a letter — never an opening bracket, brace, hash, code fence, or quotation mark.
+
 ## Instructions
 Write a 3-4 paragraph coaching summary for {name}. This is a progress review, not a single-game analysis.
 
@@ -1823,7 +1833,7 @@ Requirements:
 - Keep language age-appropriate for {age} years old.
 - Be warm but professional. Concrete, not vague.
 
-Respond with ONLY the text paragraphs, no JSON, no headers, no markdown formatting."""
+Respond with ONLY the text paragraphs, no JSON, no headers, no markdown formatting. Begin with the first word of paragraph 1; end with the last word of the final paragraph."""
 
 
 def _format_motif_summary_for_prompt(motif_summary: dict) -> str:
@@ -2012,6 +2022,16 @@ Each of {name}'s recent games has already been coached one-by-one. Your job is t
 ## Player Trajectory (last 30 days, measured)
 {trajectory_block}
 
+## Output format (REQUIRED — read carefully)
+Your reply must be PLAIN TEXT ONLY:
+- Exactly 4 paragraphs separated by blank lines (one blank line between paragraphs)
+- NO JSON, NO arrays, NO objects. Do not wrap your output in `[...]` or `{{...}}`
+- NO markdown headings (no `#`, `##`), NO bullet lists (no `-`, `*`, `1.`), NO code fences
+- NO preamble like "Sure," / "Certainly," / "Here is your review:" — start directly with the first sentence of paragraph 1
+- NO trailing commentary
+
+The FIRST CHARACTER of your reply must be a letter — never an opening bracket, brace, hash, code fence, or quotation mark.
+
 ## Instructions
 Write a 4-paragraph review for {name}. Plain text, no headings, no markdown.
 
@@ -2025,7 +2045,7 @@ Write a 4-paragraph review for {name}. Plain text, no headings, no markdown.
 
 Tone: warm, honest, and personal. Address {name} by name in paragraph 1 or 2.
 
-Respond with ONLY the four paragraphs of plain text. No JSON, no markdown headings, no extra commentary."""
+Respond with ONLY the four paragraphs of plain text. No JSON, no markdown headings, no extra commentary. Begin with the first word of paragraph 1; end with the last word of the final paragraph."""
 
 
 def _build_recent_games_table(games: list[dict]) -> str:

@@ -704,6 +704,36 @@ class TestTrendPromptWiring:
         assert "_format_motif_summary_for_prompt" in src
         assert "motif_summary_text=" in src
 
+    def test_v15_4_trend_prompt_has_emphatic_no_json_block(self):
+        """v1.15.4 regression — the gpt-5.5-pro JSON-array shape that
+        surfaced during v1.15.3 live testing prompted us to make the
+        'no JSON' rule emphatic AND repeated. Two regression locks:
+        1) the dedicated output-format section header is present, 2)
+        the closing reinforcement mentions 'first word of paragraph 1'."""
+        from src.patterns import TREND_PROMPT
+        assert "## Output format" in TREND_PROMPT
+        # The emphatic 'no arrays / no objects' wording must survive
+        assert "NO arrays" in TREND_PROMPT or "no arrays" in TREND_PROMPT.lower()
+        # The 'first character must be a letter' guard
+        assert "FIRST CHARACTER" in TREND_PROMPT or "first character" in TREND_PROMPT.lower()
+        # The 'no preamble' rule (catches 'Sure, here is...' bug shape)
+        assert "preamble" in TREND_PROMPT.lower() or "Sure," in TREND_PROMPT
+
+    def test_v15_4_recent_form_review_prompt_has_emphatic_no_json_block(self):
+        """v1.15.4 — same regression lock for the journal review prompt.
+        v1.14.1 hit the JSON-array shape there first; the v1.15.4 prompt
+        tightening fixes the root cause for both surfaces."""
+        from src.patterns import RECENT_FORM_REVIEW_PROMPT
+        assert "## Output format" in RECENT_FORM_REVIEW_PROMPT
+        assert (
+            "NO arrays" in RECENT_FORM_REVIEW_PROMPT
+            or "no arrays" in RECENT_FORM_REVIEW_PROMPT.lower()
+        )
+        assert (
+            "FIRST CHARACTER" in RECENT_FORM_REVIEW_PROMPT
+            or "first character" in RECENT_FORM_REVIEW_PROMPT.lower()
+        )
+
 
 class TestGenerateTrendSummaryPlumbing:
     """v1.15.3: end-to-end plumbing tests for generate_trend_summary

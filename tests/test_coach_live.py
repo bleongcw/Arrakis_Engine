@@ -266,6 +266,71 @@ def trend_stats_db(db_path):
     return (pid, db_path)
 
 
+@pytest.fixture
+def trend_stats_borderline_db(db_path):
+    """v1.15.4 compliance fixture — top_missed_count is exactly at the
+    >=5-instance gate boundary (5 missed, 0 found). Tests the prompt's
+    'When >= 5 instances, make ONE recommendation specifically about
+    that motif' rule at its threshold. Below 5 the LLM should NOT
+    recommend by name; at exactly 5 it SHOULD.
+
+    Replaces the v1.15.3 deferred test_claude_opus_4_7_cites_top_motif
+    with a more meaningful coverage scenario — boundary conditions
+    catch more bugs than 'big number, also works'.
+    """
+    conn = init_db(db_path)
+    pid = ensure_player(conn, "evan", display_name="Evan", age=9, rating=1100)
+    stats = {
+        "total_games": 50,
+        "results": {"wins": 28, "losses": 20, "draws": 2, "win_rate": 56.0},
+        "phase_analysis": {
+            "opening": {"acpl": 45.1, "moves": 600},
+            "middlegame": {"acpl": 68.1, "moves": 400},
+            "endgame": {"acpl": 48.0, "moves": 300},
+        },
+        "consistency": {
+            "mean_acpl": 54.5, "best_acpl": 5.0, "worst_acpl": 220.0,
+            "total_games": 50, "rating": "Stable",
+        },
+        "move_quality": {
+            "excellent": {"pct": 60.0}, "good": {"pct": 12.6},
+            "inaccuracy": {"pct": 10.5}, "mistake": {"pct": 10.5},
+            "blunder": {"pct": 6.4},
+        },
+        "accuracy": {"overall_pct": 72.5},
+        "endgame_conversion": {"winning_endgames": {"conversion_rate": 81.1}},
+        "tactical_misses": {"miss_rate": 48.3},
+        "comeback_collapse": {
+            "comebacks": {"comeback_rate": 30.0},
+            "collapses": {"collapse_rate": 25.0},
+        },
+        "repertoire_consistency": {"white": {"rating": "Focused"}},
+        "acpl_trend": [
+            {"week": "2026-04-15", "acpl": 60, "games": 5},
+            {"week": "2026-04-22", "acpl": 55, "games": 5},
+        ],
+        # Boundary: exactly 5 missed forks — the LLM should still
+        # cite "fork" because the prompt rule is ">=5", not ">5".
+        "motif_summary": {
+            "period_days": 30,
+            "total_critical_moves": 5,
+            "top_missed": "fork", "top_missed_count": 5,
+            "by_motif": [
+                {"motif": "fork", "missed": 5, "found": 0, "miss_rate": 100.0},
+            ],
+        },
+    }
+    conn.execute(
+        """INSERT INTO player_patterns
+        (player_id, period_start, period_end, stats_json, updated_at)
+        VALUES (?, ?, ?, ?, datetime('now'))""",
+        (pid, "2026-04-15", "2026-05-15", json.dumps(stats)),
+    )
+    conn.commit()
+    conn.close()
+    return (pid, db_path)
+
+
 class TestTrendSummaryCompliance:
     """v1.15.3: per-model real-API tests for trend summary output style.
 
@@ -354,19 +419,58 @@ class TestTrendSummaryCompliance:
                 f"First 300 chars: {summary[:300]!r}"
             )
 
-    def test_claude_opus_4_7_cites_top_motif(self, trend_stats_db):
-        """Claude opus-4-7 must cite hanging_piece by name in the
-        generated trend summary."""
-        if not os.getenv("ARRAKIS_ANTHROPIC_API_KEY"):
-            pytest.skip("ARRAKIS_ANTHROPIC_API_KEY not set")
+    def test_gpt_5_5_pro_borderline_threshold_cites_motif(
+        self, trend_stats_borderline_db,
+    ):
+        """v1.15.4 — replaces the v1.15.3 deferred Claude test (Claude
+        API rate-limited until 2026-06-01). Tests the prompt's
+        >=5-instance gate at its exact boundary: top_missed_count = 5.
+
+        The prompt rule is 'When the Recurring Tactical Themes section
+        shows a clear top miss (>= 5 instances), make ONE of the 3
+        practice recommendations specifically about that motif.' If
+        the LLM treats this as a soft suggestion only at high counts,
+        a borderline case (exactly 5) might silently skip the citation.
+        This test pins the boundary so future prompt edits can't
+        accidentally raise the gate.
+
+        Once Claude API access restores after 2026-06-01, add a
+        test_claude_opus_4_7_borderline_threshold variant alongside
+        for cross-provider compliance.
+        """
+        if not os.getenv("ARRAKIS_OPENAI_API_KEY"):
+            pytest.skip("ARRAKIS_OPENAI_API_KEY not set")
         from src.patterns import generate_trend_summary
 
-        pid, db_path = trend_stats_db
-        model = "claude-opus-4-7"
+        pid, db_path = trend_stats_borderline_db
+        model = "gpt-5.5-pro-2026-04-23"
         summary = generate_trend_summary(
-            pid, db_path=db_path, provider="claude", model=model,
+            pid, db_path=db_path, provider="openai", model=model,
         )
-        self._assert_compliant(summary, "claude", model)
+        # Use a borderline-tuned variant of _assert_compliant: fork
+        # instead of hanging_piece, count=5 instead of 13.
+        assert summary, f"openai:{model} returned an empty summary"
+        assert len(summary) > 600, (
+            f"openai:{model} returned a short summary ({len(summary)} "
+            f"chars); prompt asks for 3-4 paragraphs."
+        )
+        assert "Evan" in summary, "summary should address Evan by name"
+        # Fork must be cited by name even at exactly 5 instances
+        lower = summary.lower()
+        assert "fork" in lower, (
+            f"openai:{model} did NOT cite the top-missed motif (fork, 5 "
+            f"instances at the boundary). The prompt rule is '>= 5', not "
+            f"'> 5' — exactly 5 must trigger the citation.\n\n"
+            f"Full summary:\n{summary}"
+        )
+        # Plain-text compliance (v1.15.4 tightened prompt should hold)
+        stripped = summary.lstrip()
+        for bad in self.FORBIDDEN_PREAMBLE_PREFIXES:
+            assert not stripped.startswith(bad), (
+                f"openai:{model} v1.15.4 prompt compliance failed — "
+                f"summary starts with {bad!r}.\n"
+                f"First 300 chars: {summary[:300]!r}"
+            )
 
     def test_gpt_5_5_pro_cites_top_motif(self, trend_stats_db):
         """GPT-5.5-pro must cite hanging_piece by name. This is the

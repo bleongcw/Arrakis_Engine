@@ -4,6 +4,80 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.15.4] - 2026-05-28
+
+### Changed
+- **Tightened `TREND_PROMPT` and `RECENT_FORM_REVIEW_PROMPT` to
+  emphatically forbid JSON output.** v1.15.3's live testing surfaced
+  that gpt-5.5-pro occasionally returned the trend summary as a JSON
+  array of paragraph strings (`["para 1", "para 2", ...]`) instead
+  of plain prose. The frontend rendered correctly because v1.14.1's
+  `parseTrendSummary` already handles JSON arrays — but the prompt
+  said "no JSON" and the LLM was ignoring it. v1.15.4 fixes the
+  root cause.
+
+  Both prompts now open with a dedicated `## Output format (REQUIRED
+  — read carefully)` block listing explicit rules:
+  - Plain text only, 3-4 paragraphs (or 4 for journal reviews),
+    separated by blank lines
+  - NO JSON, NO arrays, NO objects — do not wrap in `[...]` or
+    `{...}`
+  - NO markdown headings (no `#`, `##`), NO bullet lists, NO code
+    fences
+  - NO preamble ("Sure,", "Certainly,", "Here is your summary:")
+  - The FIRST CHARACTER must be a letter — never an opening bracket,
+    brace, hash, code fence, or quotation mark
+  - NO trailing commentary
+
+  The closing instruction also gains a positive reinforcement: *"Begin
+  with the first word of paragraph 1; end with the last word of the
+  final paragraph."*
+
+  This mirrors the v1.14.1 client-side fix at the source. Journal
+  reviews (RECENT_FORM_REVIEW_PROMPT) were vulnerable to the same
+  bug class — patched proactively in the same ship.
+
+- **Live compliance test swap.** v1.15.3 deferred
+  `test_claude_opus_4_7_cites_top_motif` because the Anthropic API
+  hit a usage cap (regains 2026-06-01). Rather than leave a dead
+  test for a month, v1.15.4 replaces it with
+  `test_gpt_5_5_pro_borderline_threshold_cites_motif` — a more
+  meaningful coverage scenario that pins the prompt's
+  *"when >= 5 instances"* rule at its exact boundary
+  (`top_missed_count = 5`). Catches bugs the high-N test would miss
+  (e.g. a future prompt edit accidentally raising the gate to >5).
+
+  Once Claude API restores, the original cross-provider test can be
+  added back alongside the borderline test.
+
+### Tests
+- 2 new fast source-grep guards in
+  `tests/test_patterns.py::TestTrendPromptWiring`:
+  - `test_v15_4_trend_prompt_has_emphatic_no_json_block` — pins the
+    new format block + first-character guard + preamble-forbidden
+    wording so a future refactor can't silently strip them
+  - `test_v15_4_recent_form_review_prompt_has_emphatic_no_json_block`
+    — same lock for the journal review prompt
+- 1 swapped live test:
+  `tests/test_coach_live.py::TestTrendSummaryCompliance::test_gpt_5_5_pro_borderline_threshold_cites_motif`
+  (replaces the deferred Claude test). New fixture
+  `trend_stats_borderline_db` with `top_missed=fork, count=5`.
+- Backend total: 524 → **526** (2 new fast tests, 1 swapped live test)
+
+### Verified live
+All 3 live compliance tests pass against real gpt-5.5-pro-2026-04-23
+(363s total = ~2 min per call × 3 reasoning calls):
+- ✅ Top motif citation @ 13 instances — full pattern + JSON-free
+- ✅ Borderline citation @ exactly 5 instances — fork named at gate
+- ✅ Zero-motif data — no invented N-counts, no JSON shape
+
+The `FORBIDDEN_PREAMBLE_PREFIXES` strict check (`[`, `{`, `## `,
+"Sure,", etc.) now passes consistently — the v1.15.4 prompt
+tightening eliminated the JSON-array shape we observed during
+v1.15.3 development.
+
+---
+
 ## [1.15.3] - 2026-05-28
 
 ### Added (tests only — no production code changes)
