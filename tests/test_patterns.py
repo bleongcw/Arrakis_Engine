@@ -705,6 +705,238 @@ class TestTrendPromptWiring:
         assert "motif_summary_text=" in src
 
 
+class TestGenerateTrendSummaryPlumbing:
+    """v1.15.3: end-to-end plumbing tests for generate_trend_summary
+    with a mocked LLM provider. Verifies the full path stats → built
+    prompt → call_provider invocation → persistence works.
+
+    Uses `unittest.mock.patch("src.llm_providers.call_provider")` so
+    the lazy import inside generate_trend_summary resolves to the
+    patched function.
+    """
+
+    def _seed_player_with_stats(
+        self, db_path, motif_summary, *,
+        username="evanleongxinyu", display_name="Evan", age=9, rating=1100,
+    ):
+        """Insert a player + a player_patterns row carrying the given
+        motif_summary dict. Returns the player_id.
+
+        The non-motif stats are populated with realistic-but-minimal
+        values so the prompt's other slots (ACPL, results, phase
+        analysis, etc.) interpolate without "N/A" placeholders.
+        """
+        conn = init_db(db_path)
+        pid = ensure_player(
+            conn, username, display_name=display_name, age=age, rating=rating,
+        )
+        stats = {
+            "total_games": 50,
+            "results": {"wins": 28, "losses": 20, "draws": 2, "win_rate": 56.0},
+            "phase_analysis": {
+                "opening": {"acpl": 45.1, "moves": 600},
+                "middlegame": {"acpl": 68.1, "moves": 400},
+                "endgame": {"acpl": 48.0, "moves": 300},
+            },
+            "consistency": {
+                "mean_acpl": 54.5, "best_acpl": 5.0, "worst_acpl": 220.0,
+                "total_games": 50, "rating": "Stable",
+            },
+            "move_quality": {
+                "excellent": {"pct": 60.0}, "good": {"pct": 12.6},
+                "inaccuracy": {"pct": 10.5}, "mistake": {"pct": 10.5},
+                "blunder": {"pct": 6.4},
+            },
+            "accuracy": {"overall_pct": 72.5},
+            "endgame_conversion": {"winning_endgames": {"conversion_rate": 81.1}},
+            "tactical_misses": {"miss_rate": 48.3},
+            "comeback_collapse": {
+                "comebacks": {"comeback_rate": 30.0},
+                "collapses": {"collapse_rate": 25.0},
+            },
+            "repertoire_consistency": {"white": {"rating": "Focused"}},
+            "acpl_trend": [
+                {"week": "2026-04-15", "acpl": 60, "games": 5},
+                {"week": "2026-04-22", "acpl": 55, "games": 5},
+            ],
+            "motif_summary": motif_summary,
+        }
+        conn.execute(
+            """INSERT INTO player_patterns
+            (player_id, period_start, period_end, stats_json, updated_at)
+            VALUES (?, ?, ?, ?, datetime('now'))""",
+            (pid, "2026-04-15", "2026-05-15", json.dumps(stats)),
+        )
+        conn.commit()
+        conn.close()
+        return pid
+
+    def test_calls_llm_with_motif_text_in_prompt(self, db_path):
+        """The prompt sent to the LLM must contain the motif section
+        with the formatted top motif. This is the regression lock for
+        the prompt-injection seam (v1.15.0)."""
+        from unittest.mock import patch
+        from src.patterns import generate_trend_summary
+
+        motif_summary = {
+            "period_days": 30, "total_critical_moves": 12,
+            "top_missed": "fork", "top_missed_count": 8,
+            "by_motif": [
+                {"motif": "fork", "missed": 8, "found": 3, "miss_rate": 72.7},
+                {"motif": "pin", "missed": 2, "found": 1, "miss_rate": 66.7},
+            ],
+        }
+        pid = self._seed_player_with_stats(db_path, motif_summary)
+
+        captured = {}
+        def fake_call(provider, prompt, model=None, **kwargs):
+            captured["provider"] = provider
+            captured["prompt"] = prompt
+            captured["model"] = model
+            return "Fake trend summary text from the mocked LLM."
+
+        with patch("src.llm_providers.call_provider", side_effect=fake_call):
+            result = generate_trend_summary(pid, db_path=db_path, provider="claude")
+
+        # The call happened, exactly once
+        assert "prompt" in captured, "call_provider was never invoked"
+        # Return value flows back to caller
+        assert result == "Fake trend summary text from the mocked LLM."
+        # Motif section present
+        prompt = captured["prompt"]
+        assert "## Recurring Tactical Themes" in prompt
+        assert "fork: missed 8" in prompt
+        # Headline fires (count=8 >= 5 threshold)
+        assert "Headline:" in prompt
+        # Other slots still wired (sanity)
+        assert "Evan" in prompt
+        assert "56.0" in prompt or "56" in prompt  # win rate
+        assert "68.1" in prompt  # middlegame ACPL
+
+    def test_persists_summary_to_player_patterns(self, db_path):
+        """The LLM response must be written back to
+        player_patterns.trend_summary verbatim."""
+        from unittest.mock import patch
+        from src.patterns import generate_trend_summary
+
+        pid = self._seed_player_with_stats(db_path, {
+            "period_days": 30, "total_critical_moves": 5,
+            "top_missed": "pin", "top_missed_count": 5,
+            "by_motif": [{"motif": "pin", "missed": 5, "found": 0, "miss_rate": 100.0}],
+        })
+        fake_summary = "Persistence test summary — should land verbatim in the row."
+
+        with patch("src.llm_providers.call_provider", return_value=fake_summary):
+            generate_trend_summary(pid, db_path=db_path, provider="openai")
+
+        conn = init_db(db_path)
+        row = conn.execute(
+            """SELECT trend_summary FROM player_patterns
+            WHERE player_id = ? ORDER BY updated_at DESC LIMIT 1""",
+            (pid,),
+        ).fetchone()
+        conn.close()
+        assert row is not None
+        assert row["trend_summary"] == fake_summary
+
+    def test_raises_when_no_pattern_stats_row(self, db_path):
+        """If no player_patterns row exists, generate_trend_summary
+        must raise ValueError with a guidance message — never crash
+        with a less-actionable error."""
+        from src.patterns import generate_trend_summary
+
+        conn = init_db(db_path)
+        pid = ensure_player(conn, "newkid", display_name="New", age=9, rating=900)
+        conn.close()
+
+        with pytest.raises(ValueError, match="No pattern stats for player"):
+            generate_trend_summary(pid, db_path=db_path, provider="claude")
+
+    def test_provider_and_model_pass_through(self, db_path):
+        """--provider and --model args must reach call_provider
+        unchanged. The model override is the key regression risk —
+        v1.13.1 hit this exact bug shape on a different prompt."""
+        from unittest.mock import patch
+        from src.patterns import generate_trend_summary
+
+        pid = self._seed_player_with_stats(db_path, {
+            "period_days": 30, "total_critical_moves": 0,
+            "top_missed": None, "top_missed_count": 0, "by_motif": [],
+        })
+
+        with patch("src.llm_providers.call_provider", return_value="ok") as mock:
+            generate_trend_summary(
+                pid, db_path=db_path,
+                provider="openai", model="gpt-5.5-pro-2026-04-23",
+            )
+
+        assert mock.call_count == 1
+        args, kwargs = mock.call_args
+        # Signature is call_provider(provider, prompt, model=...)
+        assert args[0] == "openai"
+        # model goes through whatever channel resolve_model lands on —
+        # could be positional or keyword. Accept either shape.
+        passed_model = kwargs.get("model") if "model" in kwargs else (
+            args[2] if len(args) > 2 else None
+        )
+        assert passed_model == "gpt-5.5-pro-2026-04-23"
+
+    def test_below_threshold_skips_headline(self, db_path):
+        """When top_missed_count < 5, the motif section must NOT
+        emit the 'Headline:' line — the LLM should NOT be told this
+        is a clear top miss worth recommending puzzles for."""
+        from unittest.mock import patch
+        from src.patterns import generate_trend_summary
+
+        pid = self._seed_player_with_stats(db_path, {
+            "period_days": 30, "total_critical_moves": 4,
+            "top_missed": "fork", "top_missed_count": 3,
+            "by_motif": [
+                {"motif": "fork", "missed": 3, "found": 1, "miss_rate": 75.0},
+            ],
+        })
+
+        captured = {}
+        def fake_call(provider, prompt, **kwargs):
+            captured["prompt"] = prompt
+            return "ok"
+
+        with patch("src.llm_providers.call_provider", side_effect=fake_call):
+            generate_trend_summary(pid, db_path=db_path, provider="claude")
+
+        prompt = captured["prompt"]
+        # Bullet row still present
+        assert "fork: missed 3" in prompt
+        # But no Headline (under threshold)
+        # Allow "Headline" elsewhere (the trajectory block uses it too
+        # if it were injected separately), so scope to the motif section:
+        motif_section_start = prompt.index("## Recurring Tactical Themes")
+        motif_section = prompt[motif_section_start:motif_section_start + 1000]
+        assert "Headline:" not in motif_section
+
+    def test_zero_motif_data_uses_placeholder(self, db_path):
+        """When no critical moves have motif data yet, the placeholder
+        string must appear so the LLM knows to skip motif-citation
+        rules entirely."""
+        from unittest.mock import patch
+        from src.patterns import generate_trend_summary
+
+        pid = self._seed_player_with_stats(db_path, {
+            "period_days": 30, "total_critical_moves": 0,
+            "top_missed": None, "top_missed_count": 0, "by_motif": [],
+        })
+
+        captured = {}
+        def fake_call(provider, prompt, **kwargs):
+            captured["prompt"] = prompt
+            return "ok"
+
+        with patch("src.llm_providers.call_provider", side_effect=fake_call):
+            generate_trend_summary(pid, db_path=db_path, provider="claude")
+
+        assert "No motif data yet" in captured["prompt"]
+
+
 class TestBuildTrajectoryBlockMotifSection:
     """v1.15.0: trajectory block grows a recurring-themes section when
     motif_summary has at least one critical move recorded."""

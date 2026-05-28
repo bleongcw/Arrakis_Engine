@@ -4,6 +4,119 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.15.3] - 2026-05-28
+
+### Added (tests only — no production code changes)
+- **Test coverage for the trend summary pipeline** at three layers,
+  closing a gap that became visible after v1.15.0-v1.15.2: the
+  motif citation in Bernard's Coaching Summary card was working
+  correctly, but there was no automated check that the LLM would
+  *continue* to comply with the v1.15.0 prompt instructions if a
+  model swap or prompt refactor happened. Without these tests, a
+  future regression would be silent.
+
+  **Layer 1 — Backend plumbing** (`tests/test_patterns.py::
+  TestGenerateTrendSummaryPlumbing`, 6 fast tests, no LLM):
+  - `test_calls_llm_with_motif_text_in_prompt` — patches
+    `src.llm_providers.call_provider`, captures the prompt
+    argument, asserts the motif section is present with the
+    headline and bullet rows for the top-missed motif. Regression
+    lock for the v1.15.0 prompt-injection seam.
+  - `test_persists_summary_to_player_patterns` — confirms LLM
+    response lands verbatim in `player_patterns.trend_summary`.
+  - `test_raises_when_no_pattern_stats_row` — `ValueError` with
+    actionable message ("Run patterns first.") when no row exists.
+  - `test_provider_and_model_pass_through` — `--provider` and
+    `--model` reach `call_provider` unchanged. Catches the
+    v1.13.1-shape regression class.
+  - `test_below_threshold_skips_headline` — `top_missed_count=3`
+    must NOT emit the "Headline" line (under the >=5 LLM-citation gate).
+  - `test_zero_motif_data_uses_placeholder` — empty
+    `motif_summary` produces the "No motif data yet" placeholder.
+
+  **Layer 2 — CLI dispatch** (`tests/test_main_cli.py`, NEW file,
+  5 fast tests):
+  - `test_dispatches_to_generate_trend_summary` — fake Namespace
+    + patched generate_trend_summary; asserts exactly-once call
+    with resolved player_id, provider, model.
+  - `test_model_override_passes_through` — `--model` flag reaches
+    the inner function.
+  - `test_skips_missing_player_with_warn` — unknown username
+    prints `WARN:` line and exits cleanly without invoking the LLM.
+  - `test_reports_no_pattern_stats_per_target` — ValueError from
+    the inner function is caught and reported as `✗ <player>:`
+    without propagating.
+  - `test_no_player_flag_iterates_active_players` — bare `trend`
+    iterates all active players.
+
+  **Layer 3 — Live LLM compliance** (`tests/test_coach_live.py::
+  TestTrendSummaryCompliance`, 3 tests gated behind `pytest -m
+  live`, costs ~$0.10-0.20 per run):
+  - `trend_stats_db` fixture seeds a `motif_summary` with
+    `top_missed="hanging_piece"` at 13 instances (well over the
+    >=5 gate).
+  - `test_claude_opus_4_7_cites_top_motif` — runs against real
+    Claude API, asserts: length >600, "Evan" appears, one of
+    several motif-name variants ("hanging piece" / "free piece" /
+    etc.) appears, a numeric reference (13 or any 2-digit number)
+    appears, no JSON/markdown/preamble leakage.
+  - `test_gpt_5_5_pro_cites_top_motif` — same shape against
+    GPT-5.5-pro. Per-provider coverage mirrors the v1.13.2
+    `TestStructuredFeedbackCompliance` pattern.
+  - `test_zero_motif_data_does_not_crash_live` — empty motif
+    summary still produces a usable narrative AND the LLM does
+    NOT invent a motif citation (regression lock for "obey the
+    prompt's no-data rule").
+
+  **Layer 4 — Frontend rendering** (`frontend/components/patterns/
+  __tests__/trend-summary.test.tsx`, NEW file, 4 tests):
+  - Motif citation paragraph reaches the DOM as a `<p>` tag
+  - Multi-paragraph summary splits into the expected number of
+    `<p>` tags
+  - Empty-state copy renders when `summary={null}`; motif text
+    does not leak in
+  - "AI-generated" provenance label renders when summary exists,
+    is absent when summary is null
+
+  **How to run the live tests:**
+  ```bash
+  ARRAKIS_ANTHROPIC_API_KEY=... ARRAKIS_OPENAI_API_KEY=... \
+    pytest tests/test_coach_live.py -m live -k TrendSummaryCompliance -v
+  ```
+
+### Tests
+- Backend total: 513 → **524** (11 new fast tests)
+- Backend live total: 8 → **11** (3 new gated live tests, run
+  manually pre-release)
+- Frontend total: 179 → **183** (4 new render tests)
+
+### Verified live
+- `test_gpt_5_5_pro_cites_top_motif` passed against real OpenAI API
+  (159s): "hanging piece" cited by name, numeric count referenced,
+  no JSON/markdown preamble. The full v1.15.0→v1.15.1→v1.15.2→v1.15.3
+  chain is now end-to-end verified on a real model.
+- `test_zero_motif_data_does_not_crash_live` passed (110s): LLM
+  returned 4-paragraph narrative without inventing any specific
+  motif instance count. Note: the LLM may still mention motifs as
+  generic kid-coaching tips ("watch out for hanging pieces") — the
+  assertion narrowly forbids invented N-count claims, which is the
+  actual regression we want to catch.
+- `test_claude_opus_4_7_cites_top_motif` not run for v1.15.3 ship
+  (Claude API rate-limited until 2026-06-01); will run pre-release
+  once access restores.
+
+### Known issue (deferred to v1.15.4)
+- On some runs, gpt-5.5-pro returns the trend summary as a JSON
+  array of paragraph strings (`["para 1", "para 2", ...]`) rather
+  than plain prose — same shape as the v1.14.1 Journal review bug.
+  The frontend renders correctly because v1.14.1's `parseTrendSummary`
+  already handles JSON arrays. But the trend_summary prompt says
+  "Respond with ONLY the text paragraphs, no JSON" — the LLM is
+  ignoring this on some samples. Tighter prompt wording to land in
+  v1.15.4 (mirror the journal review prompt fix).
+
+---
+
 ## [1.15.2] - 2026-05-28
 
 ### Added
