@@ -245,13 +245,24 @@ def trend_stats_db(db_path):
         # The compliance signal: hanging_piece is far over the 5-instance
         # gate, so the prompt instructs the LLM to make ONE of its 3
         # practice recommendations specifically about this motif.
+        # v1.16.0: hanging_piece is also concentrated in middlegame
+        # (10 of 13 = 77%) so the prompt asks the LLM to name the
+        # phase in the recommendation.
         "motif_summary": {
             "period_days": 30,
             "total_critical_moves": 15,
             "top_missed": "hanging_piece", "top_missed_count": 13,
+            "top_missed_dominant_phase": "middlegame",
             "by_motif": [
-                {"motif": "hanging_piece", "missed": 13, "found": 2, "miss_rate": 86.7},
-                {"motif": "pin", "missed": 2, "found": 1, "miss_rate": 66.7},
+                {"motif": "hanging_piece", "missed": 13, "found": 2,
+                 "miss_rate": 86.7,
+                 "missed_by_phase": {"opening": 1, "middlegame": 10, "endgame": 2},
+                 "found_by_phase": {"opening": 0, "middlegame": 2, "endgame": 0},
+                 "dominant_missed_phase": "middlegame"},
+                {"motif": "pin", "missed": 2, "found": 1, "miss_rate": 66.7,
+                 "missed_by_phase": {"opening": 0, "middlegame": 1, "endgame": 1},
+                 "found_by_phase": {"opening": 0, "middlegame": 1, "endgame": 0},
+                 "dominant_missed_phase": None},
             ],
         },
     }
@@ -486,6 +497,45 @@ class TestTrendSummaryCompliance:
             pid, db_path=db_path, provider="openai", model=model,
         )
         self._assert_compliant(summary, "openai", model)
+
+    def test_v16_0_gpt_5_5_pro_cites_dominant_phase(self, trend_stats_db):
+        """v1.16.0: when the top-missed motif has a dominant phase
+        (here: hanging_piece concentrated in middlegame, 10 of 13),
+        the prompt's Paragraph 3 rule instructs the LLM to name the
+        phase in the practice recommendation. Reuses trend_stats_db
+        (modified in v1.16.0 to include phase splits), so the same
+        synthetic stats blob exercises BOTH motif-citation (v1.15.0)
+        AND phase-citation (v1.16.0).
+
+        Cost: ~$0.05 (one extra gpt-5.5-pro reasoning call per
+        full live-test pass).
+        """
+        if not os.getenv("ARRAKIS_OPENAI_API_KEY"):
+            pytest.skip("ARRAKIS_OPENAI_API_KEY not set")
+        from src.patterns import generate_trend_summary
+
+        pid, db_path = trend_stats_db
+        model = "gpt-5.5-pro-2026-04-23"
+        summary = generate_trend_summary(
+            pid, db_path=db_path, provider="openai", model=model,
+        )
+        # First, the motif citation must still hold (v1.15.0 compliance)
+        self._assert_compliant(summary, "openai", model)
+
+        # v1.16.0: the practice recommendation must name "middlegame"
+        # since the prompt explicitly says "name the phase in the
+        # recommendation" when there's a dominant phase tag. We accept
+        # any mention of "middlegame" in the summary as evidence of
+        # compliance — paraphrases like "middlegame puzzles" or "your
+        # middlegame play" are fine.
+        lower = summary.lower()
+        assert "middlegame" in lower, (
+            f"openai:{model} did NOT name the dominant phase "
+            f"(middlegame) anywhere in the summary, even though the "
+            f"prompt's v1.16.0 rule explicitly asks for a phase-named "
+            f"practice recommendation when the top motif has a "
+            f"dominant-phase tag.\n\nFull summary:\n{summary}"
+        )
 
     def test_zero_motif_data_does_not_crash_live(self, db_path):
         """When motif_summary.total_critical_moves == 0, the prompt

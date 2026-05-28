@@ -4,6 +4,99 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.16.0] - 2026-05-28
+
+### Added
+- **Phase × motif breakdown.** Each motif's missed/found counts are
+  now split by game phase (opening / middlegame / endgame), and the
+  aggregate flags when a motif's misses are *concentrated* in a
+  single phase. Coaching can now say *"you miss forks in the
+  middlegame but find them in the endgame"* instead of just *"you
+  miss forks."*
+
+  Each `by_motif[]` row gains three v1.16.0 fields (all additive —
+  pre-v1.16.0 stored patterns rows still render correctly):
+  ```python
+  "missed_by_phase": {"opening": 1, "middlegame": 10, "endgame": 2}
+  "found_by_phase":  {"opening": 0, "middlegame":  2, "endgame": 0}
+  "dominant_missed_phase": "middlegame"  # or None
+  ```
+  Plus a top-level `top_missed_dominant_phase` mirror of the top
+  motif's tag.
+
+  **Dominant phase rule:** total missed must be ≥3 AND one phase
+  must hold ≥60% of misses. Avoids over-claiming on small samples
+  (e.g. 1 missed fork in opening isn't a "concentration"); the 60%
+  threshold catches real patterns like 4/6 (67%) without flagging
+  noise like 3/6 (50%).
+
+- **LLM prompts surface the phase signal at every layer.**
+  - `TREND_PROMPT` motif section: each bullet now shows
+    `phase split: opening N, middlegame N, endgame N — X focus`,
+    plus a concentration sentence in the Headline ("concentrated in
+    middlegame (10 of 13)") when the top motif has a dominant phase
+  - `TREND_PROMPT` Paragraph 3 rule: when a motif's
+    practice-recommendation gate fires AND it has a "X focus" tag,
+    the LLM is asked to NAME the phase in the recommendation —
+    e.g. *"10 middlegame hanging-piece puzzles every day"* rather
+    than just *"hanging-piece puzzles"*
+  - `build_trajectory_block` (per-game coach prompt): the
+    "Recurring tactical themes" line gains a "— concentrated in
+    {phase}" suffix; `diag` dict gains a `motif_top_missed_phase`
+    key for `coaching_meta_json` introspection
+
+- **MotifThemes Patterns card** gains a phase breakdown line under
+  each non-zero motif row: `Opening 1 · Middlegame 10 · Endgame 2`.
+  When a motif has a dominant phase, that phase span is amber-bold
+  and prefixed with 🎯 (e.g. `🎯 Middlegame 10`). Pre-v1.16.0
+  patterns rows that lack phase fields still render — the line is
+  simply skipped.
+
+- **No schema migration.** All v1.16.0 changes are additive.
+  `move_analysis.move_number` is already populated;
+  `_classify_game_phase()` already exists. Aggregation runs at
+  compute time. Pre-v1.16.0 patterns rows just don't have the new
+  fields until next `python main.py patterns` run.
+
+### Verified live
+- ✅ `test_v16_0_gpt_5_5_pro_cites_dominant_phase` PASSED (166s
+  against real gpt-5.5-pro-2026-04-23). The full chain — phase
+  split flows into prompt → LLM names "middlegame" in the practice
+  recommendation → existing motif citation rules still hold —
+  works end-to-end on real APIs.
+
+### Tests
+- 15 new backend tests:
+  - `TestComputeMotifSummary::test_v16_0_*` × 7 — per-phase
+    tracking, dominance detection, balanced=None, insufficient-signal
+    handling, top passthrough, malformed-move-number safety, helper
+    direct boundary cases
+  - `TestFormatMotifSummaryForPrompt::test_v16_0_*` × 4 — phase
+    split lines, focus tag, no-focus-when-balanced, pre-v1.16.0
+    backward-compat
+  - `TestTrendPromptWiring::test_v16_0_prompt_paragraph3_mentions_phase_naming`
+  - `TestGenerateTrendSummaryPlumbing::test_v16_0_phase_data_in_prompt`
+  - `TestBuildTrajectoryBlockMotifSection::test_v16_0_*` × 2 —
+    block surfaces phase + diag passthrough; no-tag when balanced
+- 4 new frontend tests:
+  - phase breakdown line renders with counts
+  - dominant phase highlighted (🎯 + amber-bold)
+  - balanced / low-count motifs have no dominant highlight
+  - pre-v1.16.0 rows (no `missed_by_phase`) skip the phase line
+- 1 new live LLM compliance test (gated on `-m live`):
+  - phase-name citation in the practice recommendation
+- Backend: 526 → **541**. Frontend: 183 → **187**. Live: 11 → **12**.
+
+### Upgrade
+
+```bash
+python main.py patterns          # populate phase fields
+python main.py trend --player <username> --provider openai
+# the regenerated summary will name the phase when applicable
+```
+
+---
+
 ## [1.15.4] - 2026-05-28
 
 ### Changed

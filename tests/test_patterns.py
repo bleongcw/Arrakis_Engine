@@ -22,6 +22,7 @@ from src.patterns import (
     _compute_opening_acpl,
     _compute_tactical_misses,
     _compute_motif_summary,
+    _dominant_phase,
     _format_motif_summary_for_prompt,
     _compute_repertoire_consistency,
     _acpl_trend_direction,
@@ -586,6 +587,147 @@ class TestComputeMotifSummary:
         assert result["total_critical_moves"] == 1
         assert result["top_missed"] is None
 
+    # ── v1.16.0 phase × motif tests ─────────────────────────────────
+
+    def test_v16_0_per_phase_tracking(self):
+        """v1.16.0: each motif instance is bucketed by game phase
+        derived from move_number — opening (≤15), middlegame (≤30),
+        endgame (>30)."""
+        games = [{"id": 1, "player_color": "white", "date_played": _today()}]
+        moves = {1: [
+            # Opening (move 8)
+            {"side": "white", "move_number": 8,
+             "motifs_json": _mj(best=["fork"], missed=["fork"])},
+            # Middlegame (move 22)
+            {"side": "white", "move_number": 22,
+             "motifs_json": _mj(best=["fork"], missed=["fork"])},
+            # Endgame (move 40)
+            {"side": "white", "move_number": 40,
+             "motifs_json": _mj(best=["fork"], missed=["fork"])},
+        ]}
+        result = _compute_motif_summary(games, moves, period_days=30)
+        fork = next(e for e in result["by_motif"] if e["motif"] == "fork")
+        assert fork["missed_by_phase"] == {
+            "opening": 1, "middlegame": 1, "endgame": 1,
+        }
+        assert fork["found_by_phase"] == {
+            "opening": 0, "middlegame": 0, "endgame": 0,
+        }
+        # Total missed sums correctly across phases
+        assert fork["missed"] == 3
+        # Even 3-way split → no dominant phase
+        assert fork["dominant_missed_phase"] is None
+
+    def test_v16_0_dominant_phase_detection(self):
+        """v1.16.0: 8 of 10 missed forks land in middlegame → dominant."""
+        games = [{"id": 1, "player_color": "white", "date_played": _today()}]
+        moves_list = []
+        # 8 middlegame misses (move 16-29)
+        for mn in range(16, 24):
+            moves_list.append({"side": "white", "move_number": mn,
+                               "motifs_json": _mj(best=["fork"], missed=["fork"])})
+        # 2 endgame misses (move 35, 40)
+        for mn in (35, 40):
+            moves_list.append({"side": "white", "move_number": mn,
+                               "motifs_json": _mj(best=["fork"], missed=["fork"])})
+        moves = {1: moves_list}
+        result = _compute_motif_summary(games, moves, period_days=30)
+        fork = next(e for e in result["by_motif"] if e["motif"] == "fork")
+        assert fork["missed_by_phase"]["middlegame"] == 8
+        assert fork["missed_by_phase"]["endgame"] == 2
+        # 8/10 = 80% ≥ 60% threshold → middlegame is dominant
+        assert fork["dominant_missed_phase"] == "middlegame"
+
+    def test_v16_0_no_dominant_when_balanced(self):
+        """v1.16.0: 3/4/3 split is too balanced to call dominant."""
+        games = [{"id": 1, "player_color": "white", "date_played": _today()}]
+        moves_list = []
+        for mn in (5, 8, 12):       # 3 opening
+            moves_list.append({"side": "white", "move_number": mn,
+                               "motifs_json": _mj(best=["fork"], missed=["fork"])})
+        for mn in (18, 22, 26, 28):  # 4 middlegame
+            moves_list.append({"side": "white", "move_number": mn,
+                               "motifs_json": _mj(best=["fork"], missed=["fork"])})
+        for mn in (35, 38, 42):     # 3 endgame
+            moves_list.append({"side": "white", "move_number": mn,
+                               "motifs_json": _mj(best=["fork"], missed=["fork"])})
+        moves = {1: moves_list}
+        result = _compute_motif_summary(games, moves, period_days=30)
+        fork = next(e for e in result["by_motif"] if e["motif"] == "fork")
+        # Top phase is middlegame with 4/10 = 40% — below 60%
+        assert fork["dominant_missed_phase"] is None
+
+    def test_v16_0_no_dominant_when_insufficient_signal(self):
+        """v1.16.0: total missed < 3 → None even when 100% in one phase.
+        Avoids over-claiming on noisy small samples."""
+        games = [{"id": 1, "player_color": "white", "date_played": _today()}]
+        moves = {1: [
+            {"side": "white", "move_number": 22,
+             "motifs_json": _mj(best=["fork"], missed=["fork"])},
+            {"side": "white", "move_number": 24,
+             "motifs_json": _mj(best=["fork"], missed=["fork"])},
+        ]}
+        result = _compute_motif_summary(games, moves, period_days=30)
+        fork = next(e for e in result["by_motif"] if e["motif"] == "fork")
+        assert fork["missed"] == 2
+        # Both misses in middlegame (100%) but total < 3 → not dominant
+        assert fork["dominant_missed_phase"] is None
+
+    def test_v16_0_top_missed_dominant_phase_passes_through(self):
+        """v1.16.0: top-level top_missed_dominant_phase mirrors the
+        top motif's per-row dominant_missed_phase field."""
+        games = [{"id": 1, "player_color": "white", "date_played": _today()}]
+        moves_list = []
+        # 5 middlegame hanging_piece misses → dominant in middlegame
+        for mn in (16, 18, 20, 22, 24):
+            moves_list.append({"side": "white", "move_number": mn,
+                               "motifs_json": _mj(best=["hanging_piece"],
+                                                  missed=["hanging_piece"])})
+        # 1 opening pin miss (not the top motif)
+        moves_list.append({"side": "white", "move_number": 8,
+                           "motifs_json": _mj(best=["pin"], missed=["pin"])})
+        moves = {1: moves_list}
+        result = _compute_motif_summary(games, moves, period_days=30)
+        assert result["top_missed"] == "hanging_piece"
+        assert result["top_missed_count"] == 5
+        assert result["top_missed_dominant_phase"] == "middlegame"
+
+    def test_v16_0_unknown_phase_does_not_crash(self):
+        """v1.16.0: a move with a malformed move_number is skipped
+        for phase counting; the rest of the moves are still processed."""
+        games = [{"id": 1, "player_color": "white", "date_played": _today()}]
+        moves = {1: [
+            # Bad move_number — skipped entirely
+            {"side": "white", "move_number": None,
+             "motifs_json": _mj(best=["fork"], missed=["fork"])},
+            # Good move — counted
+            {"side": "white", "move_number": 22,
+             "motifs_json": _mj(best=["fork"], missed=["fork"])},
+        ]}
+        result = _compute_motif_summary(games, moves, period_days=30)
+        fork = next(e for e in result["by_motif"] if e["motif"] == "fork")
+        # Only the valid move counted; total_critical_moves still bumped
+        # for both moves (the parse succeeded; only the phase-bucket
+        # bump was skipped on the malformed one).
+        assert fork["missed_by_phase"]["middlegame"] == 1
+        assert fork["missed"] == 1
+
+    def test_v16_0_dominant_phase_helper_directly(self):
+        """v1.16.0: direct unit tests on _dominant_phase since it's
+        a small pure function with clear boundary conditions."""
+        # Empty → None (also < 3 total)
+        assert _dominant_phase({"opening": 0, "middlegame": 0, "endgame": 0}) is None
+        # Total < 3 → None even with concentration
+        assert _dominant_phase({"opening": 2, "middlegame": 0, "endgame": 0}) is None
+        # Exactly 3, single phase → dominant
+        assert _dominant_phase({"opening": 3, "middlegame": 0, "endgame": 0}) == "opening"
+        # 60% exactly → dominant (the boundary case)
+        assert _dominant_phase({"opening": 0, "middlegame": 6, "endgame": 4}) == "middlegame"
+        # Just under 60% → None
+        assert _dominant_phase({"opening": 0, "middlegame": 5, "endgame": 4}) is None
+        # Balanced → None
+        assert _dominant_phase({"opening": 3, "middlegame": 4, "endgame": 3}) is None
+
 
 class TestMotifSummaryInPlayerPatterns:
     """Confirm _compute_motif_summary is wired into compute_player_patterns."""
@@ -680,6 +822,79 @@ class TestFormatMotifSummaryForPrompt:
             if line.strip().startswith("- pin"):
                 pytest.fail("Zero-count motif should be skipped: %r" % line)
 
+    # ── v1.16.0 phase × motif formatter tests ──────────────────────
+
+    def test_v16_0_phase_split_in_bullet_lines(self):
+        text = _format_motif_summary_for_prompt({
+            "total_critical_moves": 15,
+            "top_missed": "hanging_piece", "top_missed_count": 13,
+            "top_missed_dominant_phase": "middlegame",
+            "by_motif": [
+                {"motif": "hanging_piece", "missed": 13, "found": 2,
+                 "miss_rate": 86.7,
+                 "missed_by_phase": {"opening": 1, "middlegame": 10, "endgame": 2},
+                 "dominant_missed_phase": "middlegame"},
+            ],
+        })
+        # Phase split appears in the bullet line
+        assert "phase split:" in text
+        assert "opening 1" in text
+        assert "middlegame 10" in text
+        assert "endgame 2" in text
+
+    def test_v16_0_focus_tag_when_dominant(self):
+        text = _format_motif_summary_for_prompt({
+            "total_critical_moves": 10,
+            "top_missed": "fork", "top_missed_count": 8,
+            "top_missed_dominant_phase": "middlegame",
+            "by_motif": [
+                {"motif": "fork", "missed": 8, "found": 0, "miss_rate": 100.0,
+                 "missed_by_phase": {"opening": 0, "middlegame": 7, "endgame": 1},
+                 "dominant_missed_phase": "middlegame"},
+            ],
+        })
+        # Focus tag suffix on the bullet line
+        assert "middlegame focus" in text
+        # Concentration sentence on the Headline
+        assert "concentrated in middlegame" in text
+        assert "7 of 8" in text
+
+    def test_v16_0_no_focus_tag_when_balanced(self):
+        text = _format_motif_summary_for_prompt({
+            "total_critical_moves": 5,
+            "top_missed": "fork", "top_missed_count": 5,
+            "top_missed_dominant_phase": None,  # balanced
+            "by_motif": [
+                {"motif": "fork", "missed": 5, "found": 0, "miss_rate": 100.0,
+                 "missed_by_phase": {"opening": 2, "middlegame": 1, "endgame": 2},
+                 "dominant_missed_phase": None},
+            ],
+        })
+        # Phase split STILL appears (data exists)
+        assert "phase split:" in text
+        # But no focus tag suffix
+        assert "focus" not in text.lower()
+        # And no concentration sentence in headline
+        assert "concentrated in" not in text
+
+    def test_v16_0_pre_v16_data_renders_without_phase_lines(self):
+        """A stats_json blob written by v1.15.0 (no missed_by_phase)
+        must still format without crashing — degrades gracefully."""
+        text = _format_motif_summary_for_prompt({
+            "total_critical_moves": 5,
+            "top_missed": "fork", "top_missed_count": 5,
+            # No top_missed_dominant_phase key at all (pre-v1.16.0)
+            "by_motif": [
+                # No missed_by_phase / dominant_missed_phase keys
+                {"motif": "fork", "missed": 5, "found": 0, "miss_rate": 100.0},
+            ],
+        })
+        # The bullet still renders with the v1.15.0 shape
+        assert "fork: missed 5×" in text
+        # No phase split (data missing — defensive None-check holds)
+        assert "phase split:" not in text
+        assert "focus" not in text.lower()
+
 
 class TestTrendPromptWiring:
     """Source-grep guards so the motif slot can't be silently removed
@@ -733,6 +948,20 @@ class TestTrendPromptWiring:
             "FIRST CHARACTER" in RECENT_FORM_REVIEW_PROMPT
             or "first character" in RECENT_FORM_REVIEW_PROMPT.lower()
         )
+
+    def test_v16_0_prompt_paragraph3_mentions_phase_naming(self):
+        """v1.16.0 — source-grep guard that Paragraph 3 instructs the
+        LLM to name the phase when a motif has a 'X focus' tag."""
+        from src.patterns import TREND_PROMPT
+        # The "name the phase" rule should mention all 3 phases
+        # (existence proof — wording can evolve but the concept must
+        # stay grounded in the canonical opening/middlegame/endgame
+        # vocabulary).
+        assert "v1.16.0" in TREND_PROMPT
+        assert "focus" in TREND_PROMPT.lower()
+        # The rule names at least one concrete phase example
+        lower = TREND_PROMPT.lower()
+        assert any(p in lower for p in ("middlegame", "opening", "endgame"))
 
 
 class TestGenerateTrendSummaryPlumbing:
@@ -966,6 +1195,43 @@ class TestGenerateTrendSummaryPlumbing:
 
         assert "No motif data yet" in captured["prompt"]
 
+    def test_v16_0_phase_data_in_prompt(self, db_path):
+        """v1.16.0: when stats include a dominant-phase motif, the
+        prompt sent to the LLM contains the phase split lines AND
+        the concentration sentence in the Headline."""
+        from unittest.mock import patch
+        from src.patterns import generate_trend_summary
+
+        pid = self._seed_player_with_stats(db_path, {
+            "period_days": 30, "total_critical_moves": 15,
+            "top_missed": "hanging_piece", "top_missed_count": 13,
+            "top_missed_dominant_phase": "middlegame",
+            "by_motif": [
+                {"motif": "hanging_piece", "missed": 13, "found": 2,
+                 "miss_rate": 86.7,
+                 "missed_by_phase": {"opening": 1, "middlegame": 10, "endgame": 2},
+                 "dominant_missed_phase": "middlegame"},
+            ],
+        })
+
+        captured = {}
+        def fake_call(provider, prompt, **kwargs):
+            captured["prompt"] = prompt
+            return "ok"
+
+        with patch("src.llm_providers.call_provider", side_effect=fake_call):
+            generate_trend_summary(pid, db_path=db_path, provider="claude")
+
+        prompt = captured["prompt"]
+        # The phase split line lands inside the motif section
+        assert "phase split:" in prompt
+        assert "middlegame 10" in prompt
+        # Focus tag suffix is present
+        assert "middlegame focus" in prompt
+        # Concentration sentence on the Headline
+        assert "concentrated in middlegame" in prompt
+        assert "10 of 13" in prompt
+
 
 class TestBuildTrajectoryBlockMotifSection:
     """v1.15.0: trajectory block grows a recurring-themes section when
@@ -1031,6 +1297,75 @@ class TestBuildTrajectoryBlockMotifSection:
         conn.close()
         assert "Recurring tactical themes" not in block
         assert diag["motif_top_missed"] is None
+
+    def test_v16_0_trajectory_block_includes_phase_tag(self, db_path):
+        """v1.16.0: trajectory block surfaces dominant phase + diag
+        gets motif_top_missed_phase key when the top motif has a
+        concentration."""
+        conn = init_db(db_path)
+        pid = ensure_player(conn, "ev16", display_name="Evan", age=9, rating=1100)
+        stats = {
+            "total_games": 50,
+            "phase_analysis": {"middlegame": {"acpl": 70, "moves": 200}},
+            "consistency": {"mean_acpl": 60, "total_games": 50, "rating": "Stable"},
+            "motif_summary": {
+                "period_days": 30,
+                "total_critical_moves": 15,
+                "top_missed": "hanging_piece", "top_missed_count": 13,
+                "top_missed_dominant_phase": "middlegame",
+                "by_motif": [
+                    {"motif": "hanging_piece", "missed": 13, "found": 2,
+                     "miss_rate": 86.7,
+                     "missed_by_phase": {"opening": 1, "middlegame": 10, "endgame": 2},
+                     "dominant_missed_phase": "middlegame"},
+                ],
+            },
+        }
+        conn.execute(
+            """INSERT INTO player_patterns
+            (player_id, period_start, period_end, stats_json, updated_at)
+            VALUES (?, ?, ?, ?, datetime('now'))""",
+            (pid, "2026-04-01", "2026-04-30", json.dumps(stats)),
+        )
+        conn.commit()
+        block, diag = build_trajectory_block(conn, pid)
+        conn.close()
+        assert "concentrated in middlegame" in block
+        assert diag["motif_top_missed_phase"] == "middlegame"
+
+    def test_v16_0_trajectory_no_phase_tag_when_no_dominance(self, db_path):
+        """v1.16.0: when there's no dominant phase, the
+        'concentrated in X' suffix must NOT appear; diag's
+        motif_top_missed_phase stays None."""
+        conn = init_db(db_path)
+        pid = ensure_player(conn, "ev16b", display_name="Evan", age=9, rating=1100)
+        stats = {
+            "total_games": 50,
+            "phase_analysis": {"middlegame": {"acpl": 70, "moves": 200}},
+            "consistency": {"mean_acpl": 60, "total_games": 50, "rating": "Stable"},
+            "motif_summary": {
+                "period_days": 30,
+                "total_critical_moves": 8,
+                "top_missed": "fork", "top_missed_count": 6,
+                "top_missed_dominant_phase": None,  # balanced
+                "by_motif": [
+                    {"motif": "fork", "missed": 6, "found": 0, "miss_rate": 100.0,
+                     "missed_by_phase": {"opening": 2, "middlegame": 2, "endgame": 2},
+                     "dominant_missed_phase": None},
+                ],
+            },
+        }
+        conn.execute(
+            """INSERT INTO player_patterns
+            (player_id, period_start, period_end, stats_json, updated_at)
+            VALUES (?, ?, ?, ?, datetime('now'))""",
+            (pid, "2026-04-01", "2026-04-30", json.dumps(stats)),
+        )
+        conn.commit()
+        block, diag = build_trajectory_block(conn, pid)
+        conn.close()
+        assert "concentrated in" not in block
+        assert diag["motif_top_missed_phase"] is None
 
 
 class TestComputeRepertoireConsistency:

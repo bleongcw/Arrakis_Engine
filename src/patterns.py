@@ -1506,30 +1506,47 @@ def _compute_motif_summary(games: list[dict],
         preferred a different idea, so the "credit" is ambiguous.
       - `miss_rate` = missed / (missed + found) * 100.
 
-    Returned dict shape (stable v1.15.0 contract — consumed by
-    `generate_trend_summary`, `build_trajectory_block`, and the
-    frontend `<MotifThemes>` card):
+    Returned dict shape (additive evolution — v1.15.0 fields all
+    still present, v1.16.0 adds phase splits and dominant-phase tags):
       {
         "period_days": 30,
-        "total_critical_moves": N,        # moves with motifs_json in window
-        "by_motif": [                     # sorted: missed desc, then found desc
-            {"motif": "fork", "missed": 8, "found": 3, "miss_rate": 72.7},
+        "total_critical_moves": N,         # moves with motifs_json in window
+        "by_motif": [                      # sorted: missed desc, then found desc
+            {
+              "motif": "fork",
+              "missed": 8, "found": 3, "miss_rate": 72.7,
+              # v1.16.0:
+              "missed_by_phase": {"opening": 1, "middlegame": 5, "endgame": 2},
+              "found_by_phase":  {"opening": 0, "middlegame": 3, "endgame": 0},
+              "dominant_missed_phase": "middlegame",  # or None
+            },
             ...
         ],
-        "top_missed": "fork" | None,      # motif with highest missed; None if 0
-        "top_missed_count": 8,            # 0 when top_missed is None
+        "top_missed": "fork" | None,
+        "top_missed_count": 8,
+        # v1.16.0:
+        "top_missed_dominant_phase": "middlegame",  # or None
       }
 
     Empty/degenerate cases:
       - No games or no motifs_json anywhere → `total_critical_moves: 0`,
-        `by_motif: []`, `top_missed: None`, `top_missed_count: 0`.
+        `by_motif` has 8 entries with all-zero counts and
+        `dominant_missed_phase = None`. `top_missed*` are None/0.
 
-    v1.15.0+
+    v1.15.0+ / v1.16.0 (phase splits)
     """
     cutoff_date = (datetime.now() - timedelta(days=period_days)).strftime("%Y-%m-%d")
 
-    missed_counts: dict[str, int] = {m: 0 for m in _MOTIF_IDENTIFIERS}
-    found_counts: dict[str, int] = {m: 0 for m in _MOTIF_IDENTIFIERS}
+    # v1.16.0: phase-keyed buckets. Each motif tracks
+    # {opening: int, middlegame: int, endgame: int} for both missed
+    # and found. Total = sum(phase_counts.values()).
+    _zero_phases = lambda: {"opening": 0, "middlegame": 0, "endgame": 0}
+    missed_by_phase: dict[str, dict[str, int]] = {
+        m: _zero_phases() for m in _MOTIF_IDENTIFIERS
+    }
+    found_by_phase: dict[str, dict[str, int]] = {
+        m: _zero_phases() for m in _MOTIF_IDENTIFIERS
+    }
     total_critical_moves = 0
 
     for g in games:
@@ -1572,17 +1589,26 @@ def _compute_motif_summary(games: list[dict],
             played_set = set(played)
             best_set = set(best)
 
+            # v1.16.0: classify the move's phase once; bump phase buckets.
+            move_no = m.get("move_number")
+            try:
+                phase = _classify_game_phase(int(move_no))
+            except (TypeError, ValueError):
+                continue  # malformed move_number — skip this move's counts
+
             for motif in missed:
-                if motif in missed_counts:
-                    missed_counts[motif] += 1
+                if motif in missed_by_phase:
+                    missed_by_phase[motif][phase] += 1
             for motif in best_set & played_set:
-                if motif in found_counts:
-                    found_counts[motif] += 1
+                if motif in found_by_phase:
+                    found_by_phase[motif][phase] += 1
 
     by_motif: list[dict] = []
     for motif in _MOTIF_IDENTIFIERS:
-        m = missed_counts[motif]
-        f = found_counts[motif]
+        m_phases = missed_by_phase[motif]
+        f_phases = found_by_phase[motif]
+        m = sum(m_phases.values())
+        f = sum(f_phases.values())
         denom = m + f
         miss_rate = round(m / denom * 100, 1) if denom else 0.0
         by_motif.append({
@@ -1590,6 +1616,12 @@ def _compute_motif_summary(games: list[dict],
             "missed": m,
             "found": f,
             "miss_rate": miss_rate,
+            # v1.16.0: per-phase splits. Always present (each phase is
+            # 0 when no instances landed there) so the frontend can
+            # rely on the keys existing.
+            "missed_by_phase": m_phases,
+            "found_by_phase": f_phases,
+            "dominant_missed_phase": _dominant_phase(m_phases),
         })
 
     # Sort: most-missed first, then most-found as tiebreaker.
@@ -1598,6 +1630,10 @@ def _compute_motif_summary(games: list[dict],
     top = by_motif[0] if by_motif else None
     top_missed = top["motif"] if top and top["missed"] > 0 else None
     top_missed_count = top["missed"] if top and top["missed"] > 0 else 0
+    # v1.16.0: pass through the top motif's dominant phase (or None).
+    top_missed_dominant_phase = (
+        top["dominant_missed_phase"] if top and top["missed"] > 0 else None
+    )
 
     return {
         "period_days": period_days,
@@ -1605,7 +1641,33 @@ def _compute_motif_summary(games: list[dict],
         "by_motif": by_motif,
         "top_missed": top_missed,
         "top_missed_count": top_missed_count,
+        # v1.16.0: dominant phase of the top-missed motif. None when the
+        # top motif's missed instances are <3 OR no phase has ≥60% share.
+        "top_missed_dominant_phase": top_missed_dominant_phase,
     }
+
+
+def _dominant_phase(phase_counts: dict[str, int]) -> str | None:
+    """v1.16.0: return the phase ("opening" / "middlegame" / "endgame")
+    that holds ≥60% of `phase_counts.values()`, OR None if no phase
+    dominates or the total signal is too small.
+
+    Rules:
+      - Total < 3 → None (insufficient signal; one or two missed
+        instances aren't a "concentration", they're noise).
+      - Phase with max count ≥ 60% of total → that phase.
+      - Otherwise → None (counts are too balanced to call dominant).
+
+    The 60% threshold matches "a clear majority but not unanimous":
+    4/6 (67%) feels like a real pattern; 3/6 (50%) doesn't.
+    """
+    total = sum(phase_counts.values())
+    if total < 3:
+        return None
+    top_phase, top_count = max(phase_counts.items(), key=lambda kv: kv[1])
+    if top_count / total >= 0.6:
+        return top_phase
+    return None
 
 
 def _compute_tactical_misses(games: list[dict],
@@ -1829,6 +1891,7 @@ Requirements:
 - Paragraph 2: Areas that need improvement. Reference the weakest phase, common mistakes, or tactical misses.
 - Paragraph 3: 3 specific, actionable practice recommendations appropriate for a {age}-year-old {tier_label}-level player.
   - v1.15.0: When the Recurring Tactical Themes section shows a clear top miss (>= 5 instances), make ONE of the 3 practice recommendations specifically about that motif (name it: "fork puzzles", "pin exercises", etc.). If no theme has reached 5 instances, ignore this rule and pick 3 general recommendations.
+  - v1.16.0: When that motif ALSO has a "X focus" tag in the Recurring Tactical Themes block (concentrated in one phase — opening, middlegame, or endgame), name the phase in the recommendation. Examples: "10 middlegame hanging-piece puzzles every day" instead of just "hanging-piece puzzles"; "spot opening pins in your first 10 moves" instead of "spot pins". If no phase focus is tagged, ignore this rule and keep the recommendation general.
 - Paragraph 4: Encouragement and growth mindset message.
 - Keep language age-appropriate for {age} years old.
 - Be warm but professional. Concrete, not vague.
@@ -1840,6 +1903,12 @@ def _format_motif_summary_for_prompt(motif_summary: dict) -> str:
     """v1.15.0: format the motif_summary aggregate as plain lines for the
     LLM prompt. One line per non-zero motif, sorted missed-desc, plus a
     headline if any motif has reached the ≥5 instance "clear top" bar.
+
+    v1.16.0: each line now includes a per-phase split (opening N,
+    middlegame N, endgame N) and a trailing "— X focus" tag when the
+    motif is concentrated (≥60%) in a single phase. The Headline also
+    grows a "concentrated in X (P of T)" sentence when the top motif
+    has a dominant phase.
 
     Returns "  No motif data yet — coach more games or run rescan-motifs."
     when the aggregate has zero critical moves in the window. The leading
@@ -1856,16 +1925,50 @@ def _format_motif_summary_for_prompt(motif_summary: dict) -> str:
     lines = []
     top = motif_summary.get("top_missed")
     top_count = motif_summary.get("top_missed_count", 0)
+    top_phase = motif_summary.get("top_missed_dominant_phase")
     if top and top_count >= 5:
-        lines.append(
-            f"  Headline: {top} is the most-missed theme ({top_count} instances in the last 30 days)."
+        headline = (
+            f"  Headline: {top} is the most-missed theme "
+            f"({top_count} instances in the last 30 days)."
         )
+        # v1.16.0: when the top motif has a dominant phase, append a
+        # concentration sentence inside the Headline so the LLM can
+        # spot the phase-naming signal without scanning bullets.
+        if top_phase:
+            # Find the phase count for clearer attribution
+            top_row = next(
+                (e for e in nonzero if e.get("motif") == top),
+                None,
+            )
+            if top_row:
+                phase_count = (top_row.get("missed_by_phase") or {}).get(top_phase, 0)
+                headline = headline.rstrip(".")
+                headline += (
+                    f" — concentrated in {top_phase} "
+                    f"({phase_count} of {top_count})."
+                )
+        lines.append(headline)
 
     for e in nonzero:
-        lines.append(
+        base = (
             f"  - {e['motif']}: missed {e['missed']}× / found {e['found']}× "
             f"({e['miss_rate']}% miss rate)"
         )
+        # v1.16.0: append phase split when data is present (always set
+        # by the v1.16.0 aggregator; defensive None-check for forward
+        # compatibility with pre-v1.16.0 stored stats_json).
+        m_phases = e.get("missed_by_phase")
+        if isinstance(m_phases, dict):
+            base += (
+                f"; phase split: opening {m_phases.get('opening', 0)}, "
+                f"middlegame {m_phases.get('middlegame', 0)}, "
+                f"endgame {m_phases.get('endgame', 0)}"
+            )
+            # Focus tag when this motif has a dominant phase
+            dom = e.get("dominant_missed_phase")
+            if dom:
+                base += f" — {dom} focus"
+        lines.append(base)
     return "\n".join(lines)
 
 
@@ -2484,9 +2587,11 @@ def build_trajectory_block(
     lines.append("")
 
     # v1.15.0: recurring tactical themes block (only when motif data exists).
+    # v1.16.0: extended with dominant-phase tag when applicable.
     motif_top = motif_summary.get("top_missed")
     motif_top_count = motif_summary.get("top_missed_count", 0)
     motif_total = motif_summary.get("total_critical_moves", 0)
+    motif_top_phase = motif_summary.get("top_missed_dominant_phase")
     if motif_total > 0:
         nonzero_motifs = [
             e for e in (motif_summary.get("by_motif") or [])
@@ -2495,9 +2600,11 @@ def build_trajectory_block(
         if nonzero_motifs:
             lines.append("**Recurring tactical themes (last 30 days):**")
             if motif_top and motif_top_count > 0:
-                lines.append(
-                    f"- Most-missed: {motif_top} ({motif_top_count} instances)"
-                )
+                # v1.16.0: append phase tag when dominant
+                line = f"- Most-missed: {motif_top} ({motif_top_count} instances)"
+                if motif_top_phase:
+                    line += f" — concentrated in {motif_top_phase}"
+                lines.append(line)
             also = [
                 f"{e['motif']} ({e['missed']})"
                 for e in nonzero_motifs
@@ -2514,6 +2621,9 @@ def build_trajectory_block(
         "trend_direction": trend_direction,
         # v1.15.0: most-missed motif tag (None when no critical moves).
         "motif_top_missed": motif_top if motif_top_count > 0 else None,
+        # v1.16.0: dominant phase of the top-missed motif (None when
+        # the top motif's misses don't concentrate ≥60% in one phase).
+        "motif_top_missed_phase": motif_top_phase if motif_top_count > 0 else None,
     }
     return "\n".join(lines), diag
 

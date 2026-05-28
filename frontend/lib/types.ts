@@ -266,6 +266,7 @@ export interface PatternStats {
   tactical_misses?: unknown;
   // v1.15.0: per-motif aggregation across the same 30-day window.
   // Drives the <MotifThemes> Patterns card.
+  // v1.16.0: per-motif rows gain phase splits + dominant_missed_phase.
   motif_summary?: {
     period_days: number;
     total_critical_moves: number;
@@ -274,9 +275,15 @@ export interface PatternStats {
       missed: number;
       found: number;
       miss_rate: number;
+      // v1.16.0 (optional — absent on pre-v1.16.0 patterns rows)
+      missed_by_phase?: { opening: number; middlegame: number; endgame: number };
+      found_by_phase?: { opening: number; middlegame: number; endgame: number };
+      dominant_missed_phase?: "opening" | "middlegame" | "endgame" | null;
     }>;
     top_missed: string | null;
     top_missed_count: number;
+    // v1.16.0:
+    top_missed_dominant_phase?: "opening" | "middlegame" | "endgame" | null;
   };
   repertoire_consistency?: unknown;
   // Time pressure

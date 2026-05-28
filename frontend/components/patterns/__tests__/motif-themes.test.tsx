@@ -9,13 +9,43 @@ const FULL_DATA: MotifSummaryData = {
   total_critical_moves: 12,
   top_missed: "fork",
   top_missed_count: 8,
+  // v1.16.0:
+  top_missed_dominant_phase: "middlegame",
   by_motif: [
-    { motif: "fork", missed: 8, found: 3, miss_rate: 72.7 },
-    { motif: "removing_defender", missed: 4, found: 1, miss_rate: 80.0 },
-    { motif: "pin", missed: 2, found: 5, miss_rate: 28.6 },
+    {
+      motif: "fork", missed: 8, found: 3, miss_rate: 72.7,
+      // v1.16.0: fork concentrated in middlegame (6 of 8)
+      missed_by_phase: { opening: 1, middlegame: 6, endgame: 1 },
+      found_by_phase: { opening: 0, middlegame: 2, endgame: 1 },
+      dominant_missed_phase: "middlegame",
+    },
+    {
+      motif: "removing_defender", missed: 4, found: 1, miss_rate: 80.0,
+      // v1.16.0: balanced across phases — no dominance
+      missed_by_phase: { opening: 1, middlegame: 2, endgame: 1 },
+      found_by_phase: { opening: 0, middlegame: 1, endgame: 0 },
+      dominant_missed_phase: null,
+    },
+    {
+      motif: "pin", missed: 2, found: 5, miss_rate: 28.6,
+      // v1.16.0: total < 3 misses → no dominance
+      missed_by_phase: { opening: 0, middlegame: 2, endgame: 0 },
+      found_by_phase: { opening: 2, middlegame: 2, endgame: 1 },
+      dominant_missed_phase: null,
+    },
     // Zero-count rows must be filtered out
-    { motif: "skewer", missed: 0, found: 0, miss_rate: 0.0 },
-    { motif: "trapped_piece", missed: 0, found: 0, miss_rate: 0.0 },
+    {
+      motif: "skewer", missed: 0, found: 0, miss_rate: 0.0,
+      missed_by_phase: { opening: 0, middlegame: 0, endgame: 0 },
+      found_by_phase: { opening: 0, middlegame: 0, endgame: 0 },
+      dominant_missed_phase: null,
+    },
+    {
+      motif: "trapped_piece", missed: 0, found: 0, miss_rate: 0.0,
+      missed_by_phase: { opening: 0, middlegame: 0, endgame: 0 },
+      found_by_phase: { opening: 0, middlegame: 0, endgame: 0 },
+      dominant_missed_phase: null,
+    },
   ],
 };
 
@@ -92,5 +122,68 @@ describe("MotifThemes (v1.15.0 Patterns card)", () => {
     const pinIdx = text.indexOf("📌 pin");
     expect(forkIdx).toBeLessThan(rdIdx);
     expect(rdIdx).toBeLessThan(pinIdx);
+  });
+});
+
+// ─── v1.16.0: phase × motif breakdown line ───────────────────────────
+
+describe("MotifThemes — v1.16.0 phase breakdown", () => {
+  it("renders the phase breakdown line under each non-zero motif row", () => {
+    render(<MotifThemes data={FULL_DATA} />);
+    // fork row has phase counts {opening 1, middlegame 6, endgame 1}
+    const forkLine = screen.getByTestId("motif-phase-line-fork");
+    expect(forkLine).toBeInTheDocument();
+    expect(forkLine.textContent).toContain("Opening 1");
+    expect(forkLine.textContent).toContain("Middlegame 6");
+    expect(forkLine.textContent).toContain("Endgame 1");
+  });
+
+  it("highlights the dominant phase span for motifs that have one", () => {
+    render(<MotifThemes data={FULL_DATA} />);
+    // fork's dominant phase is middlegame → rendered with the
+    // motif-phase-dominant-fork test id and 🎯 prefix
+    const dominantSpan = screen.getByTestId("motif-phase-dominant-fork");
+    expect(dominantSpan).toBeInTheDocument();
+    expect(dominantSpan.textContent).toContain("Middlegame");
+    expect(dominantSpan.textContent).toContain("🎯");
+  });
+
+  it("does not highlight any phase for balanced or low-count motifs", () => {
+    render(<MotifThemes data={FULL_DATA} />);
+    // removing_defender has missed_by_phase {1,2,1} → no dominance
+    expect(
+      screen.queryByTestId("motif-phase-dominant-removing_defender"),
+    ).not.toBeInTheDocument();
+    // pin's total missed is 2 (<3 signal threshold) → no dominance
+    expect(
+      screen.queryByTestId("motif-phase-dominant-pin"),
+    ).not.toBeInTheDocument();
+    // But their breakdown lines still render with the counts
+    expect(
+      screen.getByTestId("motif-phase-line-removing_defender"),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("motif-phase-line-pin")).toBeInTheDocument();
+  });
+
+  it("does not render the phase line when missed_by_phase is missing (pre-v1.16.0 row)", () => {
+    // Synthesize a pre-v1.16.0-shaped row: no phase fields present
+    const preV16Data: MotifSummaryData = {
+      period_days: 30,
+      total_critical_moves: 5,
+      top_missed: "fork",
+      top_missed_count: 5,
+      by_motif: [
+        // No missed_by_phase / found_by_phase / dominant_missed_phase
+        { motif: "fork", missed: 5, found: 0, miss_rate: 100.0 },
+      ],
+    };
+    render(<MotifThemes data={preV16Data} />);
+    // Row itself still renders
+    const forkMatches = screen.getAllByText(/fork/i);
+    expect(forkMatches.length).toBeGreaterThanOrEqual(1);
+    // But no phase breakdown line
+    expect(
+      screen.queryByTestId("motif-phase-line-fork"),
+    ).not.toBeInTheDocument();
   });
 });

@@ -23,11 +23,19 @@ import { motifLabel } from "@/lib/motifs";
  * empty-state message instead of an empty bar chart.
  */
 
+type PhaseCounts = { opening: number; middlegame: number; endgame: number };
+type Phase = "opening" | "middlegame" | "endgame";
+
 type MotifEntry = {
   motif: string;
   missed: number;
   found: number;
   miss_rate: number;
+  // v1.16.0: optional phase breakdown. Absent on pre-v1.16.0 patterns
+  // rows; present on every motif row written by v1.16.0+.
+  missed_by_phase?: PhaseCounts;
+  found_by_phase?: PhaseCounts;
+  dominant_missed_phase?: Phase | null;
 };
 
 export type MotifSummaryData = {
@@ -36,10 +44,21 @@ export type MotifSummaryData = {
   by_motif: MotifEntry[];
   top_missed: string | null;
   top_missed_count: number;
+  // v1.16.0:
+  top_missed_dominant_phase?: Phase | null;
 };
 
 const FOUND_COLOR = "#22c55e"; // emerald — matches MotifBadgeRow
 const MISSED_COLOR = "#f59e0b"; // amber — matches MotifBadgeRow
+
+// v1.16.0: title-cased phase labels for the breakdown line, so the
+// frontend shows "Middlegame" rather than the raw "middlegame"
+// identifier the backend stores.
+const PHASE_LABELS: Record<Phase, string> = {
+  opening: "Opening",
+  middlegame: "Middlegame",
+  endgame: "Endgame",
+};
 
 function MotifRow({ entry }: { entry: MotifEntry }) {
   const total = entry.missed + entry.found;
@@ -48,6 +67,14 @@ function MotifRow({ entry }: { entry: MotifEntry }) {
   const meta = motifLabel(entry.motif);
   const foundPct = (entry.found / total) * 100;
   const missedPct = (entry.missed / total) * 100;
+
+  // v1.16.0: phase breakdown line. Skip when data is absent
+  // (pre-v1.16.0 patterns rows) or when all phase counts are zero.
+  const mPhases = entry.missed_by_phase;
+  const dominant = entry.dominant_missed_phase ?? null;
+  const showPhaseLine =
+    mPhases !== undefined &&
+    (mPhases.opening + mPhases.middlegame + mPhases.endgame) > 0;
 
   return (
     <div className="mb-3">
@@ -77,6 +104,37 @@ function MotifRow({ entry }: { entry: MotifEntry }) {
           </div>
         )}
       </div>
+      {showPhaseLine && mPhases && (
+        <div
+          className="mt-1 text-[11px] text-muted-foreground flex items-center gap-2"
+          data-testid={`motif-phase-line-${entry.motif}`}
+        >
+          {(["opening", "middlegame", "endgame"] as Phase[]).map((p, i) => {
+            const count = mPhases[p];
+            const isDominant = dominant === p;
+            return (
+              <span key={p} className="flex items-center gap-2">
+                <span
+                  className={
+                    isDominant
+                      ? "text-amber-600 dark:text-amber-400 font-semibold"
+                      : ""
+                  }
+                  data-testid={
+                    isDominant
+                      ? `motif-phase-dominant-${entry.motif}`
+                      : undefined
+                  }
+                >
+                  {isDominant ? "🎯 " : ""}
+                  {PHASE_LABELS[p]} {count}
+                </span>
+                {i < 2 && <span aria-hidden="true">·</span>}
+              </span>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
