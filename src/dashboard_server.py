@@ -37,6 +37,32 @@ def dict_from_row(row):
     return dict(row) if row else None
 
 
+def _resolve_player_id(conn, identifier: str) -> int | None:
+    """v1.16.1: look up a player by slug FIRST, then fall back to
+    chess.com username.
+
+    The slug-first ordering means new bookmarks / frontend routes
+    (which always use slugs) resolve in one query. The username
+    fallback preserves backward compatibility with:
+      - old bookmarked URLs that still contain the chess.com handle
+      - cached integrations / scripts that pass the username
+      - CLI invocations from before v1.16.1
+
+    Returns None if neither match is found — callers should 404.
+    """
+    if not identifier:
+        return None
+    row = conn.execute(
+        "SELECT id FROM players WHERE slug = ?", (identifier,)
+    ).fetchone()
+    if row:
+        return row["id"]
+    row = conn.execute(
+        "SELECT id FROM players WHERE username = ?", (identifier,)
+    ).fetchone()
+    return row["id"] if row else None
+
+
 class DashboardHandler(http.server.BaseHTTPRequestHandler):
     """HTTP handler that routes /api/* to SQLite queries.
 
@@ -223,14 +249,11 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
 
         conn = self._get_conn()
         try:
-            row = conn.execute(
-                "SELECT id FROM players WHERE username = ?",
-                (player_username,),
-            ).fetchone()
-            if not row:
+            # v1.16.1: accept slug OR chess.com username
+            player_id = _resolve_player_id(conn, player_username)
+            if player_id is None:
                 self._send_json({"error": f"Player {player_username} not found"}, 404)
                 return
-            player_id = row["id"]
         finally:
             conn.close()
 
@@ -271,14 +294,11 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
 
         conn = self._get_conn()
         try:
-            row = conn.execute(
-                "SELECT id FROM players WHERE username = ?",
-                (player_username,),
-            ).fetchone()
-            if not row:
+            # v1.16.1: accept slug OR chess.com username
+            player_id = _resolve_player_id(conn, player_username)
+            if player_id is None:
                 self._send_json({"error": f"Player {player_username} not found"}, 404)
                 return
-            player_id = row["id"]
         finally:
             conn.close()
 
@@ -331,14 +351,11 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
 
         conn = self._get_conn()
         try:
-            row = conn.execute(
-                "SELECT id FROM players WHERE username = ?",
-                (player_username,),
-            ).fetchone()
-            if not row:
+            # v1.16.1: accept slug OR chess.com username
+            player_id = _resolve_player_id(conn, player_username)
+            if player_id is None:
                 self._send_json({"error": f"Player {player_username} not found"}, 404)
                 return
-            player_id = row["id"]
         finally:
             conn.close()
 
@@ -1362,12 +1379,18 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             if not player:
                 return {"error": "player parameter required"}
 
+            # v1.16.1: resolve slug-or-username to id first, then fetch
+            # the latest patterns row. Two-step lookup avoids a JOIN
+            # against the deprecated WHERE-by-username pattern.
+            player_id = _resolve_player_id(conn, player)
+            if player_id is None:
+                return {"stats": None, "username": player}
             row = conn.execute(
-                """SELECT pp.*, p.username, p.display_name
+                """SELECT pp.*, p.username, p.slug, p.display_name
                 FROM player_patterns pp JOIN players p ON pp.player_id = p.id
-                WHERE p.username = ?
+                WHERE pp.player_id = ?
                 ORDER BY pp.updated_at DESC LIMIT 1""",
-                (player,),
+                (player_id,),
             ).fetchone()
 
             if not row:
@@ -1408,12 +1431,10 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
 
         conn = self._get_conn()
         try:
-            row = conn.execute(
-                "SELECT id FROM players WHERE username = ?", (player,)
-            ).fetchone()
-            if not row:
+            # v1.16.1: accept slug OR chess.com username
+            player_id = _resolve_player_id(conn, player)
+            if player_id is None:
                 return {"error": f"Player {player} not found"}
-            player_id = row["id"]
 
             sql = (
                 "SELECT id, player_id, kind, platform, body, refs_json, provider, "

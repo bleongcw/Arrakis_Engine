@@ -5,6 +5,11 @@ export type Provider = "claude" | "openai" | "gemini" | "grok" | "mistral" | "de
 export interface Player {
   id: number;
   username: string;
+  // v1.16.1: URL/CLI/API slug, auto-derived from display_name.
+  // Optional in the type to keep backward-compat with pre-v1.16.1
+  // API responses; in practice always populated by the backend
+  // after the migration runs.
+  slug?: string;
   display_name: string | null;
   age: number | null;
   rating: number | null;

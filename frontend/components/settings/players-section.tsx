@@ -85,6 +85,11 @@ export function PlayersSection() {
                   {player.display_name || player.username}
                 </p>
                 <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground mt-0.5">
+                  {/* v1.16.1: slug + chess.com are now distinct fields —
+                      slug drives URLs, username drives the chess.com API. */}
+                  {player.slug && (
+                    <span>URL: /{player.slug}/…</span>
+                  )}
                   <span>Chess.com: {player.username}</span>
                   {player.lichess_username && (
                     <span>Lichess: {player.lichess_username}</span>

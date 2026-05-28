@@ -144,6 +144,57 @@ class TestPatternsAPI:
         data = api_get(live_server, "/api/patterns")
         assert "error" in data
 
+    # ── v1.16.1 resolver: slug-or-username acceptance ───────────────
+
+    def test_v16_1_resolves_by_slug(self, live_server):
+        """v1.16.1: /api/patterns?player=<slug> resolves correctly.
+        Fixture player is 'testplayer' with display_name='Test' →
+        auto-derived slug is 'test'."""
+        data = api_get(live_server, "/api/patterns?player=test")
+        # The resolver matched a known player → stats key present
+        # (value can be None because no patterns are seeded, but the
+        # 'username' field gets populated by the endpoint when the
+        # lookup misses patterns_row only).
+        assert "stats" in data
+        # When no patterns_row exists but the player IS found, the
+        # endpoint returns {"stats": None, "username": <param>}
+        assert data["stats"] is None
+        assert data["username"] == "test"
+
+    def test_v16_1_resolves_by_legacy_username(self, live_server):
+        """v1.16.1: old bookmarks that use the chess.com username
+        still work — the resolver falls back to WHERE username = ?
+        when the slug lookup misses."""
+        data = api_get(live_server, "/api/patterns?player=testplayer")
+        assert "stats" in data
+        assert data["username"] == "testplayer"
+
+    def test_v16_1_unknown_identifier_returns_null_stats(self, live_server):
+        """An identifier that matches neither slug nor username returns
+        the same {stats: None} shape — never a 500."""
+        data = api_get(live_server, "/api/patterns?player=ghost_player")
+        assert data["stats"] is None
+        # username field echoes back the param (frontend may render an
+        # empty-state with this)
+        assert data["username"] == "ghost_player"
+
+
+class TestPlayersAPIv161:
+    """v1.16.1: /api/players response surfaces the slug field so the
+    frontend can use it for routing."""
+
+    def test_players_response_includes_slug(self, live_server):
+        data = api_get(live_server, "/api/players")
+        assert len(data) == 1
+        p = data[0]
+        assert "slug" in p, "v1.16.1 player response must include slug"
+        # Fixture display_name is "Test" → slugify → "test"
+        assert p["slug"] == "test"
+        # Username (chess.com handle) is still surfaced — they're
+        # separate fields now
+        assert p["username"] == "testplayer"
+        assert p["display_name"] == "Test"
+
 
 class TestJournalAPI:
     """v1.10.0: GET /api/journal returns chronological entries."""

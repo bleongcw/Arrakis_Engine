@@ -30,8 +30,22 @@ export function usePlayerContext() {
   return useContext(PlayerContext);
 }
 
-// Reserved top-level routes that are NOT player usernames
+// Reserved top-level routes that are NOT player slugs (or legacy usernames).
 const RESERVED_ROUTES = new Set(["dashboard", "settings", "_not-found"]);
+
+// v1.16.1: match a URL segment against a Player. Slug is the canonical
+// identifier; username is accepted as a legacy fallback so old bookmarks
+// don't 404 after the rename.
+function matchesPlayer(p: Player, urlSegment: string): boolean {
+  return (p.slug ?? p.username) === urlSegment || p.username === urlSegment;
+}
+
+// v1.16.1: canonical identifier to use for new URLs / state keys —
+// always slug when available, falls back to username for pre-v1.16.1
+// backend responses.
+function canonicalId(p: Player): string {
+  return p.slug ?? p.username;
+}
 
 function PlayerProvider({ children }: { children: ReactNode }) {
   const [players, setPlayers] = useState<Player[]>([]);
@@ -40,7 +54,7 @@ function PlayerProvider({ children }: { children: ReactNode }) {
 
   const pathname = usePathname();
 
-  // Extract player from URL: /<player>/games → "player"
+  // Extract player from URL: /<slug-or-legacy-username>/games → "..."
   const segments = pathname.split("/").filter(Boolean);
   const urlPlayer = segments.length > 0 && !RESERVED_ROUTES.has(segments[0])
     ? segments[0]
@@ -50,8 +64,8 @@ function PlayerProvider({ children }: { children: ReactNode }) {
     try {
       const data = await fetchPlayers();
       setPlayers(data);
-      if (data.length > 0 && !data.some((p) => p.username === currentPlayer)) {
-        setCurrentPlayer(data[0].username);
+      if (data.length > 0 && !data.some((p) => canonicalId(p) === currentPlayer)) {
+        setCurrentPlayer(canonicalId(data[0]));
       }
     } catch (err) {
       console.error("Failed to refresh players:", err);
@@ -62,11 +76,17 @@ function PlayerProvider({ children }: { children: ReactNode }) {
     fetchPlayers()
       .then((data) => {
         setPlayers(data);
-        // Sync currentPlayer from URL if valid, otherwise default to first player
-        if (urlPlayer && data.some((p) => p.username === urlPlayer)) {
-          setCurrentPlayer(urlPlayer);
-        } else if (data.length > 0 && !currentPlayer) {
-          setCurrentPlayer(data[0].username);
+        // Sync currentPlayer from URL if valid (slug OR legacy username),
+        // otherwise default to first player's canonical slug.
+        if (urlPlayer) {
+          const matched = data.find((p) => matchesPlayer(p, urlPlayer));
+          if (matched) {
+            setCurrentPlayer(canonicalId(matched));
+            return;
+          }
+        }
+        if (data.length > 0 && !currentPlayer) {
+          setCurrentPlayer(canonicalId(data[0]));
         }
       })
       .catch((err) => {
@@ -77,12 +97,16 @@ function PlayerProvider({ children }: { children: ReactNode }) {
 
   // Keep context in sync when URL changes
   useEffect(() => {
-    if (urlPlayer && players.some((p) => p.username === urlPlayer)) {
-      setCurrentPlayer(urlPlayer);
+    if (urlPlayer) {
+      const matched = players.find((p) => matchesPlayer(p, urlPlayer));
+      if (matched) {
+        setCurrentPlayer(canonicalId(matched));
+      }
     }
   }, [urlPlayer, players]);
 
-  const selectedPlayer = players.find((p) => p.username === currentPlayer) || null;
+  const selectedPlayer =
+    players.find((p) => canonicalId(p) === currentPlayer) || null;
 
   return (
     <PlayerContext.Provider

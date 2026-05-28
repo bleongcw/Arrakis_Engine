@@ -4,6 +4,122 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.16.1] - 2026-05-28
+
+### Added
+- **Friendly URL slugs decoupled from chess.com handles.** Two
+  chess.com renames in one session (`evanleongxinyu` →
+  `nevergiveupgreatthings`, `estellaleong` → `sixsevenequals42`)
+  exposed that v1.0–v1.16.0 conflated three distinct identifiers
+  into one `username` column: chess.com API handle, URL routing
+  slug, and DB unique key. v1.16.1 separates them.
+
+  ```
+  Before: http://localhost:3000/nevergiveupgreatthings/patterns
+  After:  http://localhost:3000/evanleong/patterns
+  ```
+
+  - **`players.slug TEXT`** — new column, partial UNIQUE INDEX
+    (only enforces uniqueness when slug IS NOT NULL). Auto-derived
+    from `display_name` via the new `_slugify` helper: lowercase +
+    strip ALL non-alphanumeric (no separator) — `"Evan Leong"` →
+    `"evanleong"`. The user's chosen format.
+  - **`players.username`** — unchanged, keeps mapping to chess.com
+    handle. ONLY used by the harvester to pull games via the
+    chess.com API. Never appears in URLs after v1.16.1.
+  - **Schema migration is additive + idempotent.** Runs on next
+    `init_db()` call. `WHERE slug IS NULL` filter means the
+    backfill loop is a no-op once everything's populated. Pre-
+    v1.16.1 rows backfilled cleanly on Bernard's live DB: Evan
+    Leong → `evanleong`, Estella Leong → `estellaleong`, Eleanor
+    Leong → `eleanorleong`, Bernard Leong → `bernardleong`.
+
+- **`_resolve_player_id(conn, identifier)` backend helper** —
+  resolves a `?player=X` API param or CLI `--player X` arg by
+  slug first, falling back to chess.com username if the slug
+  lookup misses. Preserves backward compatibility: old bookmarks
+  / cached integrations / shell scripts using the chess.com handle
+  continue to work indefinitely. Replaces 5 duplicated
+  `SELECT id FROM players WHERE username = ?` sites in
+  `dashboard_server.py`.
+
+- **`ensure_player` extended** with optional `slug` kwarg + the
+  new `_allocate_slug` helper for collision-safe suffixing
+  (`evanleong` / `evanleong2` / `evanleong3` when display_names
+  collide).
+
+- **Frontend routing now slug-canonical.** `app/providers.tsx`
+  matches URL segments against `slug ?? username` (slug primary,
+  username as legacy fallback). `player-selector.tsx` routes to
+  `/<slug>/...` for new URLs. `Player` type gains optional `slug`.
+  `Settings → Players` panel now shows the distinction clearly:
+  ```
+  Evan Leong
+    URL: /evanleong/…
+    Chess.com: nevergiveupgreatthings
+  ```
+
+- **CLI `--player` accepts slug or username** across every
+  cmd_* function — single `WHERE slug = ? OR username = ?` per
+  lookup. Both `python main.py trend --player evanleong` and
+  `python main.py trend --player nevergiveupgreatthings` resolve
+  to the same player.
+
+- **`config.yaml` supports optional `slug:` field** per player
+  entry. Omitted → auto-derived from `display_name`. Explicit →
+  overrides the auto-derivation.
+
+### Tests
+- 24 new backend tests in `tests/test_models.py`:
+  - `TestSlugify` × 9 — basic / multi-word / apostrophe / hyphen /
+    non-ASCII / empty fallback / all-symbol fallback / idempotent /
+    digits-preserved
+  - `TestSlugMigration` × 3 — backfills NULL slugs, idempotent
+    re-runs, UNIQUE INDEX blocks duplicates
+  - `TestEnsurePlayerSlugSupport` × 6 — auto-derivation, explicit
+    override, collision suffixing (×2 and ×3), username fallback,
+    update-existing-slug
+  - `TestAllocateSlug` × 2 — no-collision passthrough, self-
+    exclusion via `excluding_player_id`
+- 4 new backend resolver tests in `tests/test_dashboard_server.py`:
+  - `?player=<slug>` resolves correctly
+  - `?player=<legacy-username>` still works (backward compat)
+  - Unknown identifier returns `stats: null` cleanly (never 500)
+  - `/api/players` response surfaces `slug` field
+- 3 new CLI tests in `tests/test_main_cli.py::TestCmdTrendSlugSupport`:
+  - `--player evanleong` (slug) → resolves to right id
+  - `--player nevergiveupgreatthings` (legacy) → still works
+  - Unknown identifier → WARN, no crash
+- 4 new frontend tests in
+  `frontend/components/__tests__/player-selector.test.tsx` (NEW):
+  - Display names render for each player
+  - Click routes to `/<slug>/<subpath>` not `/<username>/...`
+  - Pre-v1.16.1 players without slug fall back to username
+  - currentPlayer comparison uses slug as the canonical id
+- Backend: 541 → **568** (+27). Frontend: 187 → **191** (+4).
+
+### Upgrade
+
+```bash
+# 1. Pull v1.16.1 — migration runs on next backend start
+python -c "from src.models import init_db; init_db('data/chess_coach.db')"
+
+# 2. Verify the new slugs landed
+sqlite3 data/chess_coach.db "SELECT id, username, slug, display_name FROM players"
+
+# 3. Restart the dev server so the in-memory config picks up
+python main.py serve
+
+# 4. Open http://localhost:3000/evanleong/patterns
+#    (old URL /nevergiveupgreatthings/patterns still works too)
+```
+
+No data migration needed beyond the auto-backfill. All historical
+games / patterns / journal entries / motif data are FK'd by
+`player_id` and follow the rename transparently.
+
+---
+
 ## [1.16.0] - 2026-05-28
 
 ### Added

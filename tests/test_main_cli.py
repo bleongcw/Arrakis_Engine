@@ -169,3 +169,77 @@ class TestCmdTrend:
         main_module.cmd_trend(args, _config(db_path))
 
         assert len(seen) == 2, f"expected 2 players, got {seen}"
+
+
+class TestCmdTrendSlugSupport:
+    """v1.16.1: --player accepts slug ('evanleong') OR chess.com
+    username ('nevergiveupgreatthings'). Same player resolves either
+    way; unknown identifier still WARNs cleanly."""
+
+    def test_v16_1_accepts_slug(self, db_path, monkeypatch, capsys):
+        """--player evanleong (slug) must resolve to the same id as
+        --player nevergiveupgreatthings (chess.com username)."""
+        conn = init_db(db_path)
+        pid = ensure_player(
+            conn, "nevergiveupgreatthings", display_name="Evan Leong",
+            age=9, rating=1100,
+        )
+        conn.close()
+
+        calls = []
+        def fake_generate(player_id, db_path=None, provider="claude", model=None):
+            calls.append(player_id)
+            return "ok"
+
+        monkeypatch.setattr(
+            "src.patterns.generate_trend_summary", fake_generate,
+        )
+
+        args = _args(player=["evanleong"], provider="openai")
+        main_module.cmd_trend(args, _config(db_path))
+
+        assert calls == [pid], (
+            f"slug 'evanleong' should resolve to player id {pid}; got {calls}"
+        )
+
+    def test_v16_1_accepts_legacy_username(self, db_path, monkeypatch, capsys):
+        """--player nevergiveupgreatthings (chess.com handle) still
+        works after v1.16.1 (backward compat for old scripts)."""
+        conn = init_db(db_path)
+        pid = ensure_player(
+            conn, "nevergiveupgreatthings", display_name="Evan Leong",
+            age=9, rating=1100,
+        )
+        conn.close()
+
+        calls = []
+        monkeypatch.setattr(
+            "src.patterns.generate_trend_summary",
+            lambda player_id, **kw: calls.append(player_id) or "ok",
+        )
+
+        args = _args(player=["nevergiveupgreatthings"], provider="openai")
+        main_module.cmd_trend(args, _config(db_path))
+
+        assert calls == [pid]
+
+    def test_v16_1_unknown_identifier_skipped(self, db_path, monkeypatch, capsys):
+        """A value matching neither slug nor username gets WARN'd
+        and the command continues — no crash, no propagated error."""
+        conn = init_db(db_path)
+        ensure_player(conn, "nevergiveupgreatthings", display_name="Evan Leong")
+        conn.close()
+
+        called = []
+        monkeypatch.setattr(
+            "src.patterns.generate_trend_summary",
+            lambda *a, **kw: called.append(1),
+        )
+
+        args = _args(player=["ghost"], provider="openai")
+        main_module.cmd_trend(args, _config(db_path))
+
+        out = capsys.readouterr().out
+        assert "WARN" in out
+        assert "ghost" in out
+        assert called == [], "unknown identifier should not invoke generate"

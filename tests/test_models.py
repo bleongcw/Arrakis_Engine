@@ -9,6 +9,7 @@ import pytest
 from src.models import (
     init_db, get_connection, ensure_player,
     extract_opponent_from_pgn, get_db_path, _migrate,
+    _slugify, _allocate_slug,
 )
 
 
@@ -298,4 +299,194 @@ class TestBackfillAcplMateTransition:
             "SELECT acpl FROM games WHERE id = ?", (gid,),
         ).fetchone()["acpl"]
         assert acpl_fixed == 0.0
+        conn.close()
+
+
+# ─── v1.16.1: slug + slugify + migration ─────────────────────────────
+
+
+class TestSlugify:
+    """v1.16.1: pure-function tests for _slugify."""
+
+    def test_basic_two_words(self):
+        assert _slugify("Evan Leong") == "evanleong"
+
+    def test_three_words(self):
+        assert _slugify("Mary Jane Smith") == "maryjanesmith"
+
+    def test_apostrophe(self):
+        assert _slugify("O'Brien") == "obrien"
+
+    def test_hyphen_collapsed(self):
+        assert _slugify("Anne-Marie") == "annemarie"
+
+    def test_non_ascii_stripped(self):
+        # The user explicitly wants pure-ASCII slugs; this is
+        # acceptable for the English-name-only dataset.
+        assert _slugify("García") == "garca"
+
+    def test_empty_returns_fallback(self):
+        assert _slugify("") == "player"
+        assert _slugify(None) == "player"  # type: ignore[arg-type]
+
+    def test_all_symbols_returns_fallback(self):
+        assert _slugify("!!!---") == "player"
+
+    def test_idempotent(self):
+        for raw in ("Evan Leong", "Mary Jane", "O'Brien", ""):
+            assert _slugify(_slugify(raw)) == _slugify(raw)
+
+    def test_numbers_preserved(self):
+        # If a user picks "Player 42" as display_name, the digits survive.
+        assert _slugify("Player 42") == "player42"
+
+
+class TestSlugMigration:
+    """v1.16.1: _migrate backfills slug for pre-v1.16.1 rows."""
+
+    def test_backfill_populates_slug_from_display_name(self, tmp_path):
+        db = str(tmp_path / "test.db")
+        # Simulate a pre-v1.16.1 schema by creating the DB with init_db,
+        # then nulling out a row's slug (legacy state).
+        conn = init_db(db)
+        ensure_player(conn, "evanleongxinyu", display_name="Evan Leong")
+        conn.execute("UPDATE players SET slug = NULL WHERE username = ?",
+                     ("evanleongxinyu",))
+        conn.commit()
+        # Re-run migration — should backfill the NULL slug
+        _migrate(conn)
+        row = conn.execute(
+            "SELECT slug FROM players WHERE username = ?", ("evanleongxinyu",)
+        ).fetchone()
+        assert row["slug"] == "evanleong"
+        conn.close()
+
+    def test_backfill_is_idempotent(self, tmp_path):
+        db = str(tmp_path / "test.db")
+        conn = init_db(db)
+        ensure_player(conn, "evanleongxinyu", display_name="Evan Leong")
+        slug1 = conn.execute(
+            "SELECT slug FROM players WHERE username = ?", ("evanleongxinyu",)
+        ).fetchone()["slug"]
+        # Second migration pass should not touch the existing slug
+        _migrate(conn)
+        slug2 = conn.execute(
+            "SELECT slug FROM players WHERE username = ?", ("evanleongxinyu",)
+        ).fetchone()["slug"]
+        assert slug1 == slug2 == "evanleong"
+        conn.close()
+
+    def test_unique_index_blocks_duplicate_slug(self, tmp_path):
+        db = str(tmp_path / "test.db")
+        conn = init_db(db)
+        ensure_player(conn, "alice123", display_name="Evan Leong")
+        # Try to insert a second row with the same slug directly — should
+        # raise IntegrityError thanks to the unique index.
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO players (username, display_name, slug) "
+                "VALUES (?, ?, ?)",
+                ("bob456", "Bob", "evanleong"),
+            )
+            conn.commit()
+        conn.close()
+
+
+class TestEnsurePlayerSlugSupport:
+    """v1.16.1: ensure_player accepts optional slug + handles collisions."""
+
+    def test_auto_derives_slug_from_display_name(self, tmp_path):
+        db = str(tmp_path / "test.db")
+        conn = init_db(db)
+        pid = ensure_player(conn, "alice123", display_name="Evan Leong")
+        row = conn.execute(
+            "SELECT slug FROM players WHERE id = ?", (pid,)
+        ).fetchone()
+        assert row["slug"] == "evanleong"
+        conn.close()
+
+    def test_explicit_slug_overrides_auto_derivation(self, tmp_path):
+        db = str(tmp_path / "test.db")
+        conn = init_db(db)
+        pid = ensure_player(
+            conn, "alice123", display_name="Evan Leong", slug="evan",
+        )
+        row = conn.execute(
+            "SELECT slug FROM players WHERE id = ?", (pid,)
+        ).fetchone()
+        assert row["slug"] == "evan"
+        conn.close()
+
+    def test_collision_appends_numeric_suffix(self, tmp_path):
+        db = str(tmp_path / "test.db")
+        conn = init_db(db)
+        pid1 = ensure_player(conn, "alice", display_name="Evan Leong")
+        pid2 = ensure_player(conn, "bob", display_name="Evan Leong")
+        slugs = [
+            conn.execute("SELECT slug FROM players WHERE id = ?", (p,)).fetchone()["slug"]
+            for p in (pid1, pid2)
+        ]
+        assert slugs == ["evanleong", "evanleong2"]
+        conn.close()
+
+    def test_collision_continues_past_2(self, tmp_path):
+        db = str(tmp_path / "test.db")
+        conn = init_db(db)
+        ids = [
+            ensure_player(conn, f"user{i}", display_name="Evan Leong")
+            for i in range(3)
+        ]
+        slugs = sorted(
+            conn.execute("SELECT slug FROM players WHERE id = ?", (p,)).fetchone()["slug"]
+            for p in ids
+        )
+        assert slugs == ["evanleong", "evanleong2", "evanleong3"]
+        conn.close()
+
+    def test_falls_back_to_username_when_no_display_name(self, tmp_path):
+        db = str(tmp_path / "test.db")
+        conn = init_db(db)
+        pid = ensure_player(conn, "alice123")  # no display_name
+        row = conn.execute(
+            "SELECT slug FROM players WHERE id = ?", (pid,)
+        ).fetchone()
+        # slug derived from the username
+        assert row["slug"] == "alice123"
+        conn.close()
+
+    def test_updating_existing_player_can_change_slug(self, tmp_path):
+        db = str(tmp_path / "test.db")
+        conn = init_db(db)
+        pid = ensure_player(conn, "alice", display_name="Evan Leong")
+        # Re-ensure with an explicit new slug
+        same_pid = ensure_player(
+            conn, "alice", display_name="Evan Leong", slug="evan",
+        )
+        assert pid == same_pid
+        row = conn.execute(
+            "SELECT slug FROM players WHERE id = ?", (pid,)
+        ).fetchone()
+        assert row["slug"] == "evan"
+        conn.close()
+
+
+class TestAllocateSlug:
+    """v1.16.1: _allocate_slug returns a unique slug + handles
+    excluding_player_id correctly (so updating yourself doesn't
+    fight your own existing slug)."""
+
+    def test_returns_input_when_no_collision(self, tmp_path):
+        db = str(tmp_path / "test.db")
+        conn = init_db(db)
+        assert _allocate_slug(conn, "Evan Leong") == "evanleong"
+        conn.close()
+
+    def test_excluding_player_id_avoids_self_collision(self, tmp_path):
+        db = str(tmp_path / "test.db")
+        conn = init_db(db)
+        pid = ensure_player(conn, "alice", display_name="Evan Leong")
+        # Allocating "evanleong" excluding pid → returns "evanleong"
+        # (no collision since the only row with that slug IS pid)
+        got = _allocate_slug(conn, "evanleong", excluding_player_id=pid)
+        assert got == "evanleong"
         conn.close()

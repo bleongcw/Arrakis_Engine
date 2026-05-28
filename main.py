@@ -67,6 +67,9 @@ def cmd_harvest(args, config):
             fide_id=player.get("fide_id"),
             fide_rating=player.get("fide_rating"),
             lichess_username=player.get("lichess_username"),
+            # v1.16.1: optional explicit slug from config.yaml.
+            # When omitted, ensure_player auto-derives from display_name.
+            slug=player.get("slug"),
         )
         conn.close()
 
@@ -184,8 +187,10 @@ def cmd_note(args, config):
     platform = args.platform or "chess.com"
 
     conn = init_db(db_path)
+    # v1.16.1: accept slug or chess.com username
     row = conn.execute(
-        "SELECT id FROM players WHERE username = ?", (username,)
+        "SELECT id FROM players WHERE slug = ? OR username = ?",
+        (username, username),
     ).fetchone()
     conn.close()
     if not row:
@@ -220,9 +225,11 @@ def cmd_review(args, config):
     if players_arg:
         targets = []
         for username in players_arg:
+            # v1.16.1: accept slug ('evanleong') OR chess.com username
             row = conn.execute(
-                "SELECT id, username, display_name FROM players WHERE username = ?",
-                (username,),
+                "SELECT id, username, display_name FROM players "
+                "WHERE slug = ? OR username = ?",
+                (username, username),
             ).fetchone()
             if not row:
                 print(f"WARN: player '{username}' not found — skipping")
@@ -286,9 +293,11 @@ def cmd_trend(args, config):
     if players_arg:
         targets = []
         for username in players_arg:
+            # v1.16.1: accept slug ('evanleong') OR chess.com username
             row = conn.execute(
-                "SELECT id, username, display_name FROM players WHERE username = ?",
-                (username,),
+                "SELECT id, username, display_name FROM players "
+                "WHERE slug = ? OR username = ?",
+                (username, username),
             ).fetchone()
             if not row:
                 print(f"WARN: player '{username}' not found — skipping")
@@ -479,10 +488,11 @@ def cmd_fide_update(args, config):
     rating = args.rating
     fide_id = getattr(args, "fide_id", None)
 
-    # Find the player
+    # Find the player — v1.16.1: accept slug or chess.com username
     player = conn.execute(
-        "SELECT id, username, display_name, fide_id, fide_rating FROM players WHERE username = ?",
-        (username,),
+        "SELECT id, username, display_name, fide_id, fide_rating "
+        "FROM players WHERE slug = ? OR username = ?",
+        (username, username),
     ).fetchone()
 
     if not player:

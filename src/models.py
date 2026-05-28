@@ -160,6 +160,29 @@ def _backfill_acpl(conn: sqlite3.Connection):
         print(f"  Backfilled ACPL for {updated} games (±1000cp capped)")
 
 
+def _slugify(text: str) -> str:
+    """v1.16.1: convert a display name to a URL slug.
+
+    Rule (per user preference): lowercase + strip every
+    non-alphanumeric character. NO separator — `"Evan Leong"` becomes
+    `"evanleong"`, `"Mary Jane"` becomes `"maryjane"`. Falls back to
+    `"player"` if the input produces an empty string (defensive).
+
+    Why no hyphen: short single-word slugs (`evanleong` /
+    `estellaleong`) are easier to type and remember than hyphenated
+    forms. The user picked this format explicitly.
+
+    Edge cases:
+      - apostrophes ("O'Brien"  → "obrien")
+      - hyphens ("Anne-Marie"  → "annemarie")
+      - non-ASCII letters are stripped (the simplest rule for an
+        English-name-only dataset); a future enhancement could
+        unidecode them if needed.
+    """
+    s = re.sub(r"[^a-z0-9]+", "", (text or "").lower())
+    return s or "player"
+
+
 def _migrate(conn: sqlite3.Connection):
     """Add columns that may not exist in older databases."""
     cols = {r[1] for r in conn.execute("PRAGMA table_info(game_coaching)").fetchall()}
@@ -228,6 +251,52 @@ def _migrate(conn: sqlite3.Connection):
         conn.commit()
     if "is_active" not in player_cols:
         conn.execute("ALTER TABLE players ADD COLUMN is_active INTEGER DEFAULT 1")
+        conn.commit()
+    if "slug" not in player_cols:
+        # v1.16.1: decouple the URL slug from the chess.com username.
+        # `username` keeps the chess.com handle (used by the harvester
+        # API); `slug` is the human-facing identifier used by URLs,
+        # the API ?player= param, and the CLI --player flag. Auto-
+        # derived from display_name via _slugify, but can be overridden
+        # explicitly in config.yaml.
+        conn.execute("ALTER TABLE players ADD COLUMN slug TEXT")
+        conn.commit()
+    # v1.16.1: UNIQUE INDEX is partial (only when slug IS NOT NULL) so
+    # mid-migration or future-NULL rows don't trigger a constraint.
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_players_slug "
+        "ON players(slug) WHERE slug IS NOT NULL"
+    )
+    conn.commit()
+    # v1.16.1: backfill any NULL slugs (idempotent — runs on every
+    # _migrate() call but the WHERE clause makes it a no-op once all
+    # rows have slugs). This also catches edge cases where someone
+    # manually NULL'd a slug for any reason. Collisions across the
+    # batch are handled by carrying a `seen` set + DB collision check.
+    null_rows = conn.execute(
+        "SELECT id, display_name, username FROM players "
+        "WHERE slug IS NULL ORDER BY id"
+    ).fetchall()
+    if null_rows:
+        # Pre-load existing slugs so the seen-set starts populated —
+        # avoids colliding with rows that already have slugs.
+        seen: set[str] = {
+            r["slug"] for r in conn.execute(
+                "SELECT slug FROM players WHERE slug IS NOT NULL"
+            ).fetchall()
+        }
+        for r in null_rows:
+            base = _slugify(r["display_name"] or r["username"])
+            slug = base
+            suffix = 2
+            while slug in seen:
+                slug = f"{base}{suffix}"
+                suffix += 1
+            seen.add(slug)
+            conn.execute(
+                "UPDATE players SET slug = ? WHERE id = ?",
+                (slug, r["id"]),
+            )
         conn.commit()
 
     # v1.10.0: one-time migration of player_patterns.recent_form_review (v1.9.0
@@ -410,17 +479,60 @@ CREATE INDEX IF NOT EXISTS idx_journal_entries_player_date
 """
 
 
+def _allocate_slug(conn: sqlite3.Connection, base: str,
+                   excluding_player_id: int | None = None) -> str:
+    """v1.16.1: return a UNIQUE slug derived from `base`, appending
+    numeric suffixes ("2", "3", ...) if needed to avoid collisions.
+    If `excluding_player_id` is given, that row's existing slug is
+    ignored for the collision check (so updating a player's own
+    slug doesn't fight itself)."""
+    base = _slugify(base)
+    candidate = base
+    suffix = 2
+    while True:
+        if excluding_player_id is not None:
+            existing = conn.execute(
+                "SELECT 1 FROM players WHERE slug = ? AND id != ?",
+                (candidate, excluding_player_id),
+            ).fetchone()
+        else:
+            existing = conn.execute(
+                "SELECT 1 FROM players WHERE slug = ?", (candidate,)
+            ).fetchone()
+        if not existing:
+            return candidate
+        candidate = f"{base}{suffix}"
+        suffix += 1
+
+
 def ensure_player(conn: sqlite3.Connection, username: str,
                   display_name: str | None = None, age: int | None = None,
                   rating: int | None = None, fide_id: str | None = None,
                   fide_rating: int | None = None,
-                  lichess_username: str | None = None) -> int:
-    """Insert or update a player, returning the player id."""
+                  lichess_username: str | None = None,
+                  slug: str | None = None) -> int:
+    """Insert or update a player, returning the player id.
+
+    v1.16.1: accepts optional `slug` — the URL/CLI/API identifier
+    decoupled from chess.com `username`. If not provided, derived
+    from `display_name` (or `username` fallback) via _slugify, with
+    collision-safe suffixing.
+    """
     row = conn.execute(
-        "SELECT id FROM players WHERE username = ?", (username,)
+        "SELECT id, slug FROM players WHERE username = ?", (username,)
     ).fetchone()
     if row:
-        if display_name or age or rating or fide_id or fide_rating or lichess_username:
+        # Resolve slug for an existing player:
+        # - If caller provided one explicitly, validate uniqueness
+        #   excluding this row's own current slug.
+        # - Otherwise leave the existing slug alone.
+        resolved_slug = None
+        if slug:
+            resolved_slug = _allocate_slug(
+                conn, slug, excluding_player_id=row["id"],
+            )
+        if (display_name or age or rating or fide_id or fide_rating
+                or lichess_username or resolved_slug):
             conn.execute(
                 """UPDATE players SET
                     display_name = COALESCE(?, display_name),
@@ -428,16 +540,24 @@ def ensure_player(conn: sqlite3.Connection, username: str,
                     rating = COALESCE(?, rating),
                     fide_id = COALESCE(?, fide_id),
                     fide_rating = COALESCE(?, fide_rating),
-                    lichess_username = COALESCE(?, lichess_username)
+                    lichess_username = COALESCE(?, lichess_username),
+                    slug = COALESCE(?, slug)
                 WHERE username = ?""",
-                (display_name, age, rating, fide_id, fide_rating, lichess_username, username),
+                (display_name, age, rating, fide_id, fide_rating,
+                 lichess_username, resolved_slug, username),
             )
             conn.commit()
         return row["id"]
+    # New player: derive slug from explicit arg, display_name, or username.
+    slug_source = slug or display_name or username
+    resolved_slug = _allocate_slug(conn, slug_source)
     conn.execute(
-        """INSERT INTO players (username, display_name, age, rating, fide_id, fide_rating, lichess_username)
-        VALUES (?, ?, ?, ?, ?, ?, ?)""",
-        (username, display_name, age, rating, fide_id, fide_rating, lichess_username),
+        """INSERT INTO players
+        (username, display_name, age, rating, fide_id, fide_rating,
+         lichess_username, slug)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (username, display_name, age, rating, fide_id, fide_rating,
+         lichess_username, resolved_slug),
     )
     conn.commit()
     return conn.execute(

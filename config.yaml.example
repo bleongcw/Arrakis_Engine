@@ -3,16 +3,26 @@
 #   cp config.yaml.example config.yaml
 
 players:
-  - username: your_chess_com_username       # Chess.com username (required)
+  - username: your_chess_com_username       # Chess.com username (required, used by harvester)
+    slug: yourfriendlyslug                  # v1.16.1: URL slug (optional — auto-derived from display_name)
     lichess_username: your_lichess_username  # Lichess username (optional)
     fide_id: null                           # FIDE player ID (optional, e.g., 1234567)
     display_name: Player 1
     age: null
     rating: null
   - username: another_chess_com_username
+    # slug omitted → auto-derived from display_name ("Player 2" → "player2")
     display_name: Player 2
     age: null
     rating: null
+
+# v1.16.1 note: `slug` is the human-facing identifier used in URLs
+# (`http://localhost:3000/<slug>/patterns`), API params
+# (`?player=<slug>`), and the CLI (`--player <slug>`). It's
+# auto-derived from `display_name` if omitted — "Evan Leong" becomes
+# "evanleong". Specify explicitly only when you want a custom slug
+# different from the auto-derived form. Chess.com renames only touch
+# `username`, never the slug, so bookmarks stay permanent.
 
 stockfish:
   # Stockfish binary path — adjust for your system:
