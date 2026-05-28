@@ -126,6 +126,82 @@ class TestGamesAPI:
         data = api_get(live_server, "/api/games/99999")
         assert "error" in data
 
+    # ── v1.16.3: slug-or-username resolver on /api/games ─────────────
+
+    def test_v16_3_games_resolves_by_slug(self, live_server):
+        """v1.16.3 regression: /api/games?player=<slug> must return
+        the same games as /api/games?player=<chess.com-username>.
+
+        v1.16.1 introduced the slug column but missed _api_games_list,
+        leaving its WHERE clause as `p.username = ?`. Symptom in
+        Bernard's UI: Games tab showed 0 games after the v1.16.1
+        frontend started routing by slug.
+        """
+        # Fixture player is 'testplayer' with display_name='Test' →
+        # auto-derived slug is 'test'.
+        by_slug = api_get(live_server, "/api/games?player=test")
+        by_username = api_get(live_server, "/api/games?player=testplayer")
+        assert len(by_slug) == 2, (
+            f"slug lookup returned {len(by_slug)} games, expected 2"
+        )
+        assert len(by_slug) == len(by_username), (
+            "slug and username queries must return the same game count"
+        )
+
+    def test_v16_3_games_filters_combine_with_slug(self, live_server):
+        """v1.16.3: combining ?player=<slug>&result=win still filters
+        correctly. Catches regressions where the (slug OR username)
+        clause wraps wrong and breaks subsequent AND conditions."""
+        data = api_get(live_server, "/api/games?player=test&result=win")
+        assert len(data) == 1
+        assert data[0]["result"] == "win"
+
+
+class TestPlayerLookupStaticGuard:
+    """v1.16.3 static regression guard: catches future lookups that
+    bypass _resolve_player_id by going direct to `WHERE username = ?`.
+    That class of bug is what made v1.16.1's Games tab break.
+
+    Allowlist: lines we KNOW are intentional (player-creation check,
+    inside the resolver itself, the legacy-fallback branch). Anything
+    else should funnel through _resolve_player_id or use the
+    (slug = ? OR username = ?) shape.
+    """
+
+    def test_no_new_player_username_lookups_outside_resolver(self):
+        import re
+        from pathlib import Path
+        path = Path(__file__).parent.parent / "src" / "dashboard_server.py"
+        text = path.read_text()
+        # Find all occurrences of "WHERE username = ?" referencing the
+        # players table. Allow:
+        #   - inside `def _resolve_player_id` (the resolver's own fallback)
+        #   - inside `def _handle_create_player` (is_active existence check)
+        # Anywhere else is a bug — new lookups must funnel through the
+        # resolver or use `(slug = ? OR username = ?)`.
+        offenders = []
+        for m in re.finditer(r"WHERE username = \?", text):
+            # Walk backwards to find the nearest `def ` line
+            preceding = text[:m.start()]
+            def_matches = list(re.finditer(r"^def (\w+)", preceding, re.MULTILINE))
+            if def_matches:
+                enclosing = def_matches[-1].group(1)
+                if enclosing == "_resolve_player_id":
+                    continue
+            # Method scope (inside a class) — check for is_active in context
+            ctx = text[max(0, m.start() - 200):m.start() + 30]
+            if "is_active" in ctx:
+                continue  # _handle_create_player — intentional
+            offenders.append((m.start(), enclosing if def_matches else "<unknown>"))
+        assert not offenders, (
+            f"v1.16.3 regression: {len(offenders)} `WHERE username = ?` "
+            f"site(s) found outside the resolver / player-creation check: "
+            f"{offenders}. New endpoints should funnel through "
+            f"_resolve_player_id(conn, identifier) or use the "
+            f"(slug = ? OR username = ?) shape so slug-based URLs keep "
+            f"working."
+        )
+
 
 class TestStatusAPI:
     def test_status(self, live_server):

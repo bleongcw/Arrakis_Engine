@@ -4,6 +4,55 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.16.3] - 2026-05-29
+
+### Fixed
+- **Games tab showed `0 games` after v1.16.1's slug routing rollout.**
+  v1.16.1 introduced the slug column + refactored 5 backend lookup
+  sites to use the new `_resolve_player_id` helper. But two sites
+  were missed — both still doing `WHERE p.username = ?` directly,
+  which never matches when the frontend sends a slug:
+  - `src/dashboard_server.py::_api_games_list` (line 1268-1270) —
+    drove the empty Games tab
+  - `src/report.py::build_report_data` (line 97) — same bug shape,
+    just hadn't been triggered yet because the Reports tab is less
+    visited
+
+  Both now accept `(slug = ? OR username = ?)`. Old URLs with the
+  chess.com username still work; new slug-based URLs (which the
+  v1.16.1 frontend always sends) now work too.
+
+- **`build_report_data` arg renamed** from `player_username` to
+  `player_identifier` to match its v1.16.3 semantics (accepts both
+  slug and chess.com username). The old positional name was a
+  semantic lie after v1.16.3.
+
+### Added
+- **Static regression guard** `TestPlayerLookupStaticGuard` in
+  `tests/test_dashboard_server.py`. Scans `src/dashboard_server.py`
+  for any `WHERE username = ?` site outside the resolver itself or
+  the player-creation existence check. Future endpoints that bypass
+  `_resolve_player_id` will fail this test at lint speed (no live
+  server, no fixture). This is the test that would have caught the
+  v1.16.1 miss instantly.
+
+### Tests
+- 2 new live-server tests on `/api/games`:
+  - `?player=<slug>` returns the same game count as
+    `?player=<chess.com-username>` (the bug Bernard hit)
+  - Slug-based query combines correctly with other filters
+    (`&result=win`)
+- 1 new static guard (3 tests total)
+- Backend: 569 → **572** (+3)
+
+### Recovery
+
+No data action needed. The fix is purely server-side: restart the
+backend (`python main.py serve`), hard-refresh the browser, and the
+Games tab will populate.
+
+---
+
 ## [1.16.2] - 2026-05-29
 
 ### Fixed

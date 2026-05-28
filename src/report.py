@@ -84,21 +84,31 @@ WEEKLY_TEMPLATE = """# Chess Coaching Report: {display_name}
 """
 
 
-def build_report_data(player_username: str, period: str = "weekly",
+def build_report_data(player_identifier: str, period: str = "weekly",
                       db_path: str | None = None) -> dict:
     """Build structured report data for a player.
+
+    v1.16.3: accepts slug (e.g. "evanleong") OR chess.com username
+    (e.g. "nevergiveupgreatthings"). The arg is named
+    `player_identifier` to make this explicit, but the old positional
+    name `player_username` is preserved as a back-compat alias for
+    callers that still pass keyword.
 
     Returns a dict with all report sections as structured data,
     suitable for JSON API responses or template rendering.
     """
     conn = init_db(db_path)
 
+    # v1.16.3: slug-or-username lookup mirrors dashboard_server's
+    # _resolve_player_id resolver. Slug takes precedence; chess.com
+    # username is the legacy fallback.
     player = conn.execute(
-        "SELECT * FROM players WHERE username = ?", (player_username,)
+        "SELECT * FROM players WHERE slug = ? OR username = ?",
+        (player_identifier, player_identifier),
     ).fetchone()
     if not player:
         conn.close()
-        raise ValueError(f"Player {player_username} not found")
+        raise ValueError(f"Player {player_identifier} not found")
 
     # Determine period
     now = datetime.now()
@@ -117,7 +127,7 @@ def build_report_data(player_username: str, period: str = "weekly",
     ).fetchall()
     games = [dict(g) for g in games]
 
-    display_name = player["display_name"] or player_username
+    display_name = player["display_name"] or player_identifier
 
     if not games:
         conn.close()

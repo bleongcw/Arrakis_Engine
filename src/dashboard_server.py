@@ -1267,7 +1267,12 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
 
             player = params.get("player", [None])[0]
             if player:
-                conditions.append("p.username = ?")
+                # v1.16.2: accept slug OR chess.com username (v1.16.1
+                # introduced the slug column but missed this site —
+                # the symptom was an empty Games tab after frontend
+                # routes flipped to slug-based URLs).
+                conditions.append("(p.slug = ? OR p.username = ?)")
+                values.append(player)
                 values.append(player)
 
             result = params.get("result", [None])[0]
