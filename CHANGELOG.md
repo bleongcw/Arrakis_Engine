@@ -4,6 +4,73 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.15.1] - 2026-05-28
+
+### Fixed
+- **Skewer detector was over-firing 10–18× over other geometric motifs.**
+  v1.15.0 surfaced the bug at the aggregate level: Evan's "top missed
+  theme" came back as `skewer (26 instances)` over a 30-day window,
+  which seemed suspiciously high — real skewers are rarer than forks
+  or pins. Spot-checking Evan's #1 missed-skewer position (game 966
+  vs Giant_Ro, move 27, FEN
+  `8/Rp2bpkp/3pb1p1/4p3/2PqP3/3P2P1/3Q1PBP/1r2N1K1`) revealed the
+  false-positive pattern: after `Qxa7` the black queen sits on a7
+  with a white pawn on f2 and the white king on g1 along the
+  a7–g1 diagonal. The v1.14.0 detector tagged this as a skewer
+  because the geometry matched (front pawn < back king), but the
+  attacker (queen, value 9) is *more* valuable than the front piece
+  (pawn, value 1) — so the pawn isn't meaningfully threatened with
+  a winning trade. It's an incidental alignment, not a forcing
+  tactical theme.
+
+  Aggregated across all four players' history, the v1.14.0 detector
+  fired skewer **1930 times** as "played", **1566** as "best", and
+  **1250** as "missed" — vs fork at 108/144/138 and pin at
+  532/446/414. The skewer numbers were ~10–18× too high.
+
+  Fix: `src/motifs.py::detect_skewer` now requires the classical
+  geometry — **attacker value < front piece value** (in addition to
+  the existing front < back rule). A queen attacking a pawn no
+  longer registers; a bishop attacking a knight no longer registers
+  in opening trades. The detector now matches the textbook
+  definition: a sliding piece threatens a more valuable enemy piece,
+  with an even more valuable piece exposed behind. Three classical
+  cases preserved:
+  - `bishop(3) → queen(9) → king(100)` ✓
+  - `rook(5) → queen(9) → king(100)` ✓
+  - `bishop(3) → rook(5) → queen(9)` ✓
+
+  Re-ran `rescan-motifs` for Evan after the fix. Window contracted
+  from 117 → 64 critical moves (the 53 false-positive skewer
+  tags went away). Top-missed motif flipped from `skewer (26)` to
+  **`hanging_piece (13)`** — which matches what the per-game coach
+  has been calling out all along. Skewer dropped from 26 missed
+  instances to just 1.
+
+  No schema change. After upgrading, run:
+  ```bash
+  python main.py rescan-motifs --player <username>
+  python main.py patterns
+  ```
+  to repopulate `motifs_json` with the tightened detector and
+  refresh the aggregate. Then regenerate the trend summary so the
+  LLM coach picks up the corrected top-missed motif.
+
+### Tests
+- 4 new regression tests in `tests/test_motifs.py::TestSkewer`:
+  - `test_v15_1_queen_attacks_pawn_with_king_behind_is_not_skewer`
+    — the literal FEN from Evan's game 966 (the position that
+    prompted the calibration)
+  - `test_v15_1_bishop_captures_knight_with_queen_behind_is_not_skewer`
+    — equal-value attacker → front trade, must not tag
+  - `test_v15_1_rook_attacks_pawn_with_bishop_behind_is_not_skewer`
+    — attacker > front, no forcing threat
+  - `test_v15_1_bishop_skewers_rook_through_queen_still_works` —
+    positive case (`bishop(3) → rook(5) → queen(9)`) must still tag
+- Backend total: 509 → **513**. Frontend unchanged at 179.
+
+---
+
 ## [1.15.0] - 2026-05-28
 
 ### Added

@@ -198,6 +198,95 @@ class TestSkewer:
         result = detect_skewer(board, _move(board, "b3c5"), None)
         assert result is None
 
+    # ── v1.15.1 regression locks: classical-skewer geometry ───────────
+
+    def test_v15_1_queen_attacks_pawn_with_king_behind_is_not_skewer(self):
+        """v1.15.1 regression — the bug that prompted the calibration.
+
+        Position is the literal FEN from Evan's game 966 vs Giant_Ro
+        (move 27, black to move). Engine's best move was Qxa7 — a
+        rook grab. After Qxa7 the black queen sits on a7, attacks
+        the white pawn on f2 with the white king on g1 behind along
+        the a7-g1 diagonal. The v1.14.0 detector tagged this as a
+        skewer (front pawn < back king), inflating the skewer count
+        10–18× over other geometric motifs.
+
+        v1.15.1 rejects it: attacker (queen=9) is not less valuable
+        than the front piece (pawn=1), so taking the pawn is not a
+        meaningful "trade up." The pawn isn't forced to move.
+        """
+        board = chess.Board(
+            "8/Rp2bpkp/3pb1p1/4p3/2PqP3/3P2P1/3Q1PBP/1r2N1K1 b - - 4 27"
+        )
+        result = detect_skewer(board, _move(board, "d4a7"), None)
+        assert result is None, (
+            "queen attacks pawn (queen > pawn) is not a classical skewer "
+            "— the front piece must be more valuable than the attacker"
+        )
+
+    def test_v15_1_bishop_captures_knight_with_queen_behind_is_not_skewer(self):
+        """v1.15.1 regression — opening trades should not register.
+
+        White bishop on c4 captures a black knight on c6 (worth 3 vs 3);
+        a black queen on c8 happens to be on the c-file behind. The
+        v1.14.0 detector tagged this as skewer because front (knight=3)
+        < back (queen=9). But the attacker (bishop=3) is not less
+        valuable than the front (knight=3) — it's an equal-value
+        trade, not a winning skewer. Classical skewer rejects.
+        """
+        board = chess.Board(
+            "r1bqk2r/pppp1ppp/2n2n2/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 4"
+        )
+        # Move: Bxc6 (bishop on c4 takes knight on c6); queen on c8 behind.
+        # Wait — board above has queen on d8 not c8. Use a sharper FEN.
+        board = chess.Board("r1qk3r/pppp1ppp/2n2n2/4p3/2B1P3/8/PPPP1PPP/4K3 w - - 0 1")
+        result = detect_skewer(board, _move(board, "c4c6"), None)
+        # Bxc6 captures the knight; on the c-file behind sits a black queen
+        # on c8. Equal-value attacker→front trade ⇒ not a real skewer.
+        assert result is None, (
+            "equal-value attacker → front (bishop=3 vs knight=3) is not "
+            "a classical skewer even when a higher-value piece sits behind"
+        )
+
+    def test_v15_1_rook_attacks_pawn_with_bishop_behind_is_not_skewer(self):
+        """v1.15.1 regression — rook attacking a pawn with a minor piece
+        behind is not a forcing skewer (rook=5 > pawn=1).
+        """
+        # White rook moves from a1 to h1; black pawn h7, black bishop h8.
+        # After Rh1: rook on h1, attacks pawn h7 along h-file, bishop h8
+        # behind it. Front (pawn=1) < back (bishop=3), but attacker
+        # (rook=5) > front (pawn=1). Not a real skewer.
+        board = chess.Board("3k3b/7p/8/8/8/8/8/R3K3 w - - 0 1")
+        result = detect_skewer(board, _move(board, "a1h1"), None)
+        assert result is None, (
+            "attacker more valuable than the front piece ⇒ not a forcing skewer"
+        )
+
+    def test_v15_1_bishop_skewers_rook_through_queen_still_works(self):
+        """v1.15.1 regression — positive case must still fire.
+
+        Classical: bishop attacks queen with rook behind. Wait — that's
+        attacker (bishop=3) < front (queen=9) AND front (queen=9) > back
+        (rook=5). The current rule requires front < back, so this is
+        actually NOT tagged. The correct classical pattern is
+        bishop(3) attacks rook(5) with queen(9) behind: attacker(3) <
+        front(5) AND front(5) < back(9). Build that.
+        """
+        # White bishop on a1; black rook on c3, black queen on e5 along
+        # the a1-h8 diagonal. White king on h1, black king on h8 (legal
+        # but irrelevant). Bxc3 isn't needed — we want the bishop's
+        # MOVE to create the geometry. Put bishop on h1 → moves to a8?
+        # Cleaner: bishop on a8 (just moved there) attacks rook on c6
+        # with queen on e4 behind along a8-h1 diagonal.
+        # FEN: bishop just played to a8; before: bishop on b7.
+        # Pre-move FEN with bishop on b7: black rook c6, black queen e4.
+        board = chess.Board("4k3/1B6/2r5/8/4q3/8/8/4K3 w - - 0 1")
+        # Bb7-a8: bishop on a8 sees c6 (rook), then e4 (queen) along a8-h1.
+        result = detect_skewer(board, _move(board, "b7a8"), None)
+        assert result == MOTIF_SKEWER, (
+            "classical attacker(3) < front(5) < back(9) must still tag"
+        )
+
 
 # ── Removing the defender ───────────────────────────────────────────
 

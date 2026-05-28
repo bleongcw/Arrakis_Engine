@@ -318,6 +318,25 @@ def detect_skewer(
     FRONT. We detect by checking sliding pieces (rook/bishop/queen)
     that attack a less-valuable enemy piece with a more-valuable enemy
     piece directly behind it on the same line.
+
+    v1.15.1: tightened the classical-skewer geometry. The attacker
+    must be LESS VALUABLE than the front piece — otherwise the move
+    isn't "threatening" the front piece in any meaningful way (a
+    queen attacking a pawn doesn't force the pawn off the line; the
+    pawn is just a one-point trade waiting to happen). Without this
+    guard the detector tagged any aligned attacker+front+back trio,
+    producing 10–18× more skewer firings than other geometric motifs
+    in v1.14.0 — the classic *"queen ends on a-file, pawn-then-king
+    is incidentally on the diagonal"* false positive.
+
+    Classical pattern preserved:
+      bishop(3) attacks queen(9) with king(100) behind → skewer ✓
+      rook(5)   attacks queen(9) with king(100) behind → skewer ✓
+      bishop(3) attacks rook(5)  with queen(9) behind → skewer ✓
+    Newly rejected (false positives in v1.14.0):
+      queen(9) attacks pawn(1) with king(100) behind → not a skewer
+      bishop(3) captures knight(3) with queen(9) behind → opening trade
+      rook(5) attacks pawn(1) with bishop(3) behind → not forcing
     """
     moving_piece = board.piece_at(move.from_square)
     if moving_piece is None:
@@ -329,9 +348,10 @@ def detect_skewer(
     after.push(move)
     enemy_color = not moving_piece.color
     from_sq = move.to_square
+    attacker_val = _piece_value(moving_piece)
     # For each direction the sliding piece moves, walk outward and find
     # the first 2 enemy pieces — if the FIRST is less valuable than the
-    # SECOND, that's a skewer.
+    # SECOND, that's the geometry of a skewer.
     directions = _sliding_directions_for(moving_piece.piece_type)
     for dx, dy in directions:
         first_enemy_sq = None
@@ -355,8 +375,11 @@ def detect_skewer(
             continue
         first_val = _piece_value(after.piece_at(first_enemy_sq))
         second_val = _piece_value(after.piece_at(second_enemy_sq))
-        # Skewer: front piece less valuable than back piece
-        if first_val < second_val:
+        # v1.15.1: classical skewer — attacker < front, front < back.
+        # The attacker<front gate is the new one; it ensures the front
+        # piece is genuinely threatened by the trade (the attacker
+        # actually gains material if the front piece doesn't move).
+        if attacker_val < first_val and first_val < second_val:
             return MOTIF_SKEWER
     return None
 
