@@ -30,19 +30,24 @@ export function usePlayerContext() {
   return useContext(PlayerContext);
 }
 
-// Reserved top-level routes that are NOT player slugs (or legacy usernames).
+// Reserved top-level routes that are NOT player slugs.
 const RESERVED_ROUTES = new Set(["dashboard", "settings", "_not-found"]);
 
-// v1.16.1: match a URL segment against a Player. Slug is the canonical
-// identifier; username is accepted as a legacy fallback so old bookmarks
-// don't 404 after the rename.
+// v1.16.4: slug-only matching. The chess.com username is harvester-
+// only since v1.16.4 — old URLs that contained the chess.com handle
+// no longer resolve (the v1.16.1 backward-compat path was dropped
+// once the slug feature stabilised). The frontend has been emitting
+// slug-only URLs since v1.16.1, so the practical impact is just
+// stale browser bookmarks.
+//
+// The `?? p.username` fallback is retained ONLY as a defensive
+// guard against a pre-v1.16.1 API response that doesn't include
+// `slug`. With the v1.16.1+ backend running, every Player row
+// always has a slug.
 function matchesPlayer(p: Player, urlSegment: string): boolean {
-  return (p.slug ?? p.username) === urlSegment || p.username === urlSegment;
+  return (p.slug ?? p.username) === urlSegment;
 }
 
-// v1.16.1: canonical identifier to use for new URLs / state keys —
-// always slug when available, falls back to username for pre-v1.16.1
-// backend responses.
 function canonicalId(p: Player): string {
   return p.slug ?? p.username;
 }

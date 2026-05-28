@@ -38,27 +38,23 @@ def dict_from_row(row):
 
 
 def _resolve_player_id(conn, identifier: str) -> int | None:
-    """v1.16.1: look up a player by slug FIRST, then fall back to
-    chess.com username.
+    """v1.16.4: slug-only player lookup.
 
-    The slug-first ordering means new bookmarks / frontend routes
-    (which always use slugs) resolve in one query. The username
-    fallback preserves backward compatibility with:
-      - old bookmarked URLs that still contain the chess.com handle
-      - cached integrations / scripts that pass the username
-      - CLI invocations from before v1.16.1
+    The chess.com `username` column is reserved exclusively for the
+    harvester's API calls — it never appears in URLs, the API
+    `?player=` param, the CLI `--player` flag, or any user-facing
+    surface. v1.16.4 dropped the v1.16.1 backward-compat fallback
+    that accepted username here; old bookmarks using the chess.com
+    handle now 404 (frontend has been emitting slug-only URLs since
+    v1.16.1, so the practical impact is just stale browser
+    bookmarks).
 
-    Returns None if neither match is found — callers should 404.
+    Returns None if no player matches — callers should 404.
     """
     if not identifier:
         return None
     row = conn.execute(
         "SELECT id FROM players WHERE slug = ?", (identifier,)
-    ).fetchone()
-    if row:
-        return row["id"]
-    row = conn.execute(
-        "SELECT id FROM players WHERE username = ?", (identifier,)
     ).fetchone()
     return row["id"] if row else None
 
@@ -1267,12 +1263,9 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
 
             player = params.get("player", [None])[0]
             if player:
-                # v1.16.2: accept slug OR chess.com username (v1.16.1
-                # introduced the slug column but missed this site —
-                # the symptom was an empty Games tab after frontend
-                # routes flipped to slug-based URLs).
-                conditions.append("(p.slug = ? OR p.username = ?)")
-                values.append(player)
+                # v1.16.4: slug-only lookup. chess.com username is
+                # harvester-only since v1.16.4.
+                conditions.append("p.slug = ?")
                 values.append(player)
 
             result = params.get("result", [None])[0]

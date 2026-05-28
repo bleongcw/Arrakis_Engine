@@ -4,6 +4,69 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.16.4] - 2026-05-29
+
+### Changed (breaking)
+- **Slug-only lookups.** The v1.16.1 backward-compat fallback that
+  accepted the chess.com username in URLs / API params / CLI args is
+  gone. From v1.16.4 onward, all player identifiers across the user-
+  facing surface are slugs:
+  - `http://localhost:3000/evanleong/patterns` ✓
+  - `http://localhost:3000/nevergiveupgreatthings/patterns` ✗ (404)
+  - `?player=evanleong` ✓
+  - `?player=nevergiveupgreatthings` ✗ (empty result)
+  - `python main.py trend --player evanleong` ✓
+  - `python main.py trend --player nevergiveupgreatthings` ✗ (WARN, skipped)
+
+  The `players.username` column stays unchanged — it's now reserved
+  exclusively for the harvester's chess.com API calls. The previous
+  3 versions (v1.16.1 → v1.16.3) carried the dual lookup as a
+  bridge; v1.16.4 retires it because:
+  - The v1.16.1+ frontend never emits chess.com-username URLs
+  - No external integrations / scripts depend on the old shape
+  - The two-identifier query produced subtle bug-class confusion
+    (the v1.16.1 → v1.16.3 patches all came from one or another
+    site forgetting the `OR username = ?` clause)
+
+  Slug-only is one identifier per surface — clearer to reason about,
+  easier to keep correct.
+
+- **Sites updated:** `_resolve_player_id`, `_api_games_list`,
+  `build_report_data`, and 4 CLI lookups in `main.py` (cmd_note,
+  cmd_review, cmd_trend, cmd_fide_update). All drop the `OR username
+  = ?` clause and look up by slug only.
+
+- **`build_report_data` arg renamed** from `player_identifier`
+  (v1.16.3) to `player_slug` (v1.16.4) to reflect the slug-only
+  contract.
+
+### Tests
+- Static guard tightened: `WHERE username = ?` is now allowed ONLY
+  inside `_handle_create_player` (the chess.com-handle uniqueness
+  check during player creation). The v1.16.1 resolver-fallback
+  exception is gone too.
+- Existing tests converted from "accepts legacy username" to
+  "rejects legacy username":
+  - `test_v16_4_legacy_username_no_longer_resolves` (patterns API)
+  - `test_v16_4_games_rejects_legacy_username` (games API)
+  - `test_v16_4_legacy_username_rejected` (CLI)
+- Test fixtures updated: `db_with_data` in test_dashboard_server.py
+  now uses `slug="test"` (different from `username="testplayer"`)
+  so test queries genuinely exercise the slug-only lookup path.
+  test_report.py and test_main_cli.py fixtures pin slug similarly.
+- Backend: 572 → **573**
+- Frontend: unchanged at 191
+
+### Bookmarks
+
+The v1.16.1 frontend has been emitting slug-only URLs for over a day
+now, so the practical impact on Bernard's setup is zero — every URL
+the browser saw was already in the `/<slug>/` form. Any stale
+browser bookmarks from before v1.16.1 (chess.com-username URLs) now
+404; just re-bookmark from the live UI.
+
+---
+
 ## [1.16.3] - 2026-05-29
 
 ### Fixed

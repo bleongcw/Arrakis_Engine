@@ -187,10 +187,9 @@ def cmd_note(args, config):
     platform = args.platform or "chess.com"
 
     conn = init_db(db_path)
-    # v1.16.1: accept slug or chess.com username
+    # v1.16.4: slug-only lookup. chess.com username is harvester-only.
     row = conn.execute(
-        "SELECT id FROM players WHERE slug = ? OR username = ?",
-        (username, username),
+        "SELECT id FROM players WHERE slug = ?", (username,)
     ).fetchone()
     conn.close()
     if not row:
@@ -225,11 +224,10 @@ def cmd_review(args, config):
     if players_arg:
         targets = []
         for username in players_arg:
-            # v1.16.1: accept slug ('evanleong') OR chess.com username
+            # v1.16.4: slug-only lookup.
             row = conn.execute(
-                "SELECT id, username, display_name FROM players "
-                "WHERE slug = ? OR username = ?",
-                (username, username),
+                "SELECT id, username, display_name FROM players WHERE slug = ?",
+                (username,),
             ).fetchone()
             if not row:
                 print(f"WARN: player '{username}' not found — skipping")
@@ -293,11 +291,10 @@ def cmd_trend(args, config):
     if players_arg:
         targets = []
         for username in players_arg:
-            # v1.16.1: accept slug ('evanleong') OR chess.com username
+            # v1.16.4: slug-only lookup.
             row = conn.execute(
-                "SELECT id, username, display_name FROM players "
-                "WHERE slug = ? OR username = ?",
-                (username, username),
+                "SELECT id, username, display_name FROM players WHERE slug = ?",
+                (username,),
             ).fetchone()
             if not row:
                 print(f"WARN: player '{username}' not found — skipping")
@@ -488,11 +485,11 @@ def cmd_fide_update(args, config):
     rating = args.rating
     fide_id = getattr(args, "fide_id", None)
 
-    # Find the player — v1.16.1: accept slug or chess.com username
+    # Find the player — v1.16.4: slug-only lookup.
     player = conn.execute(
         "SELECT id, username, display_name, fide_id, fide_rating "
-        "FROM players WHERE slug = ? OR username = ?",
-        (username, username),
+        "FROM players WHERE slug = ?",
+        (username,),
     ).fetchone()
 
     if not player:

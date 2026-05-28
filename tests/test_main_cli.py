@@ -44,6 +44,8 @@ class TestCmdTrend:
         call generate_trend_summary(player_id, db_path, provider, model)
         exactly once with the resolved player_id."""
         conn = init_db(db_path)
+        # v1.16.4: slug "evan" auto-derived from display_name "Evan".
+        # CLI --player now requires slug, not chess.com username.
         pid = ensure_player(
             conn, "evanleongxinyu", display_name="Evan", age=9, rating=1100,
         )
@@ -61,7 +63,7 @@ class TestCmdTrend:
             "src.patterns.generate_trend_summary", fake_generate,
         )
 
-        args = _args(player=["evanleongxinyu"], provider="openai")
+        args = _args(player=["evan"], provider="openai")
         main_module.cmd_trend(args, _config(db_path))
 
         assert len(calls) == 1
@@ -202,11 +204,13 @@ class TestCmdTrendSlugSupport:
             f"slug 'evanleong' should resolve to player id {pid}; got {calls}"
         )
 
-    def test_v16_1_accepts_legacy_username(self, db_path, monkeypatch, capsys):
-        """--player nevergiveupgreatthings (chess.com handle) still
-        works after v1.16.1 (backward compat for old scripts)."""
+    def test_v16_4_legacy_username_rejected(self, db_path, monkeypatch, capsys):
+        """v1.16.4: --player <chess.com-username> is no longer
+        accepted. The v1.16.1 backward-compat fallback was dropped —
+        CLI lookups are slug-only now. Symptom: WARN + skip, no
+        generate call."""
         conn = init_db(db_path)
-        pid = ensure_player(
+        ensure_player(
             conn, "nevergiveupgreatthings", display_name="Evan Leong",
             age=9, rating=1100,
         )
@@ -221,7 +225,13 @@ class TestCmdTrendSlugSupport:
         args = _args(player=["nevergiveupgreatthings"], provider="openai")
         main_module.cmd_trend(args, _config(db_path))
 
-        assert calls == [pid]
+        out = capsys.readouterr().out
+        assert "WARN" in out
+        assert "nevergiveupgreatthings" in out
+        assert calls == [], (
+            "v1.16.4: chess.com username should NOT resolve to player_id; "
+            "only slug should match."
+        )
 
     def test_v16_1_unknown_identifier_skipped(self, db_path, monkeypatch, capsys):
         """A value matching neither slug nor username gets WARN'd

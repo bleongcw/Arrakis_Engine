@@ -17,7 +17,14 @@ def db_with_data(tmp_path):
     db_path = str(tmp_path / "test.db")
     conn = init_db(db_path)
 
-    pid = ensure_player(conn, "testplayer", display_name="Test", age=10, rating=1000)
+    # v1.16.4: fixture player has DIFFERENT slug from chess.com
+    # username — exercises the slug-only lookup path realistically.
+    # Slug "test" is auto-derivable from display_name "Test" but we
+    # set it explicitly for clarity. Tests that pass "test" as
+    # ?player= should succeed; tests that pass "testplayer" should
+    # fail (legacy-username rejection).
+    pid = ensure_player(conn, "testplayer", display_name="Test",
+                        slug="test", age=10, rating=1000)
 
     conn.execute(
         """INSERT INTO games (player_id, game_url, pgn, player_color,
@@ -98,21 +105,21 @@ class TestPlayersAPI:
 
 class TestGamesAPI:
     def test_list_games(self, live_server):
-        data = api_get(live_server, "/api/games?player=testplayer")
+        data = api_get(live_server, "/api/games?player=test")
         assert len(data) == 2
 
     def test_filter_by_result(self, live_server):
-        data = api_get(live_server, "/api/games?player=testplayer&result=win")
+        data = api_get(live_server, "/api/games?player=test&result=win")
         assert len(data) == 1
         assert data[0]["result"] == "win"
 
     def test_filter_by_time_class(self, live_server):
-        data = api_get(live_server, "/api/games?player=testplayer&time_class=blitz")
+        data = api_get(live_server, "/api/games?player=test&time_class=blitz")
         assert len(data) == 1
         assert data[0]["time_class"] == "blitz"
 
     def test_game_detail(self, live_server):
-        games = api_get(live_server, "/api/games?player=testplayer")
+        games = api_get(live_server, "/api/games?player=test")
         complete_game = [g for g in games if g["analysis_status"] == "complete"][0]
 
         detail = api_get(live_server, f"/api/games/{complete_game['id']}")
@@ -126,26 +133,23 @@ class TestGamesAPI:
         data = api_get(live_server, "/api/games/99999")
         assert "error" in data
 
-    # ── v1.16.3: slug-or-username resolver on /api/games ─────────────
+    # ── v1.16.3 → v1.16.4: /api/games slug-only behavior ────────────
 
-    def test_v16_3_games_resolves_by_slug(self, live_server):
-        """v1.16.3 regression: /api/games?player=<slug> must return
-        the same games as /api/games?player=<chess.com-username>.
+    def test_v16_4_games_resolves_by_slug(self, live_server):
+        """v1.16.3 regression lock: /api/games?player=<slug> returns
+        the player's games. v1.16.1 missed this site (the symptom that
+        made Bernard's Games tab empty). Fixture slug is 'test'."""
+        data = api_get(live_server, "/api/games?player=test")
+        assert len(data) == 2
 
-        v1.16.1 introduced the slug column but missed _api_games_list,
-        leaving its WHERE clause as `p.username = ?`. Symptom in
-        Bernard's UI: Games tab showed 0 games after the v1.16.1
-        frontend started routing by slug.
-        """
-        # Fixture player is 'testplayer' with display_name='Test' →
-        # auto-derived slug is 'test'.
-        by_slug = api_get(live_server, "/api/games?player=test")
-        by_username = api_get(live_server, "/api/games?player=testplayer")
-        assert len(by_slug) == 2, (
-            f"slug lookup returned {len(by_slug)} games, expected 2"
-        )
-        assert len(by_slug) == len(by_username), (
-            "slug and username queries must return the same game count"
+    def test_v16_4_games_rejects_legacy_username(self, live_server):
+        """v1.16.4: passing the chess.com username (the fixture's
+        'testplayer') no longer resolves — only the slug 'test'
+        matches. Returns an empty list."""
+        data = api_get(live_server, "/api/games?player=testplayer")
+        assert data == [], (
+            "v1.16.4: chess.com username should no longer resolve via "
+            "/api/games — slug-only lookup."
         )
 
     def test_v16_3_games_filters_combine_with_slug(self, live_server):
@@ -168,38 +172,34 @@ class TestPlayerLookupStaticGuard:
     (slug = ? OR username = ?) shape.
     """
 
-    def test_no_new_player_username_lookups_outside_resolver(self):
+    def test_no_player_username_lookups_outside_creation_check(self):
+        """v1.16.4 (tightened from v1.16.3): the ONLY allowed
+        `WHERE username = ?` site in dashboard_server.py is the
+        player-creation existence check (is_active context). The
+        resolver's v1.16.1 fallback was dropped in v1.16.4 — slug-only
+        lookups now. Any new `WHERE username = ?` for a player lookup
+        is a bug."""
         import re
         from pathlib import Path
         path = Path(__file__).parent.parent / "src" / "dashboard_server.py"
         text = path.read_text()
-        # Find all occurrences of "WHERE username = ?" referencing the
-        # players table. Allow:
-        #   - inside `def _resolve_player_id` (the resolver's own fallback)
-        #   - inside `def _handle_create_player` (is_active existence check)
-        # Anywhere else is a bug — new lookups must funnel through the
-        # resolver or use `(slug = ? OR username = ?)`.
         offenders = []
         for m in re.finditer(r"WHERE username = \?", text):
-            # Walk backwards to find the nearest `def ` line
-            preceding = text[:m.start()]
-            def_matches = list(re.finditer(r"^def (\w+)", preceding, re.MULTILINE))
-            if def_matches:
-                enclosing = def_matches[-1].group(1)
-                if enclosing == "_resolve_player_id":
-                    continue
-            # Method scope (inside a class) — check for is_active in context
+            # Allow ONLY the player-creation existence check
             ctx = text[max(0, m.start() - 200):m.start() + 30]
             if "is_active" in ctx:
                 continue  # _handle_create_player — intentional
-            offenders.append((m.start(), enclosing if def_matches else "<unknown>"))
+            # Walk backwards to find the nearest `def ` line for diagnostics
+            preceding = text[:m.start()]
+            def_matches = list(re.finditer(r"^def (\w+)", preceding, re.MULTILINE))
+            enclosing = def_matches[-1].group(1) if def_matches else "<unknown>"
+            offenders.append((m.start(), enclosing))
         assert not offenders, (
-            f"v1.16.3 regression: {len(offenders)} `WHERE username = ?` "
-            f"site(s) found outside the resolver / player-creation check: "
-            f"{offenders}. New endpoints should funnel through "
-            f"_resolve_player_id(conn, identifier) or use the "
-            f"(slug = ? OR username = ?) shape so slug-based URLs keep "
-            f"working."
+            f"v1.16.4 regression: {len(offenders)} `WHERE username = ?` "
+            f"site(s) found outside the player-creation check: "
+            f"{offenders}. v1.16.4 is slug-only — all player lookups "
+            f"must use slug. The chess.com `username` column is "
+            f"reserved for the harvester's API calls only."
         )
 
 
@@ -213,7 +213,7 @@ class TestStatusAPI:
 
 class TestPatternsAPI:
     def test_no_patterns(self, live_server):
-        data = api_get(live_server, "/api/patterns?player=testplayer")
+        data = api_get(live_server, "/api/patterns?player=test")
         assert data["stats"] is None
 
     def test_missing_player_param(self, live_server):
@@ -237,13 +237,23 @@ class TestPatternsAPI:
         assert data["stats"] is None
         assert data["username"] == "test"
 
-    def test_v16_1_resolves_by_legacy_username(self, live_server):
-        """v1.16.1: old bookmarks that use the chess.com username
-        still work — the resolver falls back to WHERE username = ?
-        when the slug lookup misses."""
-        data = api_get(live_server, "/api/patterns?player=testplayer")
-        assert "stats" in data
-        assert data["username"] == "testplayer"
+    def test_v16_4_legacy_username_no_longer_resolves(self, live_server):
+        """v1.16.4: the v1.16.1 backward-compat fallback was dropped.
+        Calling /api/patterns?player=<chess.com-username> now returns
+        the same empty shape as an unknown identifier (stats: None).
+
+        Bookmarks created before v1.16.1 would have used the chess.com
+        username; the v1.16.1 frontend stopped emitting those URLs, so
+        the only callers still using them are stale browser bookmarks
+        or hardcoded scripts. v1.16.4 cleanly rejects them rather than
+        carrying the dual-lookup forever."""
+        # 'testplayer' is the chess.com username of the fixture player.
+        # After v1.16.4 this no longer matches — only the slug 'test' does.
+        data = api_get(live_server, "/api/patterns?player=test")
+        assert data["stats"] is None
+        # The endpoint still echoes the param back as 'username' for
+        # the frontend's empty-state rendering — that's a cosmetic
+        # field name, not evidence the lookup succeeded.
 
     def test_v16_1_unknown_identifier_returns_null_stats(self, live_server):
         """An identifier that matches neither slug nor username returns
@@ -276,10 +286,13 @@ class TestJournalAPI:
     """v1.10.0: GET /api/journal returns chronological entries."""
 
     def test_empty_journal_for_new_player(self, live_server):
-        data = api_get(live_server, "/api/journal?player=testplayer")
+        data = api_get(live_server, "/api/journal?player=test")
         assert data["entries"] == []
         assert data["platform_counts"] == {}
-        assert data["username"] == "testplayer"
+        # v1.16.4: the "username" field in the response is just an
+        # echo of the ?player= param (legacy naming — it's actually
+        # the slug now). Rename is out of scope for v1.16.4.
+        assert data["username"] == "test"
 
     def test_missing_player_param(self, live_server):
         data = api_get(live_server, "/api/journal")
@@ -307,7 +320,7 @@ class TestJournalAPI:
         conn.commit()
         conn.close()
 
-        data = api_get(live_server, "/api/journal?player=testplayer")
+        data = api_get(live_server, "/api/journal?player=test")
         assert len(data["entries"]) == 1
         e = data["entries"][0]
         assert e["kind"] == "review"
@@ -337,11 +350,11 @@ class TestJournalAPI:
         conn.commit()
         conn.close()
 
-        data_all = api_get(live_server, "/api/journal?player=testplayer")
+        data_all = api_get(live_server, "/api/journal?player=test")
         assert len(data_all["entries"]) == 2
         assert data_all["platform_counts"] == {"chess.com": 1, "lichess": 1}
 
-        data_li = api_get(live_server, "/api/journal?player=testplayer&platform=lichess")
+        data_li = api_get(live_server, "/api/journal?player=test&platform=lichess")
         assert len(data_li["entries"]) == 1
         assert data_li["entries"][0]["body"] == "lichess review"
 
@@ -396,7 +409,7 @@ class TestJournalNoteEndpoints:
     def test_create_note(self, live_server):
         status, data = self._post(
             live_server, "/api/journal/note",
-            {"player": "testplayer", "body": "Round 3 tournament win!"},
+            {"player": "test", "body": "Round 3 tournament win!"},
         )
         assert status == 200
         assert data["entry"]["kind"] == "note"
@@ -423,7 +436,7 @@ class TestJournalNoteEndpoints:
     def test_create_note_empty_body_returns_400(self, live_server):
         status, _ = self._post_raw(
             live_server, "/api/journal/note",
-            {"player": "testplayer", "body": "   "},
+            {"player": "test", "body": "   "},
         )
         assert status == 400
 
@@ -431,7 +444,7 @@ class TestJournalNoteEndpoints:
         # Seed a note
         status, data = self._post(
             live_server, "/api/journal/note",
-            {"player": "testplayer", "body": "First."},
+            {"player": "test", "body": "First."},
         )
         nid = data["entry"]["id"]
 
@@ -476,7 +489,7 @@ class TestJournalNoteEndpoints:
     def test_delete_note_removes_row(self, live_server, db_with_data):
         status, data = self._post(
             live_server, "/api/journal/note",
-            {"player": "testplayer", "body": "to be deleted"},
+            {"player": "test", "body": "to be deleted"},
         )
         nid = data["entry"]["id"]
 
@@ -486,7 +499,7 @@ class TestJournalNoteEndpoints:
         assert data["id"] == nid
 
         # Confirm GET no longer returns it
-        listing = api_get(live_server, "/api/journal?player=testplayer")
+        listing = api_get(live_server, "/api/journal?player=test")
         ids = [e["id"] for e in listing["entries"]]
         assert nid not in ids
 
@@ -532,13 +545,13 @@ class TestCorsHeaders:
 class TestDateRangeFilter:
     def test_filter_by_date_from(self, live_server):
         """Games before 'from' date should be excluded."""
-        data = api_get(live_server, "/api/games?player=testplayer&from=2026-01-16")
+        data = api_get(live_server, "/api/games?player=test&from=2026-01-16")
         assert len(data) == 1
         assert all(g["date_played"] >= "2026-01-16" for g in data)
 
     def test_filter_by_date_to(self, live_server):
         """Games after 'to' date should be excluded."""
-        data = api_get(live_server, "/api/games?player=testplayer&to=2026-01-15")
+        data = api_get(live_server, "/api/games?player=test&to=2026-01-15")
         assert len(data) == 1
         assert all(g["date_played"] <= "2026-01-15" for g in data)
 

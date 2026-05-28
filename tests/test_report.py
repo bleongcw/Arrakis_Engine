@@ -12,7 +12,12 @@ from src.models import init_db, ensure_player
 def db_with_games(tmp_path):
     db_path = str(tmp_path / "test.db")
     conn = init_db(db_path)
-    pid = ensure_player(conn, "testplayer", display_name="TestKid", age=9, rating=1050)
+    # v1.16.4: pin slug to "testplayer" so the rest of the test file
+    # (which calls generate_report("testplayer", ...)) keeps working
+    # under slug-only lookup. Mirrors how a real config.yaml entry
+    # might set slug == username intentionally (Bernard's setup).
+    pid = ensure_player(conn, "testplayer", display_name="TestKid",
+                        slug="testplayer", age=9, rating=1050)
 
     # Games within last week — use relative dates so test never goes stale
     recent_date = (datetime.now() - timedelta(days=2)).strftime("%Y-%m-%d")
@@ -63,7 +68,8 @@ class TestGenerateReport:
     def test_no_games_in_period(self, tmp_path):
         db_path = str(tmp_path / "empty.db")
         conn = init_db(db_path)
-        ensure_player(conn, "testplayer", display_name="TestKid")
+        ensure_player(conn, "testplayer", display_name="TestKid",
+                      slug="testplayer")
         conn.close()
 
         output_dir = str(tmp_path / "reports")
@@ -80,7 +86,10 @@ class TestAcplInterpretation:
         """Create a DB where every player move has the given swing_cp."""
         db_path = str(tmp_path / "acpl_test.db")
         conn = init_db(db_path)
-        pid = ensure_player(conn, "testplayer", display_name="TestKid", age=9, rating=1050)
+        # v1.16.4: pin slug to "testplayer" so generate_report calls
+        # below keep working under slug-only lookup.
+        pid = ensure_player(conn, "testplayer", display_name="TestKid",
+                            slug="testplayer", age=9, rating=1050)
 
         recent = (datetime.now() - timedelta(days=2)).strftime("%Y-%m-%d")
         conn.execute(
