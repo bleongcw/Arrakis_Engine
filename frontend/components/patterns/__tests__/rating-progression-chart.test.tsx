@@ -13,6 +13,7 @@ vi.mock("recharts", () => ({
   CartesianGrid: () => null,
   ResponsiveContainer: ({ children }: any) => <div>{children}</div>,
   Tooltip: () => null,
+  Brush: () => null, // v1.18.3: date-range zoom
 }));
 
 import { RatingProgressionChart } from "@/components/patterns/rating-progression-chart";

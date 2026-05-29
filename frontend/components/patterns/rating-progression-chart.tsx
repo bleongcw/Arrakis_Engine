@@ -9,9 +9,15 @@ import {
   CartesianGrid,
   ResponsiveContainer,
   Tooltip as RechartsTooltip,
+  Brush,
 } from "recharts";
 import { createPortal } from "react-dom";
 import type { GameListItem } from "@/lib/types";
+import {
+  parsePlayedDate,
+  formatAxisTick,
+  formatTooltipDate,
+} from "@/lib/chart-format";
 
 interface RatingProgressionChartProps {
   games: GameListItem[];
@@ -35,6 +41,10 @@ const PLATFORM_LABELS: Record<Platform, string> = {
 
 interface ChartDataPoint {
   date: string;
+  // v1.18.3: epoch ms for the time-scaled X-axis. Time isn't to
+  // scale on a categorical axis (every game is an equal-width slot),
+  // which made the axis labels look irregular and crowded.
+  dateMs: number;
   rating: number;
   result: string;
   opponent: string;
@@ -83,8 +93,9 @@ function RatingInfoModal({ onClose }: { onClose: () => void }) {
         </div>
 
         <p className="text-zinc-600 dark:text-zinc-400 text-xs mb-3">
-          Shows your rating after each game over time. Each dot is one game,
-          colored by result.
+          Shows your rating after each game, plotted on a real time axis.
+          Each dot is one game, colored by result. Drag the handles on the
+          slider below the chart to zoom into a date range.
         </p>
 
         <h5 className="font-semibold text-xs text-zinc-800 dark:text-zinc-200 mb-1">
@@ -175,6 +186,7 @@ function SinglePlatformChart({
 
     const points: ChartDataPoint[] = filtered.map((g) => ({
       date: g.date_played || "",
+      dateMs: parsePlayedDate(g.date_played),
       rating: g.player_rating!,
       result: g.result,
       opponent: g.opponent_username || "?",
@@ -211,14 +223,17 @@ function SinglePlatformChart({
           <LineChart data={chartData}>
             <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
             <XAxis
-              dataKey="date"
+              dataKey="dateMs"
+              type="number"
+              scale="time"
+              domain={["dataMin", "dataMax"]}
               tick={{ fontSize: 11 }}
               className="fill-muted-foreground"
-              tickFormatter={(v: string) => {
-                if (!v) return "";
-                const parts = v.split("-");
-                return parts.length >= 2 ? `${parts[1]}/${parts[2] || ""}` : v;
-              }}
+              // v1.18.3: minTickGap spaces ticks by pixels, so a dense
+              // 590-game series no longer crowds the axis. Labels are
+              // month abbreviations (year shown only at January).
+              minTickGap={48}
+              tickFormatter={formatAxisTick}
             />
             <YAxis
               tick={{ fontSize: 11 }}
@@ -237,7 +252,7 @@ function SinglePlatformChart({
                 const d = payload[0].payload as ChartDataPoint;
                 return (
                   <div className="bg-card border border-border rounded-md p-2 text-xs shadow-lg">
-                    <p className="font-medium">{d.date}</p>
+                    <p className="font-medium">{formatTooltipDate(d.dateMs)}</p>
                     <p>
                       Rating: <span className="font-bold">{d.rating}</span>
                     </p>
@@ -276,6 +291,18 @@ function SinglePlatformChart({
               strokeDasharray="6 3"
               dot={false}
               connectNulls={false}
+            />
+            {/* v1.18.3: date-range zoom. Drag the handles to focus a
+                window; the main chart re-scales to the selection. The
+                brush itself shows a faint full-series line for context.
+                travellerWidth bumped up for easier touch targets on
+                mobile (v1.18.2 made the app mobile-usable). */}
+            <Brush
+              dataKey="dateMs"
+              height={28}
+              travellerWidth={10}
+              stroke="#94a3b8"
+              tickFormatter={(ms: number) => formatAxisTick(ms)}
             />
           </LineChart>
         </ResponsiveContainer>

@@ -4,6 +4,57 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.18.3] - 2026-05-29
+
+### Fixed
+- **Rating Progression chart had a cluttered, misleading X-axis.**
+  Two compounding bugs:
+  1. **Categorical axis, not time-scaled.** The chart used
+     `dataKey="date"` with raw date strings, so Recharts treated
+     each of the ~590 games as an equal-width category and thinned
+     tick labels by *index*. Time wasn't to scale — gaps where the
+     player played little looked the same width as busy weeks, and
+     the visible tick dates appeared irregular (Nov 26 → Dec 3 →
+     Dec 8 … then jumping to Feb 16 → Apr 5).
+  2. **Tick formatter leaked the time-of-day.** It split
+     `"2025-10-01 10:28:12"` on `-` and used `parts[2]` = `"01
+     10:28:12"`, so labels read `10/01 10:28:12` instead of a clean
+     month.
+
+### Changed
+- **Time-scaled X-axis.** Axis is now `type="number"` `scale="time"`
+  over epoch-ms (`domain=["dataMin","dataMax"]`), so the horizontal
+  position of every game reflects *when* it was actually played.
+  Quiet stretches compress; busy stretches spread out — an honest
+  timeline.
+- **Clean month labels** via the new `formatAxisTick` helper:
+  month abbreviation, with a 2-digit year shown only at January
+  (finance-chart convention) — "Oct", "Nov", "Dec", "Jan '26",
+  "Feb"… Unambiguous across the year boundary, uncluttered within.
+  `minTickGap={48}` spaces ticks by pixels, so the dense series
+  never overcrowds the axis.
+- **Date-range zoom.** Added a Recharts `Brush` below the chart —
+  drag the handles to focus a date window and the main plot
+  re-scales to the selection. Traveller width bumped for easier
+  touch targets (the app went mobile-usable in v1.18.2).
+- **Tooltip** now shows a clean `"Oct 1, 2025"` instead of the raw
+  `"2025-10-01 10:28:12"` timestamp.
+
+### Added
+- **`frontend/lib/chart-format.ts`** — `parsePlayedDate`,
+  `formatAxisTick`, `formatTooltipDate`. Extracted so the date logic
+  is unit-testable independent of the Recharts render tree.
+
+### Tests
+- New `frontend/lib/__tests__/chart-format.test.ts` (10 tests):
+  DB-format parsing, ISO-T form, NaN handling, chronological
+  ordering, bare-month vs January-year labels, the no-time-leak
+  regression lock (the exact v1.18.3 bug), and tooltip formatting.
+- Updated the rating-chart test's recharts mock to include `Brush`.
+- Frontend: 195 → **205**. Backend unchanged at 597.
+
+---
+
 ## [1.18.2] - 2026-05-29
 
 ### Fixed
