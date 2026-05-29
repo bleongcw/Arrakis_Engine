@@ -386,6 +386,19 @@ export interface OpponentProfile {
   /** Openings the opponent WINS — lines for the player to AVOID. */
   strengths: OpponentOpeningSplit;
   meta: HunterMeta;
+  /**
+   * v1.20.0 Deep Scan: the opponent's missed tactical themes (Tactical
+   * Blind Spots), aggregated from a Stockfish pass over their games.
+   * null until a Deep Scan has run. Shares the player-side motif_summary
+   * shape so the <MotifThemes> card renders it directly.
+   */
+  motif_summary?: PatternStats["motif_summary"] | null;
+  /** v1.20.0: Deep Scan coverage — drives the "Run / Re-run" affordance. */
+  deep_scan?: {
+    analyzed_games: number;
+    total_cached: number;
+    last_analyzed_at: string | null;
+  };
   /** Server-returned error (when the request was rejected before fetching). */
   error?: string;
 }
@@ -482,7 +495,7 @@ export interface ScheduleState {
 }
 
 export interface PipelineState {
-  task: "harvest" | "analyze" | "patterns" | "run_all" | "coach" | null;
+  task: "harvest" | "analyze" | "patterns" | "run_all" | "coach" | "hunt_scan" | null;
   status: "running" | "complete" | "error" | "idle";
   progress: string;
   detail: {

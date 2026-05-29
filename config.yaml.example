@@ -121,5 +121,12 @@ features:
   # Disk cost is ~3 KB per stored game (raw PGN).
   hunter_max_games_per_opponent: null
 
+  # Deep Scan (v1.20.0) — how many of an opponent's most-recent games the
+  # opt-in "Tactical Blind Spots" scan analyzes with Stockfish (depth from
+  # the `stockfish:` block above). Higher = more complete tactical picture
+  # but a longer scan (depth-22 is minutes per game). Incremental: a
+  # re-scan only analyzes newly-fetched games.
+  hunter_scan_games: 20
+
 database:
   path: data/chess_coach.db

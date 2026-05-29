@@ -151,7 +151,7 @@ ArrakisEngine/
 │   └── screenshots/           # Architecture diagram + UI screenshots
 ├── data/
 │   └── chess_coach.db         # SQLite database (auto-created, gitignored)
-├── tests/                     # Backend pytest suite (627 tests across 3 tiers)
+├── tests/                     # Backend pytest suite (639 tests across 3 tiers)
 └── reports/                   # Generated coach reports (gitignored)
 ```
 
@@ -166,7 +166,7 @@ ArrakisEngine/
 | `player_patterns` | Aggregated pattern stats JSON (+ `trend_summary`, motif_summary) |
 | `journal_entries` (v1.10.0) | Chronological coaching diary — `kind`='review'\|'note'\|'weakness_alert' (v1.19.0, fire-once priority-weakness alert) |
 | `opponent_cache` (v1.4.1) | Hunter Mode profile JSON cache (24h TTL) |
-| `opponent_games` (v1.4.4) | Hunter Mode accumulating PGN cache (sliding window) |
+| `opponent_games` (v1.4.4) | Hunter Mode accumulating PGN cache (sliding window) (+ `motifs_json`, `analyzed_at` v1.20.0 Deep Scan) |
 
 `move_analysis.motifs_json` shape: `{"played": [...], "best": [...], "missed": [...]}`,
 NULL on non-critical moves.
@@ -197,6 +197,15 @@ prompts, an escalation badge on the Tactical Themes card, and a fire-once
 `weakness_alert` Journal entry (priority tier only, de-duped per motif within the
 window). Alerts fire only when `compute_player_patterns(emit_weakness_alerts=True)`
 — the `patterns` CLI + `/api/pipeline/patterns`, never the silent auto-refresh.
+
+**Hunter Mode Deep Scan (v1.20.0):** `src/hunter.py::analyze_opponent_game`
+(read-only mirror of the analyzer motif loop) + `deep_scan_opponent`
+(incremental, last N games via `features.hunter_scan_games`) +
+`compute_opponent_motif_summary` (same shape as the player `motif_summary`)
+find the tactical themes an OPPONENT misses → "Tactical Blind Spots" on the
+hunt page. Opt-in only: `POST /api/pipeline/hunt-scan` (background, single-task
+`pipeline_state` lock) or `python main.py hunt-scan --opponent X` — never
+automatic.
 
 ## Pattern Components (Patterns page)
 
@@ -254,8 +263,8 @@ harvest + report).
 
 ## Testing
 
-**~837 tests total** — 627 backend (pytest, three tiers via `pyproject.toml`
-markers) + 210 frontend (Vitest). Integration (`-m integration`, needs Stockfish)
+**~852 tests total** — 639 backend (pytest, three tiers via `pyproject.toml`
+markers) + 213 frontend (Vitest). Integration (`-m integration`, needs Stockfish)
 and live (`-m live`, needs an LLM key) tiers are excluded by default.
 
 ### Running Tests
@@ -263,7 +272,7 @@ and live (`-m live`, needs an LLM key) tiers are excluded by default.
 pytest                                  # default unit tier (~30s, no deps)
 pytest -m integration                   # Stockfish tests (requires binary)
 pytest -m live                          # LLM API tests (~$0.30)
-cd frontend && npx vitest run           # 210 frontend tests, ~3s
+cd frontend && npx vitest run           # 213 frontend tests, ~3s
 cd frontend && npx next build           # type-check
 ```
 

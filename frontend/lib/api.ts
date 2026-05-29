@@ -387,6 +387,18 @@ export async function fetchHunterProfile(
   return fetchJSON<OpponentProfile>(`${BASE}/hunt/profile?${params}`);
 }
 
+/**
+ * v1.20.0: kick off an opponent Deep Scan (Stockfish + motif detection over
+ * their last N games). Runs as a background pipeline job — poll
+ * fetchPipelineStatus() (task "hunt_scan") for progress.
+ */
+export async function triggerHuntScan(
+  opponent: string,
+  platform: HuntPlatform
+): Promise<{ status: string; message: string }> {
+  return postPipeline("hunt-scan", { opponent, platform });
+}
+
 /** Force a fresh fetch of an opponent's profile (bypasses 24h cache). */
 export async function refreshHunterProfile(
   opponent: string,

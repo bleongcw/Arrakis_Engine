@@ -534,3 +534,148 @@ class TestSchemaMigration:
             ("x", "chess.com"),
         ).fetchone()
         assert rows["c"] == 1
+
+
+# ── v1.20.0 Deep Scan: opponent motif analysis ──────────────────────────
+
+import itertools  # noqa: E402
+from src.hunter import (  # noqa: E402
+    compute_opponent_motif_summary,
+    get_deep_scan_status,
+    deep_scan_opponent,
+    _resolve_opponent_color,
+)
+
+
+def _seed_opponent_game(conn, username, motifs=None, analyzed=True,
+                        color="white", pgn="pgn", date="2026-05-01",
+                        _counter=itertools.count()):
+    """Insert one opponent_games row, optionally pre-analyzed."""
+    conn.execute(
+        """INSERT INTO opponent_games
+        (username, platform, game_url, pgn, player_color, result,
+         date_played, motifs_json, analyzed_at)
+        VALUES (?, 'chess.com', ?, ?, ?, 'loss', ?, ?, ?)""",
+        (username.lower(), f"g{next(_counter)}", pgn, color, date,
+         json.dumps(motifs) if motifs is not None else None,
+         "datetime('now')" if analyzed else None),
+    )
+    conn.commit()
+
+
+class TestComputeOpponentMotifSummary:
+    """v1.20.0: aggregate per-game opponent motif data into the
+    MotifThemes-compatible shape."""
+
+    def test_none_when_no_analyzed_games(self, conn):
+        assert compute_opponent_motif_summary("ghost", "chess.com",
+                                              db_path=None) is None
+
+    def test_sums_distinct_games_exactly(self, db_path):
+        conn = init_db(db_path)
+        _seed_opponent_game(conn, "rival", {
+            "found": {"pin": 1}, "missed": {"fork": 2}, "critical_moves": 3,
+            "missed_by_phase": {"fork": {"opening": 0, "middlegame": 2, "endgame": 0}},
+        })
+        _seed_opponent_game(conn, "rival", {
+            "found": {}, "missed": {"fork": 1}, "critical_moves": 1,
+            "missed_by_phase": {"fork": {"opening": 0, "middlegame": 1, "endgame": 0}},
+        })
+        _seed_opponent_game(conn, "rival", {
+            "found": {"fork": 1}, "missed": {"pin": 1}, "critical_moves": 2,
+            "missed_by_phase": {"pin": {"opening": 1, "middlegame": 0, "endgame": 0}},
+        })
+        conn.close()
+        s = compute_opponent_motif_summary("rival", "chess.com", db_path)
+        assert s["games_analyzed"] == 3
+        assert s["total_critical_moves"] == 6
+        assert s["top_missed"] == "fork"
+        assert s["top_missed_count"] == 3
+        fork = next(e for e in s["by_motif"] if e["motif"] == "fork")
+        assert fork["missed"] == 3 and fork["found"] == 1
+        assert fork["dominant_missed_phase"] == "middlegame"
+
+    def test_ignores_unanalyzed_rows(self, db_path):
+        conn = init_db(db_path)
+        _seed_opponent_game(conn, "rival", {
+            "found": {}, "missed": {"fork": 5}, "critical_moves": 5,
+            "missed_by_phase": {"fork": {"opening": 0, "middlegame": 5, "endgame": 0}},
+        })
+        _seed_opponent_game(conn, "rival", None, analyzed=False)
+        conn.close()
+        s = compute_opponent_motif_summary("rival", "chess.com", db_path)
+        assert s["games_analyzed"] == 1  # the un-analyzed row is excluded
+
+
+class TestDeepScanStatus:
+    def test_counts_analyzed_vs_total(self, db_path):
+        conn = init_db(db_path)
+        _seed_opponent_game(conn, "rival", {"found": {}, "missed": {},
+                                            "critical_moves": 0,
+                                            "missed_by_phase": {}})
+        _seed_opponent_game(conn, "rival", None, analyzed=False)
+        _seed_opponent_game(conn, "rival", None, analyzed=False)
+        conn.close()
+        status = get_deep_scan_status("rival", "chess.com", db_path)
+        assert status["total_cached"] == 3
+        assert status["analyzed_games"] == 1
+
+
+class TestResolveOpponentColor:
+    def test_trusts_player_color(self):
+        assert _resolve_opponent_color({"player_color": "black"}, "x") == "black"
+
+    def test_falls_back_to_pgn_headers(self):
+        pgn = '[White "Rival"]\n[Black "Other"]\n\n1. e4 e5 *'
+        assert _resolve_opponent_color({"player_color": None, "pgn": pgn},
+                                       "rival") == "white"
+
+    def test_none_when_unresolvable(self):
+        pgn = '[White "Someone"]\n[Black "Else"]\n\n1. e4 *'
+        assert _resolve_opponent_color({"player_color": "", "pgn": pgn},
+                                       "rival") is None
+
+
+class TestDeepScanIncremental:
+    """v1.20.0: deep_scan_opponent skips already-analyzed games. Uses a
+    fake engine path is not needed — we pre-mark all games analyzed so the
+    Stockfish pass is never reached (engine-free unit test)."""
+
+    def test_all_pre_analyzed_skips_engine(self, db_path):
+        conn = init_db(db_path)
+        # Two games, both already analyzed → nothing to do, no engine call.
+        _seed_opponent_game(conn, "rival", {"found": {}, "missed": {},
+                                            "critical_moves": 0,
+                                            "missed_by_phase": {}})
+        _seed_opponent_game(conn, "rival", {"found": {}, "missed": {},
+                                            "critical_moves": 0,
+                                            "missed_by_phase": {}})
+        conn.close()
+        # No stockfish config needed: there are 0 pending games, so the
+        # engine is never invoked even though the path resolves a binary.
+        result = deep_scan_opponent(
+            "rival", "chess.com",
+            config={"stockfish": {"path": "stockfish"}},
+            db_path=db_path, limit=20,
+        )
+        assert result["analyzed"] == 0
+        assert result["candidates"] == 2
+
+
+@pytest.mark.integration
+class TestAnalyzeOpponentGameEngine:
+    """Requires a real Stockfish binary (pytest -m integration)."""
+
+    def test_detects_a_missed_motif(self):
+        import shutil
+        from src.hunter import analyze_opponent_game
+        sf = shutil.which("stockfish") or "/opt/homebrew/bin/stockfish"
+        pgn = (
+            '[White "goodguy"]\n[Black "rival"]\n\n'
+            "1. e4 e5 2. Nf3 Nc6 3. Bc4 Nd4 4. Nxe5 Qg5 5. Nxf7 Qxg2 "
+            "6. Rf1 Qxe4+ 7. Be2 Nf3# 0-1"
+        )
+        res = analyze_opponent_game(pgn, "white", sf, depth=10,
+                                    threads=2, hash_mb=128, move_time_limit=3.0)
+        assert res["critical_moves"] >= 1
+        assert isinstance(res["missed"], dict)

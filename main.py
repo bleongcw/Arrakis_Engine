@@ -199,6 +199,46 @@ def cmd_patterns(args, config):
     print(f"Updated patterns for {count} players.")
 
 
+def cmd_hunt_scan(args, config):
+    """v1.20.0: Deep-scan an opponent's recent games for tactical blind spots.
+
+    Runs Stockfish + the 12 motif detectors over the opponent's last N
+    accumulated games (from the Hunter Mode cache) and stores a per-game
+    motif summary. Slow by design — opt-in only.
+    """
+    from src.hunter import deep_scan_opponent, compute_opponent_motif_summary
+
+    db_path = config["database"]["path"]
+    opponent = args.opponent.strip()
+    platform = args.platform
+    features = config.get("features") or {}
+    limit = args.games or features.get("hunter_scan_games", 20)
+
+    def progress(done, total):
+        print(f"  Deep-scanning {opponent}: game {done}/{total}...", flush=True)
+
+    print(f"Deep scan: {opponent} ({platform}), up to {limit} games "
+          f"at depth {config.get('stockfish', {}).get('depth', 22)}.")
+    try:
+        result = deep_scan_opponent(
+            opponent, platform, config=config, db_path=db_path,
+            limit=limit, progress_cb=progress,
+        )
+    except FileNotFoundError as e:
+        print(f"ERROR: {e}")
+        return
+
+    print(f"Analyzed {result['analyzed']} new game(s) "
+          f"(skipped {result['skipped']}, {result['candidates']} candidates).")
+    summary = compute_opponent_motif_summary(opponent, platform, db_path)
+    if not summary or not summary.get("top_missed"):
+        print("No tactical blind spots detected yet.")
+        return
+    print(f"Top blind spot: {summary['top_missed']} "
+          f"(missed {summary['top_missed_count']}× across "
+          f"{summary['games_analyzed']} games).")
+
+
 def cmd_note(args, config):
     """v1.12.0: Append a parent-authored note to the player's Journal.
 
@@ -975,6 +1015,25 @@ def main():
         help="Max games to rescan (default: all)",
     )
 
+    # hunt-scan (v1.20.0) — deep-scan an opponent's games for tactical blind spots
+    hunt_scan_parser = subparsers.add_parser(
+        "hunt-scan",
+        help="(v1.20.0) Deep-scan an opponent's recent games for missed tactical motifs",
+    )
+    hunt_scan_parser.add_argument(
+        "--opponent", required=True,
+        help="Opponent username to deep-scan (must already be cached via Hunter Mode)",
+    )
+    hunt_scan_parser.add_argument(
+        "--platform", default="chess.com",
+        choices=["chess.com", "lichess"],
+        help="Platform the opponent plays on (default: chess.com)",
+    )
+    hunt_scan_parser.add_argument(
+        "--games", type=int, default=None,
+        help="Number of recent games to scan (default: features.hunter_scan_games or 20)",
+    )
+
     # backfill-clocks
     backfill_parser = subparsers.add_parser("backfill-clocks", help="Backfill clock data from PGN annotations")
 
@@ -1034,6 +1093,8 @@ def main():
         cmd_backfill_acpl(args, config)
     elif args.command == "rescan-motifs":
         cmd_rescan_motifs(args, config)
+    elif args.command == "hunt-scan":
+        cmd_hunt_scan(args, config)
     elif args.command == "backfill-clocks":
         cmd_backfill_clocks(args, config)
     elif args.command == "run-all":

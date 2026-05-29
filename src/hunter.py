@@ -27,9 +27,12 @@ from __future__ import annotations
 import io
 import json
 import logging
+import shutil
 from collections import defaultdict
 from datetime import datetime, timedelta
 
+import chess
+import chess.engine
 import chess.pgn
 
 # Reuse the platform-specific fetch + parse helpers from harvester.
@@ -47,8 +50,16 @@ from src.harvester import (
     _lichess_extract_header,
     LICHESS_API_BASE,
 )
-from src.models import get_connection
-from src.patterns import _get_opening_name
+from src.models import get_connection, init_db
+from src.patterns import (
+    _get_opening_name,
+    _classify_game_phase,
+    _dominant_phase,
+    _MOTIF_IDENTIFIERS,
+)
+# v1.20.0 deep scan: reuse the engine eval + motif-detection primitives.
+from src.analyzer import score_to_cp, cap_eval, MOTIF_DETECTION_THRESHOLD_CP
+from src.motifs import detect_motifs
 
 logger = logging.getLogger(__name__)
 
@@ -504,6 +515,343 @@ def compute_opponent_profile(games: list[dict]) -> dict:
         },
         "weaknesses": _aggregate(games, "loss"),
         "strengths": _aggregate(games, "win"),
+    }
+
+
+# ── v1.20.0 deep scan: opponent tactical-motif analysis ──────────────────
+
+
+def analyze_opponent_game(
+    pgn_text: str,
+    opponent_color: str,
+    stockfish_path: str,
+    depth: int = 22,
+    threads: int = 6,
+    hash_mb: int = 512,
+    move_time_limit: float = 10.0,
+) -> dict:
+    """Run Stockfish over ONE opponent game and tally the opponent's
+    missed/found tactical motifs.
+
+    Mirrors the per-move motif block in ``analyzer.analyze_game``
+    (src/analyzer.py ~line 285) but is read-only — no DB writes, no
+    ACPL/clock/classification bookkeeping — and tallies ONLY the moves
+    where ``opponent_color`` was the side to move. All evals are
+    white-POV (``score_to_cp``), so the cp_loss sign logic matches the
+    analyzer exactly.
+
+    Returns a per-game summary:
+      {"found": {motif: n}, "missed": {motif: n},
+       "critical_moves": n,
+       "missed_by_phase": {opening, middlegame, endgame}}
+    An unparseable or zero-move PGN yields the empty-but-valid shape.
+    """
+    empty = {
+        "found": {}, "missed": {}, "critical_moves": 0,
+        "missed_by_phase": {"opening": 0, "middlegame": 0, "endgame": 0},
+    }
+    game = chess.pgn.read_game(io.StringIO(pgn_text))
+    if game is None:
+        return empty
+    moves = list(game.mainline_moves())
+    if not moves:
+        return empty
+
+    target = chess.WHITE if opponent_color == "white" else chess.BLACK
+    found: dict[str, int] = defaultdict(int)
+    missed: dict[str, int] = defaultdict(int)
+    # Per-motif phase breakdown so cross-game aggregation is an exact sum
+    # (no lossy redistribution): {motif: {opening, middlegame, endgame}}.
+    missed_by_phase: dict[str, dict] = {}
+    critical = 0
+
+    engine = chess.engine.SimpleEngine.popen_uci(stockfish_path)
+    try:
+        engine.configure({"Threads": threads, "Hash": hash_mb})
+        board = game.board()
+        limit = chess.engine.Limit(depth=depth, time=move_time_limit)
+        info = engine.analyse(board, limit)
+        prev_cp = score_to_cp(info["score"], board.turn)
+
+        for i, move in enumerate(moves):
+            move_number = (i // 2) + 1
+            side_to_move = board.turn
+            board_before = board.copy()
+            best_info = info
+            best_move_obj = best_info["pv"][0] if best_info.get("pv") else None
+
+            eval_before_cp = prev_cp
+            board.push(move)
+            info = engine.analyse(board, limit)
+            prev_cp = score_to_cp(info["score"], board.turn)
+
+            # Only the opponent's OWN moves reveal THEIR blind spots.
+            if side_to_move != target:
+                continue
+
+            capped_before = cap_eval(eval_before_cp or 0)
+            capped_after = cap_eval(prev_cp or 0)
+            if side_to_move == chess.WHITE:
+                cp_loss = max(0, capped_before - capped_after)
+            else:
+                cp_loss = max(0, capped_after - capped_before)
+            if cp_loss < MOTIF_DETECTION_THRESHOLD_CP:
+                continue
+
+            played_pv = list(info.get("pv") or [])
+            played_motifs = detect_motifs(board_before, move, played_pv)
+            if best_move_obj is not None and best_move_obj != move:
+                best_pv = list(best_info.get("pv") or [])[1:]
+                best_motifs = detect_motifs(board_before, best_move_obj, best_pv)
+            else:
+                best_motifs = played_motifs
+            if not (played_motifs or best_motifs):
+                continue
+
+            critical += 1
+            phase = _classify_game_phase(move_number)
+            for m in best_motifs:
+                if m in played_motifs:
+                    found[m] += 1
+                else:
+                    missed[m] += 1
+                    mp = missed_by_phase.setdefault(
+                        m, {"opening": 0, "middlegame": 0, "endgame": 0})
+                    mp[phase] += 1
+
+        return {
+            "found": dict(found),
+            "missed": dict(missed),
+            "critical_moves": critical,
+            "missed_by_phase": missed_by_phase,
+        }
+    finally:
+        engine.quit()
+
+
+def _resolve_opponent_color(row: dict, username: str) -> str | None:
+    """Determine the scouted opponent's color in one game.
+
+    Trusts ``opponent_games.player_color`` when present; otherwise
+    derives it from the PGN ``[White]``/``[Black]`` headers vs the
+    username. Returns "white"/"black", or None when unresolvable (the
+    caller skips + logs that game rather than miscount the wrong side).
+    """
+    color = (row.get("player_color") or "").strip().lower()
+    if color in ("white", "black"):
+        return color
+    pgn = row.get("pgn") or ""
+    try:
+        game = chess.pgn.read_game(io.StringIO(pgn))
+    except (ValueError, OSError):
+        game = None
+    if game is None:
+        return None
+    uname = (username or "").strip().lower()
+    white = (game.headers.get("White") or "").strip().lower()
+    black = (game.headers.get("Black") or "").strip().lower()
+    if uname and uname == white:
+        return "white"
+    if uname and uname == black:
+        return "black"
+    return None
+
+
+def deep_scan_opponent(
+    username: str,
+    platform: str,
+    config: dict | None = None,
+    db_path: str | None = None,
+    limit: int = 20,
+    progress_cb=None,
+) -> dict:
+    """Run Stockfish + motif detection over the opponent's last ``limit``
+    accumulated games (newest first), storing a per-game motif summary on
+    each ``opponent_games`` row.
+
+    INCREMENTAL: games already carrying ``analyzed_at`` are skipped, so a
+    re-scan after a fresh fetch only analyzes the new games. Engine
+    settings come from ``config['stockfish']`` (same as player analysis —
+    depth 22 by default).
+
+    ``progress_cb(done, total)`` is called after each analyzed game.
+    Returns ``{"analyzed": n, "skipped": n, "candidates": n}``.
+    Raises FileNotFoundError if the Stockfish binary can't be located.
+    """
+    platform = _normalize_platform(platform)
+    sf = (config or {}).get("stockfish", {}) if config else {}
+    sf_path = sf.get("path") or shutil.which("stockfish")
+    if not sf_path or (sf_path not in ("stockfish",) and not shutil.which(sf_path)
+                       and not _is_executable(sf_path)):
+        # Resolve a bare name on PATH; otherwise require an existing binary.
+        resolved = shutil.which(sf_path) if sf_path else None
+        if not resolved and not _is_executable(sf_path or ""):
+            raise FileNotFoundError(
+                "Stockfish not found. Install it with: brew install stockfish"
+            )
+        sf_path = resolved or sf_path
+    depth = sf.get("depth", 22)
+    threads = sf.get("threads", 6)
+    hash_mb = sf.get("hash_mb", 512)
+    move_time_limit = sf.get("move_time_limit", 10.0)
+
+    # Ensure the v1.20.0 motifs_json/analyzed_at columns exist (idempotent
+    # migration) — covers running a scan against a pre-v1.20.0 database.
+    init_db(db_path).close()
+
+    conn = get_connection(db_path)
+    try:
+        rows = [
+            dict(r) for r in conn.execute(
+                """SELECT id, game_url, pgn, player_color, analyzed_at
+                FROM opponent_games
+                WHERE username = ? AND platform = ?
+                ORDER BY date_played DESC
+                LIMIT ?""",
+                (username.lower(), platform, limit),
+            ).fetchall()
+        ]
+        pending = [r for r in rows if not r.get("analyzed_at")]
+        total = len(pending)
+        analyzed = 0
+        skipped = 0
+        for r in pending:
+            color = _resolve_opponent_color(r, username)
+            if color is None:
+                skipped += 1
+                logger.warning(
+                    "[hunter] deep scan: skipping game id=%s (%s) — "
+                    "could not attribute opponent color",
+                    r.get("id"), username,
+                )
+                continue
+            per_game = analyze_opponent_game(
+                r["pgn"], color, sf_path,
+                depth=depth, threads=threads, hash_mb=hash_mb,
+                move_time_limit=move_time_limit,
+            )
+            conn.execute(
+                "UPDATE opponent_games SET motifs_json = ?, "
+                "analyzed_at = datetime('now') WHERE id = ?",
+                (json.dumps(per_game), r["id"]),
+            )
+            conn.commit()
+            analyzed += 1
+            if progress_cb:
+                progress_cb(analyzed, total)
+        return {"analyzed": analyzed, "skipped": skipped, "candidates": len(rows)}
+    finally:
+        conn.close()
+
+
+def _is_executable(path: str) -> bool:
+    import os
+    return bool(path) and os.path.isfile(path) and os.access(path, os.X_OK)
+
+
+def compute_opponent_motif_summary(
+    username: str, platform: str, db_path: str | None = None,
+) -> dict | None:
+    """Aggregate the per-game opponent motif summaries (written by
+    ``deep_scan_opponent``) into a single view.
+
+    Output mirrors the player-side ``_compute_motif_summary`` shape
+    (``by_motif`` with missed/found/miss_rate/phase splits) so the
+    frontend ``<MotifThemes>`` card renders opponent data with no new
+    chart code. Returns None when no games have been deep-scanned yet.
+    Escalation tiers are intentionally omitted — those describe a single
+    player's trajectory over time, not a scouted opponent.
+    """
+    platform = _normalize_platform(platform)
+    conn = get_connection(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT motifs_json FROM opponent_games "
+            "WHERE username = ? AND platform = ? AND analyzed_at IS NOT NULL",
+            (username.lower(), platform),
+        ).fetchall()
+    finally:
+        conn.close()
+    if not rows:
+        return None
+
+    missed_by_phase = {m: {"opening": 0, "middlegame": 0, "endgame": 0}
+                       for m in _MOTIF_IDENTIFIERS}
+    found_total = {m: 0 for m in _MOTIF_IDENTIFIERS}
+    total_critical = 0
+    games_analyzed = len(rows)
+
+    for row in rows:
+        try:
+            per = json.loads(row["motifs_json"]) if row["motifs_json"] else {}
+        except (TypeError, ValueError):
+            continue
+        total_critical += per.get("critical_moves", 0)
+        for motif, n in (per.get("found") or {}).items():
+            if motif in found_total:
+                found_total[motif] += n
+        # Per-motif phase breakdown sums exactly across games.
+        for motif, phases in (per.get("missed_by_phase") or {}).items():
+            if motif not in missed_by_phase:
+                continue
+            for ph in ("opening", "middlegame", "endgame"):
+                missed_by_phase[motif][ph] += phases.get(ph, 0)
+
+    by_motif = []
+    for motif in _MOTIF_IDENTIFIERS:
+        m_phases = dict(missed_by_phase[motif])
+        m = sum(m_phases.values())
+        f = found_total[motif]
+        denom = m + f
+        miss_rate = round(m / denom * 100, 1) if denom else 0.0
+        by_motif.append({
+            "motif": motif,
+            "missed": m,
+            "found": f,
+            "miss_rate": miss_rate,
+            "missed_by_phase": m_phases,
+            "dominant_missed_phase": _dominant_phase(m_phases),
+        })
+
+    by_motif.sort(key=lambda e: (-e["missed"], -e["found"]))
+    top = next((e for e in by_motif if e["missed"] > 0), None)
+    return {
+        "period_days": None,
+        "total_critical_moves": total_critical,
+        "games_analyzed": games_analyzed,
+        "by_motif": by_motif,
+        "top_missed": top["motif"] if top else None,
+        "top_missed_count": top["missed"] if top else 0,
+        "top_missed_dominant_phase": top["dominant_missed_phase"] if top else None,
+    }
+
+
+def get_deep_scan_status(
+    username: str, platform: str, db_path: str | None = None,
+) -> dict:
+    """v1.20.0: Deep Scan coverage for an opponent — drives the hunt
+    page's "Run / Re-run Deep Scan" affordance.
+
+    Returns {analyzed_games, total_cached, last_analyzed_at}.
+    """
+    platform = _normalize_platform(platform)
+    conn = get_connection(db_path)
+    try:
+        row = conn.execute(
+            """SELECT
+                 COUNT(*) AS total,
+                 SUM(CASE WHEN analyzed_at IS NOT NULL THEN 1 ELSE 0 END) AS analyzed,
+                 MAX(analyzed_at) AS last_analyzed_at
+               FROM opponent_games
+               WHERE username = ? AND platform = ?""",
+            (username.lower(), platform),
+        ).fetchone()
+    finally:
+        conn.close()
+    return {
+        "analyzed_games": (row["analyzed"] or 0) if row else 0,
+        "total_cached": (row["total"] or 0) if row else 0,
+        "last_analyzed_at": (row["last_analyzed_at"] if row else None),
     }
 
 

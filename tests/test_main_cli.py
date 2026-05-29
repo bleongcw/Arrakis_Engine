@@ -333,3 +333,72 @@ class TestRescanMotifsSlug:
             "should resolve, not report zero games."
         )
         assert "Rescanning 1 games" in out or "Rescanning" in out
+
+
+class TestCmdHuntScan:
+    """v1.20.0: `python main.py hunt-scan` dispatches to
+    deep_scan_opponent with the resolved opponent/platform/limit and
+    prints the top blind spot. Patches the engine pass — no Stockfish."""
+
+    def _args(self, opponent="rival", platform="chess.com", games=None):
+        return argparse.Namespace(
+            opponent=opponent, platform=platform, games=games,
+        )
+
+    def test_dispatches_to_deep_scan(self, db_path, monkeypatch, capsys):
+        calls = {}
+
+        def fake_scan(username, platform, config=None, db_path=None,
+                      limit=20, progress_cb=None):
+            calls["username"] = username
+            calls["platform"] = platform
+            calls["limit"] = limit
+            return {"analyzed": 3, "skipped": 0, "candidates": 3}
+
+        def fake_summary(username, platform, db_path=None):
+            return {"top_missed": "fork", "top_missed_count": 4,
+                    "games_analyzed": 3}
+
+        monkeypatch.setattr("src.hunter.deep_scan_opponent", fake_scan)
+        monkeypatch.setattr(
+            "src.hunter.compute_opponent_motif_summary", fake_summary,
+        )
+
+        cfg = _config(db_path)
+        cfg["features"] = {"hunter_scan_games": 12}
+        cfg["stockfish"] = {"depth": 22}
+        main_module.cmd_hunt_scan(self._args(games=None), cfg)
+
+        assert calls["username"] == "rival"
+        assert calls["platform"] == "chess.com"
+        assert calls["limit"] == 12  # from features.hunter_scan_games
+        out = capsys.readouterr().out
+        assert "Top blind spot: fork" in out
+
+    def test_games_flag_overrides_config(self, db_path, monkeypatch, capsys):
+        captured = {}
+
+        def fake_scan(u, p, config=None, db_path=None, limit=20, progress_cb=None):
+            captured["limit"] = limit
+            return {"analyzed": 0, "skipped": 0, "candidates": 0}
+
+        monkeypatch.setattr("src.hunter.deep_scan_opponent", fake_scan)
+        monkeypatch.setattr(
+            "src.hunter.compute_opponent_motif_summary",
+            lambda u, p, db_path=None: None,
+        )
+        cfg = _config(db_path)
+        main_module.cmd_hunt_scan(self._args(games=5), cfg)
+        assert captured["limit"] == 5
+        out = capsys.readouterr().out
+        assert "No tactical blind spots detected yet." in out
+
+    def test_stockfish_missing_is_reported(self, db_path, monkeypatch, capsys):
+        def boom(*a, **kw):
+            raise FileNotFoundError(
+                "Stockfish not found. Install it with: brew install stockfish"
+            )
+        monkeypatch.setattr("src.hunter.deep_scan_opponent", boom)
+        main_module.cmd_hunt_scan(self._args(), _config(db_path))
+        out = capsys.readouterr().out
+        assert "ERROR" in out and "Stockfish not found" in out

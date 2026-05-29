@@ -212,8 +212,10 @@ Key functions:
 - `fetch_opponent_games(username, platform, lookback_months=6)` — pulls fresh PGN from chess.com or lichess. **No Stockfish, no DB writes to the player-centric `games` table.**
 - `accumulate_opponent_games(...)` — orchestrates fetch-since-last + insert + prune. Returns the full accumulated set.
 - `compute_opponent_profile(games)` — aggregates by opening + color and includes up to `MAX_REPS_PER_OPENING=5` representative PGNs per `(opening, outcome)` so the UI can render mini-board step-through. Mirrors `_compute_loss_openings` from `patterns.py`.
-- `get_or_fetch_profile(...)` — public entry point. Cache-aware; returns profile + `meta` block with `cached`, `accumulated_games`, `fetched_at`, `platform`, `username`.
+- `get_or_fetch_profile(...)` — public entry point. Cache-aware; returns profile + `meta` block with `cached`, `accumulated_games`, `fetched_at`, `platform`, `username`. v1.20.0 also attaches `motif_summary` + a `deep_scan` status block when the opponent has been scanned.
 - Feature-flagged via `features.hunter_mode` (default `true`).
+
+**Deep Scan (v1.20.0) — opponent tactical blind spots.** Opt-in Stockfish pass over an opponent's games to find the tactical themes they MISS (the patterns to bait them into). `analyze_opponent_game(pgn, opponent_color, ...)` is a focused, read-only mirror of the analyzer motif loop (reuses `score_to_cp`/`cap_eval`/`MOTIF_DETECTION_THRESHOLD_CP` + `motifs.detect_motifs`; tallies only the opponent's own critical moves, with a per-motif phase breakdown). `deep_scan_opponent(username, platform, config, limit=20, progress_cb)` scans the last N (`features.hunter_scan_games`, default 20) accumulated games at the same depth as player analysis and caches a per-game motif summary + `analyzed_at` on each `opponent_games` row — **incremental**, so a re-scan only analyzes newly-fetched games. `compute_opponent_motif_summary` sums the per-game results into the same shape as the player-side `_compute_motif_summary`, so the frontend `<MotifThemes>` card renders opponent data unchanged (retitled "Tactical Blind Spots"). Opt-in only: `POST /api/pipeline/hunt-scan` (background job under the single-task `pipeline_state` lock) or `python main.py hunt-scan --opponent X` — never the default profile fetch, which stays sub-second. Opponent color per game comes from `opponent_games.player_color` with a PGN-header fallback (`_resolve_opponent_color`); unattributable games are skipped + logged.
 
 ### `dashboard_server.py` — REST API
 Single-process Python HTTP server. SQLite WAL mode + 30s busy timeout; returns 503 gracefully when the analyzer is holding the lock.
@@ -338,7 +340,7 @@ The `ARRAKIS_` prefix avoids collisions with other tools that use the unprefixed
 
 ## 7. Testing
 
-**~837 tests total** — 627 backend (pytest) + 210 frontend (Vitest). Counts as of v1.19.0; see CHANGELOG for per-release deltas. Backend integration (`-m integration`, Stockfish) and live (`-m live`, LLM key) tiers are excluded by default.
+**~852 tests total** — 639 backend (pytest) + 213 frontend (Vitest). Counts as of v1.20.0; see CHANGELOG for per-release deltas. Backend integration (`-m integration`, Stockfish) and live (`-m live`, LLM key) tiers are excluded by default.
 
 ### Backend (`tests/`)
 

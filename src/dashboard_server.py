@@ -118,6 +118,8 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             self._handle_schedule_interval(body)
         elif path == "/api/hunt/refresh":
             self._handle_hunt_refresh(body)
+        elif path == "/api/pipeline/hunt-scan":
+            self._handle_hunt_scan(body)
         elif path == "/api/journal/note":
             # v1.12.0: parent-authored note
             self._handle_create_note(body)
@@ -1597,6 +1599,8 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
         return {
             "lookback_months": features.get("hunter_lookback_months", 6),
             "max_games": features.get("hunter_max_games_per_opponent"),
+            # v1.20.0: how many recent games a Deep Scan analyzes.
+            "scan_games": features.get("hunter_scan_games", 20),
         }
 
     def _api_hunt_profile(self, params):
@@ -1612,7 +1616,11 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
         if not opponent:
             return {"error": "opponent query param is required"}
 
-        from src.hunter import get_or_fetch_profile
+        from src.hunter import (
+            get_or_fetch_profile,
+            compute_opponent_motif_summary,
+            get_deep_scan_status,
+        )
         cfg = self._hunter_config()
         try:
             profile = get_or_fetch_profile(
@@ -1622,6 +1630,16 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             )
         except ValueError as e:
             return {"error": str(e)}
+        # v1.20.0: attach Deep Scan results (Tactical Blind Spots) when the
+        # opponent has been scanned; otherwise null + a status block so the
+        # UI can render the "Run Deep Scan" affordance.
+        if isinstance(profile, dict):
+            profile["motif_summary"] = compute_opponent_motif_summary(
+                opponent, platform, self.db_path,
+            )
+            profile["deep_scan"] = get_deep_scan_status(
+                opponent, platform, self.db_path,
+            )
         return profile
 
     def _handle_hunt_refresh(self, body):
@@ -1650,6 +1668,62 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             self._send_json({"error": str(e)}, 400)
             return
         self._send_json(profile)
+
+    def _handle_hunt_scan(self, body):
+        """POST /api/pipeline/hunt-scan — body: {opponent, platform}
+
+        v1.20.0 Deep Scan: run Stockfish + the 12 motif detectors over the
+        opponent's last N accumulated games (background job), so the
+        Tactical Blind Spots card can surface the themes they miss. Opt-in
+        only — never runs automatically. Reuses the single-task
+        pipeline_state lock so it can't collide with harvest/analyze.
+        """
+        if not self._hunter_enabled():
+            self._send_json(
+                {"error": "Hunter Mode is disabled in config.yaml"}, 403,
+            )
+            return
+        opponent = (body or {}).get("opponent", "").strip()
+        platform = (body or {}).get("platform", "chess.com").strip()
+        if not opponent:
+            self._send_json({"error": "opponent is required"}, 400)
+            return
+
+        from src import pipeline_state
+        from src.hunter import deep_scan_opponent
+
+        if not pipeline_state.start_task("hunt_scan"):
+            current = pipeline_state.current_task()
+            self._send_json({"error": f"Another task is running: {current}"}, 409)
+            return
+
+        db_path = self.db_path
+        config = self.config
+        scan_games = self._hunter_config().get("scan_games", 20)
+
+        def run():
+            try:
+                def progress(done, total):
+                    pipeline_state.update_progress(
+                        f"Deep-scanning {opponent}: game {done} of {total}...",
+                        {"games_processed": done, "games_total": total},
+                    )
+                result = deep_scan_opponent(
+                    opponent, platform, config=config, db_path=db_path,
+                    limit=scan_games, progress_cb=progress,
+                )
+                pipeline_state.complete_task(result)
+            except FileNotFoundError as e:
+                pipeline_state.fail_task(str(e))
+            except Exception as e:
+                logger.exception("Hunt deep scan failed: %s", e)
+                pipeline_state.fail_task(str(e))
+
+        threading.Thread(target=run, daemon=True).start()
+        self._send_json({
+            "status": "started",
+            "message": f"Deep-scanning {opponent}'s last {scan_games} games...",
+        })
 
     def log_message(self, format, *args):
         """Suppress default access logs for cleaner output."""

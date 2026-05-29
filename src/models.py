@@ -383,6 +383,20 @@ def _migrate(conn: sqlite3.Connection):
     )
     conn.commit()
 
+    # v1.20.0: Hunter Mode deep scan — per-game tactical-motif analysis of
+    # an opponent's games. opponent_games gains a cached per-game motif
+    # summary (motifs_json) + an analyzed_at marker so a deep scan is
+    # incremental (only newly-fetched games get the expensive Stockfish
+    # pass). Both nullable — pre-v1.20.0 rows / un-scanned games are simply
+    # "not analyzed yet" and surface no Tactical Blind Spots until scanned.
+    opp_cols = {r[1] for r in conn.execute("PRAGMA table_info(opponent_games)").fetchall()}
+    if "motifs_json" not in opp_cols:
+        conn.execute("ALTER TABLE opponent_games ADD COLUMN motifs_json TEXT")
+        conn.commit()
+    if "analyzed_at" not in opp_cols:
+        conn.execute("ALTER TABLE opponent_games ADD COLUMN analyzed_at TEXT")
+        conn.commit()
+
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS players (

@@ -4,6 +4,7 @@ import { useState, useCallback } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { OpponentSearch } from "@/components/hunter/opponent-search";
 import { TargetedPrep } from "@/components/hunter/targeted-prep";
+import { OpponentBlindSpots } from "@/components/hunter/opponent-blind-spots";
 import { fetchHunterProfile, refreshHunterProfile } from "@/lib/api";
 import type { OpponentProfile, HuntPlatform } from "@/lib/types";
 
@@ -39,6 +40,21 @@ export default function HuntPage() {
     },
     [],
   );
+
+  // v1.20.0: re-fetch the profile (now carrying Deep Scan results) after a
+  // scan completes — served from the 24h cache, so this is a fast read.
+  const reloadProfile = useCallback(async () => {
+    if (!lastQuery) return;
+    try {
+      const data = await fetchHunterProfile(
+        lastQuery.opponent,
+        lastQuery.platform,
+      );
+      if (!(data as { error?: string }).error) setProfile(data);
+    } catch {
+      // Non-fatal — the scan still ran; the user can refresh manually.
+    }
+  }, [lastQuery]);
 
   const handleRefresh = useCallback(async () => {
     if (!lastQuery) return;
@@ -100,6 +116,19 @@ export default function HuntPage() {
               profile={profile}
               onRefresh={handleRefresh}
               refreshing={refreshing}
+            />
+          </CardContent>
+        </Card>
+      )}
+
+      {profile && lastQuery && (
+        <Card>
+          <CardContent className="pt-6">
+            <OpponentBlindSpots
+              opponent={lastQuery.opponent}
+              platform={lastQuery.platform}
+              profile={profile}
+              onScanComplete={reloadProfile}
             />
           </CardContent>
         </Card>

@@ -532,6 +532,48 @@ class TestJournalNoteEndpoints:
             assert e.code == 400
 
 
+class TestHuntDeepScanAPI:
+    """v1.20.0: GET /api/hunt/profile carries Deep Scan results
+    (motif_summary + deep_scan status). Seeds a fresh cached profile +
+    an analyzed opponent game so the request never hits the network."""
+
+    def test_profile_carries_motif_summary_and_status(
+        self, live_server, db_with_data,
+    ):
+        import json as _json
+        from src.models import init_db
+        from src.hunter import set_cached_profile
+
+        conn = init_db(db_with_data)
+        # Fresh cached profile → get_or_fetch_profile returns it (no fetch).
+        set_cached_profile(conn, "rival", "chess.com", {
+            "total_games": 1,
+            "results": {"wins": 0, "losses": 1, "draws": 0, "win_rate": 0.0},
+            "weaknesses": {"white": [], "black": []},
+            "strengths": {"white": [], "black": []},
+        })
+        # One analyzed opponent game so deep_scan + motif_summary populate.
+        conn.execute(
+            """INSERT INTO opponent_games
+            (username, platform, game_url, pgn, player_color, result,
+             date_played, motifs_json, analyzed_at)
+            VALUES ('rival','chess.com','gx','pgn','white','loss',
+                    '2026-05-01', ?, datetime('now'))""",
+            (_json.dumps({
+                "found": {}, "missed": {"fork": 2}, "critical_moves": 2,
+                "missed_by_phase": {"fork": {"opening": 0, "middlegame": 2, "endgame": 0}},
+            }),),
+        )
+        conn.commit()
+        conn.close()
+
+        data = api_get(live_server, "/api/hunt/profile?opponent=rival&platform=chess.com")
+        assert "motif_summary" in data
+        assert "deep_scan" in data
+        assert data["deep_scan"]["analyzed_games"] == 1
+        assert data["motif_summary"]["top_missed"] == "fork"
+
+
 class TestCorsHeaders:
     def test_response_has_cors(self, live_server):
         """API responses should include CORS headers."""

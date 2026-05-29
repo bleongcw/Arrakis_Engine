@@ -1,6 +1,6 @@
 # Arrakis Engine Roadmap
 
-*Updated 2026-05-29 — current release v1.19.0*
+*Updated 2026-05-29 — current release v1.20.0*
 
 This is the public-facing roadmap. The full release history is in
 [CHANGELOG.md](CHANGELOG.md); architectural details are in
@@ -184,6 +184,11 @@ real-world miles.
 
 ### Hunter Mode extensions
 
+- ✅ **Deep Scan — opponent tactical blind spots (shipped v1.20.0).** Opt-in
+  Stockfish + 12-motif analysis of an opponent's last N games surfaces the
+  tactical themes they MISS as a "Tactical Blind Spots" card (themes to bait
+  them into). Background job, incremental, cached. CLI: `python main.py
+  hunt-scan --opponent X`.
 - **Trap detection on opponent games** — apply the v1.4.0 trap library to the
   opponent's accumulated games, surface "their favourite trap to play" /
   "their favourite trap to fall for".

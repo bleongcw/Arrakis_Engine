@@ -4,6 +4,64 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.20.0] - 2026-05-29
+
+### Added
+- **Hunter Mode Deep Scan — opponent tactical blind spots.** Hunter Mode has
+  been opening-level and fast-by-design since v1.4.1: it tells you *what an
+  opponent plays*, never *which tactics they miss*. v1.20.0 adds an opt-in
+  **Deep Scan** that runs Stockfish + the 12 motif detectors over the
+  opponent's recent games and surfaces the themes they MISS — the patterns to
+  bait them into.
+
+  **Engine pass (`analyze_opponent_game`, `src/hunter.py`).** A focused,
+  read-only mirror of the analyzer's motif loop: walks one game, and for each
+  move where the *opponent* was to move and lost ≥50cp, detects played-vs-best
+  motifs and tallies the misses (with a per-motif phase breakdown). Reuses the
+  analyzer's `score_to_cp`/`cap_eval`/`MOTIF_DETECTION_THRESHOLD_CP` and
+  `motifs.detect_motifs` — no DB writes, no ACPL/clock/classification overhead.
+
+  **Scan orchestration.** `deep_scan_opponent` analyzes the opponent's last N
+  accumulated games (config `features.hunter_scan_games`, default 20) at the
+  same depth as player analysis (depth 22). **Incremental**: a per-game result
+  + `analyzed_at` marker are cached on each `opponent_games` row, so a re-scan
+  only analyzes newly-fetched games. `compute_opponent_motif_summary`
+  aggregates the per-game results into the same shape as the player-side
+  `motif_summary`, so the frontend `<MotifThemes>` card renders opponent data
+  with zero new chart code.
+
+  **Surfaces.** A new **"Tactical Blind Spots"** section on `/[player]/hunt`
+  with a "Deep Scan (Stockfish)" button (carrying a time warning — depth-22
+  over 20 games is minutes), a live progress bar, and on completion the
+  `<MotifThemes>` card + a deterministic headline ("Bait pins — misses 82% of
+  pin tactics across N critical moves"). `GET /api/hunt/profile` now carries
+  `motif_summary` + a `deep_scan` status block; `python main.py hunt-scan
+  --opponent X` runs the same scan from the CLI.
+
+  **Opt-in + safe.** The scan only runs via the explicit
+  `POST /api/pipeline/hunt-scan` (background job) or the CLI — never
+  automatically, so the default profile fetch stays sub-second. It reuses the
+  single-task `pipeline_state` lock so it can't collide with
+  harvest/analyze/patterns, and fails gracefully with a brew-install hint when
+  Stockfish is missing. Additive schema (two nullable `opponent_games`
+  columns) — no breaking change.
+
+### Tests
+- Backend **627 → 639** (+12 unit) plus a new Stockfish-gated integration test:
+  `compute_opponent_motif_summary` exact per-phase aggregation,
+  `get_deep_scan_status`, `_resolve_opponent_color` (player_color → PGN-header
+  fallback → skip), incremental skip, the `hunt-scan` CLI dispatch (depth/limit
+  resolution + Stockfish-missing path), and the `/api/hunt/profile` enrichment
+  shape.
+- Frontend **210 → 213** (+3): the Deep Scan section renders the button + time
+  warning when un-scanned, and the Tactical Blind Spots card + "Bait …"
+  headline after a scan.
+- Manual smoke: `python main.py hunt-scan --opponent oligonucleotide_88x`
+  analyzed 8 games incrementally and surfaced "deflection" as the top blind
+  spot.
+
+---
+
 ## [1.19.0] - 2026-05-29
 
 ### Added
