@@ -4,6 +4,46 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.18.2] - 2026-05-29
+
+### Fixed
+- **Mobile viewport meta tag was missing.** The app shipped with 74
+  responsive Tailwind breakpoint classes (`sm:`/`md:`/`lg:`),
+  progressive table column-hiding, an auto-sizing chess board, and
+  a mobile-aware nav — but `app/layout.tsx` had no viewport meta
+  tag. Without it, mobile browsers render the page at desktop width
+  and zoom out, so **none of those breakpoints ever fired on a
+  phone**. The README claimed "fully mobile-responsive (320px+)" in
+  three places; that claim was aspirational until now.
+
+  Fix: added a Next.js 16 `Viewport` export to the root layout,
+  which injects
+  `<meta name="viewport" content="width=device-width, initial-scale=1">`.
+  The existing responsive CSS now actually works on mobile — the
+  Games table sheds low-priority columns, the board fits the screen,
+  the layout flows at 1:1 scale instead of desktop-zoomed-out.
+
+  Deliberately did NOT set `maximumScale` / `userScalable=false` —
+  locking pinch-zoom is an accessibility anti-pattern, and a
+  9-year-old may genuinely want to zoom the board.
+
+### Tests
+- New `frontend/app/__tests__/layout.test.tsx` (4 tests): asserts
+  the `viewport` export exists with `width=device-width`,
+  `initialScale=1`, does NOT lock zoom, and sits alongside (not
+  replacing) the page metadata. Regression lock against the exact
+  "missing meta tag" gap class this ship fixes.
+- Frontend: 191 → **195**. Backend unchanged at 597.
+
+### Docs
+- README mobile-responsive bullet now documents the mechanism
+  (viewport meta tag), not just the claim.
+- ROADMAP mobile-status line updated: core pages are now mobile-
+  ready; dense chart grids still benefit from a future mobile-
+  layout pass.
+
+---
+
 ## [1.18.1] - 2026-05-29
 
 ### Fixed

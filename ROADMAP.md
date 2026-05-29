@@ -187,7 +187,10 @@ real-world miles.
 
 ### Frontend polish
 
-- **Mobile** — patterns + Hunter Mode usable on mobile but charts squeeze
+- **Mobile** — core pages are mobile-ready as of v1.18.2 (viewport meta tag
+  added; breakpoints fire at 1:1 scale). Dense chart grids (Patterns,
+  Hunter Mode) still squeeze on narrow screens and would benefit from a
+  dedicated mobile-layout pass — single-column stacking, larger tap targets.
 - **Onboarding** — currently a chess parent has to know to add a player, set
   up an API key, and run the pipeline. A guided first-run flow would help.
 

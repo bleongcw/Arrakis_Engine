@@ -786,7 +786,7 @@ cd frontend && pnpm install && pnpm dev
 
 ### Accessibility & Theming
 
-- **Mobile responsive** — all pages adapt to mobile (320px+), tablet, and desktop; ChessBoard auto-sizes via ResizeObserver; tables progressively hide low-priority columns; nav bar scrolls horizontally; player selector shows first names on mobile
+- **Mobile responsive** — viewport meta tag (`width=device-width`, set via Next.js `Viewport` export in the root layout) ensures breakpoints fire at 1:1 scale on phones; all pages adapt to mobile (320px+), tablet, and desktop; ChessBoard auto-sizes via ResizeObserver; tables progressively hide low-priority columns; nav bar scrolls horizontally; player selector shows first names on mobile; pinch-zoom stays available
 - **Light/dark mode** — toggle with theme button, persists across sessions
 - **Error boundaries** — root error boundary, player-scoped error boundary, custom 404 page
 - **Aria-labels** on player selector buttons and game table rows
