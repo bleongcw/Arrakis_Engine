@@ -151,7 +151,7 @@ ArrakisEngine/
 │   └── screenshots/           # Architecture diagram + UI screenshots
 ├── data/
 │   └── chess_coach.db         # SQLite database (auto-created, gitignored)
-├── tests/                     # Backend pytest suite (597 tests across 3 tiers)
+├── tests/                     # Backend pytest suite (627 tests across 3 tiers)
 └── reports/                   # Generated coach reports (gitignored)
 ```
 
@@ -164,7 +164,7 @@ ArrakisEngine/
 | `move_analysis` | Per-move Stockfish results (+ `clock_seconds`, `motifs_json` v1.14.0) |
 | `game_coaching` | LLM coaching output (+ `player_feedback`, `coaching_meta_json`) |
 | `player_patterns` | Aggregated pattern stats JSON (+ `trend_summary`, motif_summary) |
-| `journal_entries` (v1.10.0) | Chronological coaching diary — `kind`='review'\|'note' |
+| `journal_entries` (v1.10.0) | Chronological coaching diary — `kind`='review'\|'note'\|'weakness_alert' (v1.19.0, fire-once priority-weakness alert) |
 | `opponent_cache` (v1.4.1) | Hunter Mode profile JSON cache (24h TTL) |
 | `opponent_games` (v1.4.4) | Hunter Mode accumulating PGN cache (sliding window) |
 
@@ -186,6 +186,17 @@ counts with per-phase splits + a dominant-phase tag (≥60% concentration, ≥3
 instances). Surfaced in `TREND_PROMPT`, `build_trajectory_block`, and the frontend
 `<MotifThemes>` card. Skewer detector calibrated in v1.15.1 (require
 attacker-value < front-piece-value).
+
+**Recurring weakness escalation (v1.19.0):** `_compute_motif_summary` also derives,
+per motif, the distinct-game spread (`missed_games`) + recency `streak` and an
+`escalation` tier via `_escalation_tier` — spread sets the base (≥3/≥5/≥8 games →
+watch/focus/priority), an active streak ≥3 boosts one level, guarded by ≥4
+games-with-motif-data. The top-level `escalated_weaknesses` list drives three
+surfaces: a `⚠ RECURRING WEAKNESS` line + drill-prescribing clause in the coaching
+prompts, an escalation badge on the Tactical Themes card, and a fire-once
+`weakness_alert` Journal entry (priority tier only, de-duped per motif within the
+window). Alerts fire only when `compute_player_patterns(emit_weakness_alerts=True)`
+— the `patterns` CLI + `/api/pipeline/patterns`, never the silent auto-refresh.
 
 ## Pattern Components (Patterns page)
 
@@ -243,8 +254,8 @@ harvest + report).
 
 ## Testing
 
-**~802 tests total** — 597 backend (pytest, three tiers via `pyproject.toml`
-markers) + 205 frontend (Vitest). Integration (`-m integration`, needs Stockfish)
+**~837 tests total** — 627 backend (pytest, three tiers via `pyproject.toml`
+markers) + 210 frontend (Vitest). Integration (`-m integration`, needs Stockfish)
 and live (`-m live`, needs an LLM key) tiers are excluded by default.
 
 ### Running Tests
@@ -252,7 +263,7 @@ and live (`-m live`, needs an LLM key) tiers are excluded by default.
 pytest                                  # default unit tier (~30s, no deps)
 pytest -m integration                   # Stockfish tests (requires binary)
 pytest -m live                          # LLM API tests (~$0.30)
-cd frontend && npx vitest run           # 205 frontend tests, ~3s
+cd frontend && npx vitest run           # 210 frontend tests, ~3s
 cd frontend && npx next build           # type-check
 ```
 

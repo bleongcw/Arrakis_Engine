@@ -139,8 +139,10 @@ The trap library is built once by `python scripts/build_traps.py`, which fetches
 
 **Motif aggregation (v1.15.0–v1.16.0):** `_compute_motif_summary(games, moves_by_game, period_days)` rolls the per-move `motifs_json` tags up into a player-level view — per-motif missed/found counts over the 30-day window, with per-phase (opening/middlegame/endgame) splits and a `dominant_missed_phase` tag (set when one phase holds ≥60% of misses and total ≥3). Surfaced three ways: the `TREND_PROMPT` motif section, the per-game `build_trajectory_block` recurring-themes block, and the frontend `<MotifThemes>` Patterns card. The prompts ask the LLM to name the motif (and its dominant phase, if any) in a practice recommendation when it crosses the ≥5-instance bar.
 
+**Recurring weakness escalation (v1.19.0):** the same aggregator additionally tracks, per motif, the **distinct-game spread** (`missed_games` — separate games carrying a missed instance, not raw instance count) and the **recency streak** (consecutive most-recent games with motif data in which it was missed). `_escalation_tier(missed_games, streak, games_with_motif_data)` maps these to `none`/`watch`/`focus`/`priority`: spread sets the base (≥3 → watch, ≥5 → focus, ≥8 → priority), an active streak ≥3 boosts one level, and the whole thing is gated by ≥4 games-with-motif-data so new accounts can't false-alarm. Output: per-motif `missed_games`/`streak`/`escalation` fields plus a top-level `escalated_weaknesses` list and `games_with_motif_data`. Three surfaces: (1) `build_trajectory_block` leads with a `⚠ RECURRING WEAKNESS` line + records `recurring_weakness`/tier in `coaching_meta_json`, and the coaching prompts gain a clause to lead with it and prescribe a concrete drill instead of restating the diagnosis; (2) the `<MotifThemes>` card renders a 🔴/🟠/🟡 escalation badge; (3) a fire-once `weakness_alert` Journal entry is filed for priority-tier weaknesses (see `journal.py`). Alerts fire only via `compute_player_patterns(emit_weakness_alerts=True)` — the `patterns` CLI + `/api/pipeline/patterns`, never the silent `coach_game` auto-refresh.
+
 ### `journal.py` — coaching diary (v1.12.0)
-Helpers over the `journal_entries` table. Two entry kinds: `'review'` (LLM-generated Recent Form Review across the last N coached games — `compute_recent_form_review` in `patterns.py`, v1.9.0) and `'note'` (manual Parent Note, v1.12.0). Entries accumulate chronologically and render as a threaded social feed on `/[player]/journal`. Reviews name specific games by date + opponent and identify the cross-game through-line; v1.15.0 made them motif-aware.
+Helpers over the `journal_entries` table. Three entry kinds: `'review'` (LLM-generated Recent Form Review across the last N coached games — `compute_recent_form_review` in `patterns.py`, v1.9.0), `'note'` (manual Parent Note, v1.12.0), and `'weakness_alert'` (auto-filed priority recurring-weakness alert, v1.19.0). Entries accumulate chronologically and render as a threaded social feed on `/[player]/journal`. Reviews name specific games by date + opponent and identify the cross-game through-line; v1.15.0 made them motif-aware. `create_weakness_alert` is fire-once: it skips insertion when an open same-motif alert already exists within `period_days` (the row's existence *is* the dedup state), so an ongoing weakness files one entry per episode. weakness_alert entries are immutable — only `'note'` exposes edit/delete.
 
 | Metric | What it answers |
 |---|---|
@@ -336,7 +338,7 @@ The `ARRAKIS_` prefix avoids collisions with other tools that use the unprefixed
 
 ## 7. Testing
 
-**~802 tests total** — 597 backend (pytest) + 205 frontend (Vitest). Counts as of v1.18.3; see CHANGELOG for per-release deltas. Backend integration (`-m integration`, Stockfish) and live (`-m live`, LLM key) tiers are excluded by default.
+**~837 tests total** — 627 backend (pytest) + 210 frontend (Vitest). Counts as of v1.19.0; see CHANGELOG for per-release deltas. Backend integration (`-m integration`, Stockfish) and live (`-m live`, LLM key) tiers are excluded by default.
 
 ### Backend (`tests/`)
 

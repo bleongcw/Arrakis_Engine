@@ -23,6 +23,7 @@ from src.patterns import (
     _compute_tactical_misses,
     _compute_motif_summary,
     _dominant_phase,
+    _escalation_tier,
     _format_motif_summary_for_prompt,
     _compute_repertoire_consistency,
     _acpl_trend_direction,
@@ -137,6 +138,79 @@ class TestComputeRatingPerformance:
         assert r["vs_higher"]["wins"] == 1
         assert r["vs_lower"]["wins"] == 1
         assert r["vs_equal"]["losses"] == 1
+
+
+class TestEmitWeaknessAlerts:
+    """v1.19.0 Phase 3: compute_player_patterns(emit_weakness_alerts=...)
+    fires (or suppresses) the priority-weakness Journal entry."""
+
+    def _seed_priority_fork(self, db_path):
+        """Seed a player with 9 distinct games, each carrying a missed-fork
+        critical move → priority escalation tier (≥8 distinct games)."""
+        conn = init_db(db_path)
+        pid = ensure_player(conn, "forkkid", display_name="ForkKid",
+                            age=9, rating=1050)
+        for i in range(9):
+            day = f"2026-05-{i + 1:02d}"
+            conn.execute(
+                """INSERT INTO games
+                (player_id, game_url, pgn, player_color, player_rating,
+                 opponent_rating, result, time_control, time_class,
+                 date_played, analysis_status)
+                VALUES (?, ?, ?, 'white', 1050, 1000, 'loss', '600',
+                        'rapid', ?, 'complete')""",
+                (pid, f"https://chess.com/g/{i}",
+                 '[White "forkkid"]\n[Black "opp"]\n[Opening "Italian Game"]\n\n1. e4 e5 *',
+                 day),
+            )
+            gid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+            conn.execute(
+                """INSERT INTO move_analysis
+                (game_id, move_number, side, move_played, best_move,
+                 eval_before_cp, eval_after_cp, swing_cp,
+                 win_prob_before, win_prob_after, classification, pv_line,
+                 motifs_json)
+                VALUES (?, 18, 'white', 'Bd3', 'Nxe5', 250, 50, 200,
+                        70.0, 55.0, 'mistake', 'Nxe5', ?)""",
+                (gid, _mj(played=[], best=["fork"], missed=["fork"])),
+            )
+        conn.commit()
+        conn.close()
+        return pid
+
+    def _count_alerts(self, db_path, pid):
+        conn = init_db(db_path)
+        n = conn.execute(
+            "SELECT COUNT(*) FROM journal_entries "
+            "WHERE player_id = ? AND kind = 'weakness_alert'",
+            (pid,),
+        ).fetchone()[0]
+        conn.close()
+        return n
+
+    def test_emit_true_fires_one_alert(self, db_path):
+        pid = self._seed_priority_fork(db_path)
+        stats = compute_player_patterns(
+            pid, db_path=db_path, emit_weakness_alerts=True,
+        )
+        esc = stats["motif_summary"]["escalated_weaknesses"]
+        assert any(e["escalation"] == "priority" and e["motif"] == "fork"
+                   for e in esc)
+        assert self._count_alerts(db_path, pid) == 1
+
+    def test_emit_false_fires_none(self, db_path):
+        pid = self._seed_priority_fork(db_path)
+        compute_player_patterns(
+            pid, db_path=db_path, emit_weakness_alerts=False,
+        )
+        assert self._count_alerts(db_path, pid) == 0
+
+    def test_emit_true_twice_is_idempotent(self, db_path):
+        pid = self._seed_priority_fork(db_path)
+        compute_player_patterns(pid, db_path=db_path, emit_weakness_alerts=True)
+        compute_player_patterns(pid, db_path=db_path, emit_weakness_alerts=True)
+        # De-dup within window → still exactly one alert.
+        assert self._count_alerts(db_path, pid) == 1
 
 
 class TestComputePlayerPatterns:
@@ -734,6 +808,157 @@ class TestComputeMotifSummary:
         assert _dominant_phase({"opening": 0, "middlegame": 5, "endgame": 4}) is None
         # Balanced → None
         assert _dominant_phase({"opening": 3, "middlegame": 4, "endgame": 3}) is None
+
+
+# ── v1.19.0 recurring weakness escalation ─────────────────────────────────
+
+
+class TestEscalationTier:
+    """v1.19.0: _escalation_tier — distinct-game spread sets the base tier,
+    an active streak boosts one level, small samples are guarded."""
+
+    def test_below_watch_is_none(self):
+        assert _escalation_tier(2, 0, 10) == "none"
+
+    def test_tier_floors(self):
+        assert _escalation_tier(3, 0, 10) == "watch"
+        assert _escalation_tier(5, 0, 10) == "focus"
+        assert _escalation_tier(8, 0, 10) == "priority"
+
+    def test_streak_boost_watch_to_focus(self):
+        assert _escalation_tier(3, 3, 10) == "focus"
+
+    def test_streak_boost_focus_to_priority(self):
+        assert _escalation_tier(5, 3, 10) == "priority"
+
+    def test_priority_caps(self):
+        assert _escalation_tier(8, 9, 10) == "priority"
+
+    def test_streak_below_boost_threshold_no_bump(self):
+        # streak of 2 < _ESCALATION_STREAK_BOOST(3) → no bump
+        assert _escalation_tier(3, 2, 10) == "watch"
+
+    def test_streak_cannot_rescue_below_watch(self):
+        # a long streak with only 2 distinct games is still "none"
+        assert _escalation_tier(2, 9, 10) == "none"
+
+    def test_small_sample_guard(self):
+        # 8 missed games but only 3 games of data → guard returns none
+        assert _escalation_tier(8, 0, 3) == "none"
+        # exactly at the sample floor (4) → normal rules apply
+        assert _escalation_tier(3, 0, 4) == "watch"
+
+
+class TestMotifSummaryEscalation:
+    """v1.19.0: distinct-game spread + streak + escalated_weaknesses
+    output from _compute_motif_summary."""
+
+    def _games_with_misses(self, miss_sequence):
+        """Build (games, moves_by_game) where miss_sequence is a list —
+        one entry per game, oldest→newest — of the motif missed in that
+        game (or None for a clean game that still has motif data).
+        Each game gets one player-side critical move at move 20."""
+        games, moves = [], {}
+        for i, motif in enumerate(miss_sequence, start=1):
+            games.append({
+                "id": i, "player_color": "white",
+                "date_played": _days_ago(len(miss_sequence) - i),
+            })
+            best = [motif] if motif else ["pin"]
+            missed = [motif] if motif else []
+            moves[i] = [{
+                "side": "white", "move_number": 20,
+                "motifs_json": _mj(best=best, missed=missed),
+            }]
+        return games, moves
+
+    def test_distinct_game_spread_not_raw_instances(self):
+        """13 misses across 2 games must NOT escalate; 5 misses across
+        5 games must. Spread, not instance count, drives it."""
+        # 2 games, each with many fork misses (instances pile up)
+        games = [
+            {"id": 1, "player_color": "white", "date_played": _today()},
+            {"id": 2, "player_color": "white", "date_played": _today()},
+        ]
+        # also add 2 clean games so the sample guard passes (4 total)
+        games += [
+            {"id": 3, "player_color": "white", "date_played": _today()},
+            {"id": 4, "player_color": "white", "date_played": _today()},
+        ]
+        moves = {
+            1: [{"side": "white", "move_number": 10 + j,
+                 "motifs_json": _mj(best=["fork"], missed=["fork"])} for j in range(7)],
+            2: [{"side": "white", "move_number": 10 + j,
+                 "motifs_json": _mj(best=["fork"], missed=["fork"])} for j in range(6)],
+            3: [{"side": "white", "move_number": 20,
+                 "motifs_json": _mj(best=["pin"], missed=[])}],
+            4: [{"side": "white", "move_number": 20,
+                 "motifs_json": _mj(best=["pin"], missed=[])}],
+        }
+        result = _compute_motif_summary(games, moves, period_days=30)
+        fork = next(e for e in result["by_motif"] if e["motif"] == "fork")
+        assert fork["missed"] == 13          # raw instances are high
+        assert fork["missed_games"] == 2     # but only 2 distinct games
+        assert fork["escalation"] == "none"  # → not recurring
+
+    def test_five_distinct_games_is_focus(self):
+        # fork missed in 5 of 6 games-with-data, no active streak (last game clean)
+        seq = ["fork", "fork", "fork", "fork", "fork", None]
+        games, moves = self._games_with_misses(seq)
+        result = _compute_motif_summary(games, moves, period_days=30)
+        fork = next(e for e in result["by_motif"] if e["motif"] == "fork")
+        assert fork["missed_games"] == 5
+        assert fork["streak"] == 0           # newest game was clean
+        assert fork["escalation"] == "focus"
+
+    def test_streak_detected_from_newest_games(self):
+        # clean, clean, then 3 fork-misses running (newest 3)
+        seq = [None, None, "fork", "fork", "fork"]
+        games, moves = self._games_with_misses(seq)
+        result = _compute_motif_summary(games, moves, period_days=30)
+        fork = next(e for e in result["by_motif"] if e["motif"] == "fork")
+        assert fork["missed_games"] == 3
+        assert fork["streak"] == 3           # 3 consecutive newest
+        # base watch(3) + streak boost(≥3) → focus
+        assert fork["escalation"] == "focus"
+
+    def test_escalated_weaknesses_sorted_and_shaped(self):
+        # fork in 8 games (priority), pin in 5 (focus), skewer in 3 (watch)
+        seq = (["fork"] * 8) + ([None])  # fork dominates; need pin/skewer too
+        games, moves = self._games_with_misses(seq)
+        # overlay pin (5 games) and skewer (3 games) onto the first games
+        for i in range(1, 6):
+            moves[i][0]["motifs_json"] = _mj(best=["fork", "pin"],
+                                             missed=["fork", "pin"])
+        for i in range(1, 4):
+            moves[i][0]["motifs_json"] = _mj(best=["fork", "pin", "skewer"],
+                                             missed=["fork", "pin", "skewer"])
+        result = _compute_motif_summary(games, moves, period_days=30)
+        ew = result["escalated_weaknesses"]
+        # all three present, priority first
+        tiers = {e["motif"]: e["escalation"] for e in ew}
+        assert tiers["fork"] == "priority"
+        assert tiers["pin"] == "focus"
+        assert tiers["skewer"] == "watch"
+        # sorted priority → watch
+        assert [e["escalation"] for e in ew][0] == "priority"
+        # shape
+        assert set(ew[0].keys()) == {
+            "motif", "escalation", "missed_games", "streak",
+            "dominant_missed_phase",
+        }
+
+    def test_games_with_motif_data_counts_clean_games(self):
+        # 3 fork-miss games + 2 clean-but-has-data games = 5 games of data
+        seq = ["fork", "fork", "fork", None, None]
+        games, moves = self._games_with_misses(seq)
+        result = _compute_motif_summary(games, moves, period_days=30)
+        assert result["games_with_motif_data"] == 5
+
+    def test_empty_has_no_escalations(self):
+        result = _compute_motif_summary([], {}, period_days=30)
+        assert result["escalated_weaknesses"] == []
+        assert result["games_with_motif_data"] == 0
 
 
 class TestMotifSummaryInPlayerPatterns:
@@ -1373,6 +1598,160 @@ class TestBuildTrajectoryBlockMotifSection:
         conn.close()
         assert "concentrated in" not in block
         assert diag["motif_top_missed_phase"] is None
+
+
+class TestRecurringWeaknessSurfacing:
+    """v1.19.0 Phase 2: build_trajectory_block leads with a prominent
+    ⚠ RECURRING WEAKNESS line + diag tier when a focus/priority motif
+    exists; _format_motif_summary_for_prompt surfaces the same to the
+    trend LLM; the prompts carry the escalation clause."""
+
+    def _stats_with_escalation(self, escalated, games_with_motif_data=10):
+        return {
+            "total_games": 50,
+            "phase_analysis": {"middlegame": {"acpl": 70, "moves": 200}},
+            "consistency": {"mean_acpl": 60, "total_games": 50,
+                            "rating": "Stable"},
+            "motif_summary": {
+                "period_days": 30,
+                "total_critical_moves": 30,
+                "games_with_motif_data": games_with_motif_data,
+                "top_missed": "fork", "top_missed_count": 12,
+                "by_motif": [
+                    {"motif": "fork", "missed": 12, "found": 2,
+                     "miss_rate": 85.7,
+                     "missed_by_phase": {"opening": 1, "middlegame": 9,
+                                         "endgame": 2},
+                     "dominant_missed_phase": "middlegame"},
+                ],
+                "escalated_weaknesses": escalated,
+            },
+        }
+
+    def _insert(self, conn, pid, stats):
+        conn.execute(
+            """INSERT INTO player_patterns
+            (player_id, period_start, period_end, stats_json, updated_at)
+            VALUES (?, ?, ?, ?, datetime('now'))""",
+            (pid, "2026-04-01", "2026-04-30", json.dumps(stats)),
+        )
+        conn.commit()
+
+    def test_priority_weakness_leads_block_and_diag(self, db_path):
+        conn = init_db(db_path)
+        pid = ensure_player(conn, "esc1", display_name="E", age=9, rating=1100)
+        escalated = [{
+            "motif": "fork", "escalation": "priority",
+            "missed_games": 9, "streak": 3,
+            "dominant_missed_phase": "middlegame",
+        }]
+        self._insert(conn, pid, self._stats_with_escalation(escalated, 9))
+        block, diag = build_trajectory_block(conn, pid)
+        conn.close()
+        assert "RECURRING WEAKNESS" in block
+        assert "fork" in block
+        assert "missed in 9 of the last 9 games" in block
+        assert "3 in a row" in block
+        assert "mostly in the middlegame" in block
+        assert diag["recurring_weakness"] == "fork"
+        assert diag["recurring_weakness_tier"] == "priority"
+
+    def test_focus_weakness_leads_block(self, db_path):
+        conn = init_db(db_path)
+        pid = ensure_player(conn, "esc2", display_name="E", age=9, rating=1100)
+        escalated = [{
+            "motif": "pin", "escalation": "focus",
+            "missed_games": 5, "streak": 0,
+            "dominant_missed_phase": None,
+        }]
+        self._insert(conn, pid, self._stats_with_escalation(escalated, 10))
+        block, diag = build_trajectory_block(conn, pid)
+        conn.close()
+        assert "RECURRING WEAKNESS" in block
+        assert "pin" in block
+        assert "missed in 5 of the last 10 games" in block
+        # streak < 2 → no "in a row" suffix
+        assert "in a row" not in block
+        assert diag["recurring_weakness_tier"] == "focus"
+
+    def test_watch_tier_does_not_lead_block(self, db_path):
+        conn = init_db(db_path)
+        pid = ensure_player(conn, "esc3", display_name="E", age=9, rating=1100)
+        escalated = [{
+            "motif": "skewer", "escalation": "watch",
+            "missed_games": 3, "streak": 0,
+            "dominant_missed_phase": None,
+        }]
+        self._insert(conn, pid, self._stats_with_escalation(escalated, 10))
+        block, diag = build_trajectory_block(conn, pid)
+        conn.close()
+        assert "RECURRING WEAKNESS" not in block
+        assert diag["recurring_weakness"] is None
+        assert diag["recurring_weakness_tier"] is None
+
+    def test_no_escalation_no_line(self, db_path):
+        conn = init_db(db_path)
+        pid = ensure_player(conn, "esc4", display_name="E", age=9, rating=1100)
+        self._insert(conn, pid, self._stats_with_escalation([], 10))
+        block, diag = build_trajectory_block(conn, pid)
+        conn.close()
+        assert "RECURRING WEAKNESS" not in block
+        assert diag["recurring_weakness"] is None
+
+    def test_format_motif_summary_surfaces_escalation(self):
+        text = _format_motif_summary_for_prompt({
+            "total_critical_moves": 30,
+            "games_with_motif_data": 9,
+            "top_missed": "fork", "top_missed_count": 12,
+            "by_motif": [
+                {"motif": "fork", "missed": 12, "found": 2, "miss_rate": 85.7,
+                 "missed_by_phase": {"opening": 1, "middlegame": 9, "endgame": 2},
+                 "dominant_missed_phase": "middlegame"},
+            ],
+            "escalated_weaknesses": [{
+                "motif": "fork", "escalation": "priority",
+                "missed_games": 9, "streak": 3,
+                "dominant_missed_phase": "middlegame",
+            }],
+        })
+        assert "RECURRING WEAKNESS (priority): fork" in text
+        assert "missed in 9 of 9 games" in text
+        assert "3 in a row" in text
+        assert "drill" in text.lower()
+
+    def test_format_motif_summary_skips_watch(self):
+        text = _format_motif_summary_for_prompt({
+            "total_critical_moves": 10,
+            "games_with_motif_data": 10,
+            "top_missed": "fork", "top_missed_count": 3,
+            "by_motif": [
+                {"motif": "fork", "missed": 3, "found": 1, "miss_rate": 75.0,
+                 "missed_by_phase": {"opening": 1, "middlegame": 1, "endgame": 1},
+                 "dominant_missed_phase": None},
+            ],
+            "escalated_weaknesses": [{
+                "motif": "fork", "escalation": "watch",
+                "missed_games": 3, "streak": 0,
+                "dominant_missed_phase": None,
+            }],
+        })
+        assert "RECURRING WEAKNESS" not in text
+
+    def test_trend_prompt_has_escalation_clause(self):
+        from src.patterns import TREND_PROMPT
+        assert "v1.19.0" in TREND_PROMPT
+        assert "RECURRING WEAKNESS" in TREND_PROMPT
+        lower = TREND_PROMPT.lower()
+        assert "drill" in lower
+        assert "restated diagnosis" in lower or "passing mention" in lower
+
+    def test_game_coaching_prompt_has_escalation_clause(self):
+        import inspect
+        from src import coach
+        src = inspect.getsource(coach)
+        assert "v1.19.0" in src
+        assert "RECURRING WEAKNESS" in src
+        assert "drill" in src.lower()
 
 
 class TestComputeRepertoireConsistency:

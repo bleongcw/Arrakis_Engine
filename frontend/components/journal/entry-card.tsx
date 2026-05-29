@@ -36,11 +36,15 @@ const MAX_NOTE_BODY_LEN = 4000; // mirrors src/journal.py
 const KIND_ICONS: Record<string, string> = {
   review: "📖",
   note: "📝",
+  // v1.19.0: auto-filed recurring-weakness alert.
+  weakness_alert: "⚠️",
 };
 
 const KIND_LABELS: Record<string, string> = {
   review: "Review",
   note: "Note",
+  // v1.19.0:
+  weakness_alert: "Priority Weakness",
 };
 
 export interface EntryCardProps {

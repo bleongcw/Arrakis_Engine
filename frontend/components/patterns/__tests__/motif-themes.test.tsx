@@ -186,4 +186,86 @@ describe("MotifThemes — v1.16.0 phase breakdown", () => {
       screen.queryByTestId("motif-phase-line-fork"),
     ).not.toBeInTheDocument();
   });
+
+  // v1.19.0: recurring-weakness escalation badge.
+  it("renders an escalation badge with tier + N of M games + streak", () => {
+    const data: MotifSummaryData = {
+      period_days: 30,
+      total_critical_moves: 30,
+      games_with_motif_data: 9,
+      top_missed: "fork",
+      top_missed_count: 12,
+      by_motif: [
+        {
+          motif: "fork", missed: 12, found: 2, miss_rate: 85.7,
+          missed_by_phase: { opening: 1, middlegame: 9, endgame: 2 },
+          found_by_phase: { opening: 0, middlegame: 1, endgame: 1 },
+          dominant_missed_phase: "middlegame",
+          missed_games: 9, streak: 3, escalation: "priority",
+        },
+      ],
+      escalated_weaknesses: [
+        {
+          motif: "fork", escalation: "priority",
+          missed_games: 9, streak: 3, dominant_missed_phase: "middlegame",
+        },
+      ],
+    };
+    render(<MotifThemes data={data} />);
+    const badge = screen.getByTestId("motif-escalation-fork");
+    expect(badge).toBeInTheDocument();
+    expect(badge.textContent).toContain("missed in 9 of 9 games");
+    expect(badge.textContent).toContain("3 in a row");
+  });
+
+  it("omits the streak suffix when streak < 2", () => {
+    const data: MotifSummaryData = {
+      period_days: 30,
+      total_critical_moves: 20,
+      games_with_motif_data: 10,
+      top_missed: "pin",
+      top_missed_count: 5,
+      by_motif: [
+        {
+          motif: "pin", missed: 5, found: 1, miss_rate: 83.3,
+          missed_by_phase: { opening: 1, middlegame: 3, endgame: 1 },
+          found_by_phase: { opening: 0, middlegame: 1, endgame: 0 },
+          dominant_missed_phase: null,
+          missed_games: 5, streak: 0, escalation: "focus",
+        },
+      ],
+    };
+    render(<MotifThemes data={data} />);
+    const badge = screen.getByTestId("motif-escalation-pin");
+    expect(badge.textContent).toContain("missed in 5 of 10 games");
+    expect(badge.textContent).not.toContain("in a row");
+  });
+
+  it("renders no escalation badge when escalation is none or absent", () => {
+    const data: MotifSummaryData = {
+      period_days: 30,
+      total_critical_moves: 10,
+      games_with_motif_data: 6,
+      top_missed: "fork",
+      top_missed_count: 2,
+      by_motif: [
+        {
+          motif: "fork", missed: 2, found: 3, miss_rate: 40.0,
+          missed_by_phase: { opening: 1, middlegame: 1, endgame: 0 },
+          found_by_phase: { opening: 1, middlegame: 1, endgame: 1 },
+          dominant_missed_phase: null,
+          missed_games: 2, streak: 0, escalation: "none",
+        },
+        // No escalation field at all (pre-v1.19.0 row)
+        { motif: "pin", missed: 1, found: 4, miss_rate: 20.0 },
+      ],
+    };
+    render(<MotifThemes data={data} />);
+    expect(
+      screen.queryByTestId("motif-escalation-fork"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("motif-escalation-pin"),
+    ).not.toBeInTheDocument();
+  });
 });

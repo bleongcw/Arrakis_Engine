@@ -284,11 +284,25 @@ export interface PatternStats {
       missed_by_phase?: { opening: number; middlegame: number; endgame: number };
       found_by_phase?: { opening: number; middlegame: number; endgame: number };
       dominant_missed_phase?: "opening" | "middlegame" | "endgame" | null;
+      // v1.19.0 (optional — absent on pre-v1.19.0 patterns rows)
+      missed_games?: number;
+      streak?: number;
+      escalation?: "none" | "watch" | "focus" | "priority";
     }>;
     top_missed: string | null;
     top_missed_count: number;
     // v1.16.0:
     top_missed_dominant_phase?: "opening" | "middlegame" | "endgame" | null;
+    // v1.19.0: distinct games carrying motif data (the "of M games"
+    // denominator) + the recurring-weakness escalation list.
+    games_with_motif_data?: number;
+    escalated_weaknesses?: Array<{
+      motif: string;
+      escalation: "watch" | "focus" | "priority";
+      missed_games: number;
+      streak: number;
+      dominant_missed_phase?: "opening" | "middlegame" | "endgame" | null;
+    }>;
   };
   repertoire_consistency?: unknown;
   // Time pressure

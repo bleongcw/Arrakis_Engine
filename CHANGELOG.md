@@ -4,6 +4,76 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.19.0] - 2026-05-29
+
+### Added
+- **Recurring weakness escalation.** The motif aggregation (v1.15.0–v1.16.0)
+  already found a player's most-missed tactical themes, but it treated every
+  run the same — "you missed forks" got restated whether it was a one-off or a
+  pattern running game after game. v1.19.0 detects *persistence* and escalates
+  the coaching register accordingly: stop repeating the diagnosis, start
+  prescribing a fix.
+
+  **Signal (`_compute_motif_summary`, `src/patterns.py`).** Per motif we now
+  track two things across the 30-day window:
+  - **distinct-game spread** — how many *separate* games show the missed
+    motif (not raw instances: "13 misses across 2 games" is not recurring;
+    "missed in 6 different games" is). This sets the base tier:
+    ≥3 games → `watch`, ≥5 → `focus`, ≥8 → `priority`.
+  - **recency streak** — consecutive most-recent games (with motif data) in
+    which the motif was missed. An active streak of ≥3 *boosts* the tier one
+    level (watch→focus, focus→priority).
+
+  A small-sample guard (`_escalation_tier`) suppresses all escalation until at
+  least 4 games carry motif data, so a brand-new account can't trigger a
+  "priority" alert off one rough patch. Each `by_motif` row gains
+  `missed_games`, `streak`, and `escalation`; a new top-level
+  `escalated_weaknesses` list (watch+, sorted priority→watch) plus
+  `games_with_motif_data` drive the three surfaces below.
+
+  **Surface 1 — coaching.** `build_trajectory_block` now leads with a prominent
+  `⚠ RECURRING WEAKNESS: fork — missed in 6 of the last 9 games (3 in a row),
+  mostly in the middlegame. Treat as the #1 fix.` line when a focus/priority
+  weakness exists, and records `recurring_weakness` + tier in
+  `coaching_meta_json`. The `TREND_PROMPT` and `GAME_COACHING_PROMPT` gained a
+  v1.19.0 escalation clause: when a weakness is flagged recurring, **lead with
+  it and prescribe a concrete, observable drill** ("10 middlegame fork puzzles
+  daily; before every capture, ask what your knight forks") rather than a
+  restated diagnosis.
+
+  **Surface 2 — Patterns card.** The Tactical Themes card shows a per-row
+  escalation badge — 🔴 priority / 🟠 focus / 🟡 watch — reading "missed in N of
+  M games · K in a row" (streak suffix only when ≥2).
+
+  **Surface 3 — Journal.** A one-time `weakness_alert` Journal entry is filed
+  for each **priority**-tier weakness, with a motif-specific drill in the body.
+  Reuses the `journal_entries` table (no migration); the existence of an open
+  alert row *is* the fire-once state — de-duped per motif within the window so
+  an ongoing weakness files **one** entry per episode, not on every run.
+  weakness_alert entries are immutable (no edit/delete) and render with a ⚠️
+  icon, "Priority Weakness" label, and a red timeline node.
+
+  **Trigger discipline.** Alerts fire only on the explicit user-driven paths —
+  the `patterns` CLI and the `/api/pipeline/patterns` dashboard trigger
+  (`compute_player_patterns(emit_weakness_alerts=True)`). The silent
+  auto-refresh inside `coach_game` leaves the flag `False`, so coaching never
+  surprise-spawns Journal entries.
+
+### Tests
+- Backend **597 → 627** (+30): `_escalation_tier` boundary/streak/guard cases,
+  `_compute_motif_summary` distinct-game spread + streak + `escalated_weaknesses`
+  shape, `build_trajectory_block` RECURRING line + diag, prompt source-grep
+  guards, `create_weakness_alert` fire-once/different-motif/past-window de-dup,
+  and `compute_player_patterns(emit_weakness_alerts=…)` integration.
+- Frontend **205 → 210** (+5): escalation badge (tier + "N of M games" + streak
+  suffix; absent when none/missing), and the `weakness_alert` Journal kind
+  (⚠️ icon + "Priority Weakness" label, no edit menu).
+- Manual smoke on Evan's DB: 51 games with motif data → deflection (priority,
+  17 games), hanging_piece (priority, 10), overloaded_defender (priority, 10),
+  pin (focus, 6); exactly 3 priority alerts filed, re-run idempotent.
+
+---
+
 ## [1.18.5] - 2026-05-29
 
 ### Removed

@@ -17,6 +17,8 @@
 const NODE_COLORS: Record<string, string> = {
   review: "bg-emerald-500 border-emerald-600",
   note: "bg-blue-500 border-blue-600",
+  // v1.19.0: recurring-weakness alert — red to flag it stands out.
+  weakness_alert: "bg-red-500 border-red-600",
 };
 
 const FALLBACK_COLOR = "bg-zinc-400 border-zinc-500";

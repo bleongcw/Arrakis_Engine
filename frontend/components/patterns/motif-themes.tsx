@@ -26,6 +26,8 @@ import { motifLabel } from "@/lib/motifs";
 type PhaseCounts = { opening: number; middlegame: number; endgame: number };
 type Phase = "opening" | "middlegame" | "endgame";
 
+type Escalation = "none" | "watch" | "focus" | "priority";
+
 type MotifEntry = {
   motif: string;
   missed: number;
@@ -36,6 +38,10 @@ type MotifEntry = {
   missed_by_phase?: PhaseCounts;
   found_by_phase?: PhaseCounts;
   dominant_missed_phase?: Phase | null;
+  // v1.19.0: recurring-weakness escalation. Absent on pre-v1.19.0 rows.
+  missed_games?: number;
+  streak?: number;
+  escalation?: Escalation;
 };
 
 export type MotifSummaryData = {
@@ -46,7 +52,68 @@ export type MotifSummaryData = {
   top_missed_count: number;
   // v1.16.0:
   top_missed_dominant_phase?: Phase | null;
+  // v1.19.0:
+  games_with_motif_data?: number;
+  escalated_weaknesses?: Array<{
+    motif: string;
+    escalation: "watch" | "focus" | "priority";
+    missed_games: number;
+    streak: number;
+    dominant_missed_phase?: Phase | null;
+  }>;
 };
+
+// v1.19.0: per-tier badge styling. watch/focus/priority escalate the
+// dot color from yellow → orange → red, matching the coaching register.
+const ESCALATION_META: Record<
+  "watch" | "focus" | "priority",
+  { icon: string; label: string; className: string }
+> = {
+  watch: {
+    icon: "🟡",
+    label: "watch",
+    className:
+      "bg-yellow-100 text-yellow-800 dark:bg-yellow-950 dark:text-yellow-300",
+  },
+  focus: {
+    icon: "🟠",
+    label: "focus",
+    className:
+      "bg-orange-100 text-orange-800 dark:bg-orange-950 dark:text-orange-300",
+  },
+  priority: {
+    icon: "🔴",
+    label: "priority",
+    className: "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300",
+  },
+};
+
+function EscalationBadge({
+  entry,
+  gamesWithMotifData,
+}: {
+  entry: MotifEntry;
+  gamesWithMotifData?: number;
+}) {
+  const tier = entry.escalation;
+  if (!tier || tier === "none") return null;
+  const meta = ESCALATION_META[tier];
+  const missed = entry.missed_games ?? 0;
+  const streak = entry.streak ?? 0;
+  let text = gamesWithMotifData
+    ? `missed in ${missed} of ${gamesWithMotifData} games`
+    : `missed in ${missed} games`;
+  if (streak >= 2) text += ` · ${streak} in a row`;
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${meta.className}`}
+      data-testid={`motif-escalation-${entry.motif}`}
+      title={`Recurring weakness (${meta.label})`}
+    >
+      {meta.icon} {text}
+    </span>
+  );
+}
 
 const FOUND_COLOR = "#22c55e"; // emerald — matches MotifBadgeRow
 const MISSED_COLOR = "#f59e0b"; // amber — matches MotifBadgeRow
@@ -60,7 +127,13 @@ const PHASE_LABELS: Record<Phase, string> = {
   endgame: "Endgame",
 };
 
-function MotifRow({ entry }: { entry: MotifEntry }) {
+function MotifRow({
+  entry,
+  gamesWithMotifData,
+}: {
+  entry: MotifEntry;
+  gamesWithMotifData?: number;
+}) {
   const total = entry.missed + entry.found;
   if (total === 0) return null;
 
@@ -82,8 +155,11 @@ function MotifRow({ entry }: { entry: MotifEntry }) {
         <span className="text-sm font-medium">
           {meta.icon} {meta.label}
         </span>
-        <span className="text-xs text-muted-foreground">
-          {entry.found} found · {entry.missed} missed · {Math.round(entry.miss_rate)}% miss rate
+        <span className="flex items-center gap-2">
+          <EscalationBadge entry={entry} gamesWithMotifData={gamesWithMotifData} />
+          <span className="text-xs text-muted-foreground">
+            {entry.found} found · {entry.missed} missed · {Math.round(entry.miss_rate)}% miss rate
+          </span>
         </span>
       </div>
       <div className="w-full h-7 rounded-md overflow-hidden flex">
@@ -243,7 +319,11 @@ export function MotifThemes({ data }: { data?: MotifSummaryData }) {
           </div>
 
           {sorted.map((entry) => (
-            <MotifRow key={entry.motif} entry={entry} />
+            <MotifRow
+              key={entry.motif}
+              entry={entry}
+              gamesWithMotifData={data.games_with_motif_data}
+            />
           ))}
         </>
       )}

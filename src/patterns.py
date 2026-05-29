@@ -60,10 +60,18 @@ def _classify_game_phase(move_number: int) -> str:
 
 
 def compute_player_patterns(player_id: int, db_path: str | None = None,
-                            period_days: int = 30) -> dict:
+                            period_days: int = 30,
+                            emit_weakness_alerts: bool = False) -> dict:
     """Compute comprehensive pattern stats for a player.
 
     Returns a stats dict covering openings, phases, trends, and more.
+
+    v1.19.0: when ``emit_weakness_alerts`` is True, file a one-time
+    Journal "priority weakness" entry for each priority-tier recurring
+    weakness (de-duped within the window). Only the explicit user-driven
+    paths — the ``patterns`` CLI and the ``/api/pipeline/patterns``
+    dashboard trigger — set this True; the silent auto-refresh inside
+    coach_game leaves it False so coaching never surprise-spawns entries.
     """
     conn = init_db(db_path)
 
@@ -155,6 +163,23 @@ def compute_player_patterns(player_id: int, db_path: str | None = None,
         (player_id, period_start, period_end, json.dumps(stats), existing_summary),
     )
     conn.commit()
+
+    # v1.19.0: fire one-time priority-weakness Journal alerts. Only on the
+    # explicit user-driven paths (emit flag); de-duped within the window so
+    # an ongoing weakness files ONE entry per episode. focus/watch tiers
+    # surface in the card + coaching but never clutter the Journal.
+    if emit_weakness_alerts:
+        from src.journal import create_weakness_alert
+        for esc in (stats.get("motif_summary", {}).get("escalated_weaknesses") or []):
+            if esc.get("escalation") != "priority":
+                continue
+            create_weakness_alert(
+                conn, player_id, esc["motif"], esc["escalation"],
+                esc.get("missed_games", 0), esc.get("streak", 0),
+                esc.get("dominant_missed_phase"),
+                period_days=period_days,
+            )
+
     conn.close()
 
     logger.info("Computed patterns for player %d: %d games analyzed", player_id, len(games))
@@ -1555,6 +1580,13 @@ def _compute_motif_summary(games: list[dict],
     }
     total_critical_moves = 0
 
+    # v1.19.0: per-game distinct-spread + streak tracking. `per_game_missed`
+    # holds, in chronological order (oldest→newest, matching the games sort),
+    # the set of motifs missed in each game that carried ANY motif data. Used
+    # to derive (a) how many DISTINCT games show a weakness and (b) the
+    # consecutive-most-recent-games streak — the two signals escalation rides on.
+    per_game_missed: list[set[str]] = []
+
     for g in games:
         date_played = g.get("date_played")
         if not date_played or date_played[:10] < cutoff_date:
@@ -1566,6 +1598,8 @@ def _compute_motif_summary(games: list[dict],
             continue
 
         game_moves = moves_by_game.get(g["id"], [])
+        game_missed: set[str] = set()       # motifs missed in THIS game
+        game_had_motif_data = False         # did any move carry motifs_json?
         for m in game_moves:
             if m.get("side") != player_color:
                 continue
@@ -1602,12 +1636,37 @@ def _compute_motif_summary(games: list[dict],
             except (TypeError, ValueError):
                 continue  # malformed move_number — skip this move's counts
 
+            game_had_motif_data = True
             for motif in missed:
                 if motif in missed_by_phase:
                     missed_by_phase[motif][phase] += 1
+                    game_missed.add(motif)
             for motif in best_set & played_set:
                 if motif in found_by_phase:
                     found_by_phase[motif][phase] += 1
+
+        # v1.19.0: record this game's missed-motif set for spread/streak.
+        # Games with motif data but NO miss still get an empty set appended —
+        # they count toward the denominator and break any active streak.
+        if game_had_motif_data:
+            per_game_missed.append(game_missed)
+
+    # v1.19.0: derive distinct-game spread + recency streak per motif.
+    # `per_game_missed` is oldest→newest; reverse for the streak walk.
+    games_with_motif_data = len(per_game_missed)
+    missed_games_count: dict[str, int] = {m: 0 for m in _MOTIF_IDENTIFIERS}
+    streak_count: dict[str, int] = {m: 0 for m in _MOTIF_IDENTIFIERS}
+    for motif in _MOTIF_IDENTIFIERS:
+        missed_games_count[motif] = sum(
+            1 for s in per_game_missed if motif in s
+        )
+        streak = 0
+        for s in reversed(per_game_missed):
+            if motif in s:
+                streak += 1
+            else:
+                break
+        streak_count[motif] = streak
 
     by_motif: list[dict] = []
     for motif in _MOTIF_IDENTIFIERS:
@@ -1617,6 +1676,8 @@ def _compute_motif_summary(games: list[dict],
         f = sum(f_phases.values())
         denom = m + f
         miss_rate = round(m / denom * 100, 1) if denom else 0.0
+        mg = missed_games_count[motif]
+        stk = streak_count[motif]
         by_motif.append({
             "motif": motif,
             "missed": m,
@@ -1628,6 +1689,10 @@ def _compute_motif_summary(games: list[dict],
             "missed_by_phase": m_phases,
             "found_by_phase": f_phases,
             "dominant_missed_phase": _dominant_phase(m_phases),
+            # v1.19.0: persistence signals + escalation tier.
+            "missed_games": mg,
+            "streak": stk,
+            "escalation": _escalation_tier(mg, stk, games_with_motif_data),
         })
 
     # Sort: most-missed first, then most-found as tiebreaker.
@@ -1641,16 +1706,126 @@ def _compute_motif_summary(games: list[dict],
         top["dominant_missed_phase"] if top and top["missed"] > 0 else None
     )
 
+    # v1.19.0: escalated weaknesses — motifs at watch+ tier, sorted by
+    # severity (priority → watch) then by distinct-game spread. The
+    # coaching prompts + Patterns card + Journal alerts all read this.
+    _TIER_RANK = {"priority": 3, "focus": 2, "watch": 1, "none": 0}
+    escalated_weaknesses = [
+        {
+            "motif": e["motif"],
+            "escalation": e["escalation"],
+            "missed_games": e["missed_games"],
+            "streak": e["streak"],
+            "dominant_missed_phase": e["dominant_missed_phase"],
+        }
+        for e in by_motif
+        if e["escalation"] != "none"
+    ]
+    escalated_weaknesses.sort(
+        key=lambda e: (-_TIER_RANK[e["escalation"]], -e["missed_games"])
+    )
+
     return {
         "period_days": period_days,
         "total_critical_moves": total_critical_moves,
+        # v1.19.0: distinct games in the window that carried any motif data —
+        # the denominator behind "missed in N of M games".
+        "games_with_motif_data": games_with_motif_data,
         "by_motif": by_motif,
         "top_missed": top_missed,
         "top_missed_count": top_missed_count,
         # v1.16.0: dominant phase of the top-missed motif. None when the
         # top motif's missed instances are <3 OR no phase has ≥60% share.
         "top_missed_dominant_phase": top_missed_dominant_phase,
+        # v1.19.0: recurring-weakness escalation list (watch+).
+        "escalated_weaknesses": escalated_weaknesses,
     }
+
+
+# v1.19.0: escalation tier thresholds (distinct games a motif was missed
+# in, within the 30-day window). Tuned for kid coaching; easy to retune.
+_ESCALATION_WATCH_GAMES = 3
+_ESCALATION_FOCUS_GAMES = 5
+_ESCALATION_PRIORITY_GAMES = 8
+_ESCALATION_STREAK_BOOST = 3      # consecutive recent games → bump one tier
+_ESCALATION_MIN_SAMPLE = 4        # need ≥ this many games-with-motif-data
+
+
+def _escalation_tier(missed_games: int, streak: int,
+                     games_with_motif_data: int) -> str:
+    """v1.19.0: classify a motif's recurring-weakness severity.
+
+    Returns "none" / "watch" / "focus" / "priority".
+
+    Base tier from DISTINCT-game spread (not raw instances — "13 misses
+    across 2 games" is not recurring; "missed in 6 different games" is):
+      ≥8 games → priority, ≥5 → focus, ≥3 → watch, else none.
+
+    Streak boost: an active run of ≥3 consecutive most-recent games
+    bumps the tier up one level (watch→focus, focus→priority; priority
+    caps). Catches "getting worse right now" on top of broad spread.
+
+    Small-sample guard: with fewer than _ESCALATION_MIN_SAMPLE games
+    carrying motif data, return "none" — a 3-game-old account shouldn't
+    trigger a priority alert off a single rough patch.
+    """
+    if games_with_motif_data < _ESCALATION_MIN_SAMPLE:
+        return "none"
+
+    if missed_games >= _ESCALATION_PRIORITY_GAMES:
+        base = "priority"
+    elif missed_games >= _ESCALATION_FOCUS_GAMES:
+        base = "focus"
+    elif missed_games >= _ESCALATION_WATCH_GAMES:
+        base = "watch"
+    else:
+        return "none"
+
+    if streak >= _ESCALATION_STREAK_BOOST:
+        bump = {"watch": "focus", "focus": "priority", "priority": "priority"}
+        return bump[base]
+    return base
+
+
+def _humanize_motif(motif: str) -> str:
+    """v1.19.0: motif id → human label for prompts/journal ('hanging_piece'
+    → 'hanging piece'). Frontend has its own MOTIF_LABELS map; this is the
+    backend-side, text-only equivalent."""
+    return motif.replace("_", " ")
+
+
+def _format_recurring_weakness(entry: dict, games_with_motif_data: int) -> str:
+    """v1.19.0: render the prominent ⚠ RECURRING WEAKNESS headline that
+    leads the trajectory block for a focus/priority escalated weakness.
+
+    Example:
+      ⚠ RECURRING WEAKNESS: fork — missed in 6 of the last 9 games
+      (3 in a row), mostly in the middlegame. Treat as the #1 fix:
+      lead your feedback with this and prescribe a concrete drill, not
+      a restated diagnosis.
+    """
+    motif = entry.get("motif")
+    if not motif:
+        return ""
+    label = _humanize_motif(motif)
+    missed = entry.get("missed_games", 0)
+    streak = entry.get("streak", 0)
+    phase = entry.get("dominant_missed_phase")
+
+    if games_with_motif_data > 0:
+        spread = f"missed in {missed} of the last {games_with_motif_data} games"
+    else:
+        spread = f"missed in {missed} games"
+    if streak >= 2:
+        spread += f" ({streak} in a row)"
+    if phase:
+        spread += f", mostly in the {phase}"
+
+    return (
+        f"⚠ RECURRING WEAKNESS: {label} — {spread}. Treat as the #1 fix: "
+        f"lead your feedback with this and prescribe a concrete, observable "
+        f"drill, not a restated diagnosis."
+    )
 
 
 def _dominant_phase(phase_counts: dict[str, int]) -> str | None:
@@ -1806,10 +1981,15 @@ def _compute_repertoire_consistency(games: list[dict]) -> dict:
     }
 
 
-def update_patterns(db_path: str | None = None) -> int:
+def update_patterns(db_path: str | None = None,
+                    emit_weakness_alerts: bool = True) -> int:
     """Update patterns for all players with analyzed games.
 
     Returns number of players updated.
+
+    v1.19.0: ``emit_weakness_alerts`` defaults True here because the only
+    caller is the explicit ``patterns`` CLI command — a user-driven run
+    where firing priority-weakness Journal alerts is intended.
     """
     conn = init_db(db_path)
     players = conn.execute(
@@ -1823,7 +2003,10 @@ def update_patterns(db_path: str | None = None) -> int:
 
     for p in players:
         logger.info("Computing patterns for %s (id=%d)", p["username"], p["id"])
-        stats = compute_player_patterns(p["id"], db_path=db_path)
+        stats = compute_player_patterns(
+            p["id"], db_path=db_path,
+            emit_weakness_alerts=emit_weakness_alerts,
+        )
         if stats:
             logger.info(
                 "  %s: %d games, %.1f%% win rate, ACPL trend: %d weeks",
@@ -1898,6 +2081,7 @@ Requirements:
 - Paragraph 3: 3 specific, actionable practice recommendations appropriate for a {age}-year-old {tier_label}-level player.
   - v1.15.0: When the Recurring Tactical Themes section shows a clear top miss (>= 5 instances), make ONE of the 3 practice recommendations specifically about that motif (name it: "fork puzzles", "pin exercises", etc.). If no theme has reached 5 instances, ignore this rule and pick 3 general recommendations.
   - v1.16.0: When that motif ALSO has a "X focus" tag in the Recurring Tactical Themes block (concentrated in one phase — opening, middlegame, or endgame), name the phase in the recommendation. Examples: "10 middlegame hanging-piece puzzles every day" instead of just "hanging-piece puzzles"; "spot opening pins in your first 10 moves" instead of "spot pins". If no phase focus is tagged, ignore this rule and keep the recommendation general.
+  - v1.19.0: When the Recurring Tactical Themes block opens with a "RECURRING WEAKNESS (focus)" or "RECURRING WEAKNESS (priority)" line, that theme is PERSISTING game after game — lead Paragraph 3 with it and ESCALATE the framing. Give a specific, observable drill the player can do daily ("10 middlegame fork puzzles every day, and before every capture ask what your knight forks"), NOT a restated diagnosis ("watch out for forks"). Do not soften it to a passing mention. If the line says "priority", say plainly that this is the #1 thing to fix right now.
 - Paragraph 4: Encouragement and growth mindset message.
 - Keep language age-appropriate for {age} years old.
 - Be warm but professional. Concrete, not vague.
@@ -1929,6 +2113,26 @@ def _format_motif_summary_for_prompt(motif_summary: dict) -> str:
         return "  No motif data yet — coach more games or run rescan-motifs."
 
     lines = []
+    # v1.19.0: lead with recurring-weakness escalation (focus/priority) so
+    # the LLM treats persistent weaknesses as the #1 fix and prescribes a
+    # drill rather than restating the diagnosis. watch-tier stays implicit.
+    games_with_motif_data = motif_summary.get("games_with_motif_data", 0)
+    for esc in (motif_summary.get("escalated_weaknesses") or []):
+        if esc.get("escalation") not in ("focus", "priority"):
+            continue
+        label = _humanize_motif(esc["motif"])
+        spread = f"missed in {esc.get('missed_games', 0)} of {games_with_motif_data} games"
+        streak = esc.get("streak", 0)
+        if streak >= 2:
+            spread += f", {streak} in a row"
+        phase = esc.get("dominant_missed_phase")
+        if phase:
+            spread += f", mostly in the {phase}"
+        lines.append(
+            f"  RECURRING WEAKNESS ({esc['escalation']}): {label} — {spread}. "
+            f"Lead with this and prescribe a concrete drill."
+        )
+
     top = motif_summary.get("top_missed")
     top_count = motif_summary.get("top_missed_count", 0)
     top_phase = motif_summary.get("top_missed_dominant_phase")
@@ -2524,6 +2728,16 @@ def build_trajectory_block(
     acpl_trend = stats.get("acpl_trend") or []
     motif_summary = stats.get("motif_summary") or {}
 
+    # v1.19.0: pick the single most-severe recurring weakness at focus+ to
+    # lead the block with. watch-tier stays in the "Recurring themes" list
+    # below; only focus/priority earns the prominent ⚠ headline + drill.
+    games_with_motif_data = motif_summary.get("games_with_motif_data", 0)
+    escalated = [
+        e for e in (motif_summary.get("escalated_weaknesses") or [])
+        if e.get("escalation") in ("focus", "priority")
+    ]
+    top_escalated = escalated[0] if escalated else None
+
     worst_phase = _find_worst_phase(phase)
     best_phase = _find_best_phase(phase)
     worst_phase_acpl = (phase.get(worst_phase) or {}).get("acpl")
@@ -2567,6 +2781,15 @@ def build_trajectory_block(
         "the numbers show it, and note recurring weaknesses gently.",
         "",
     ]
+    # v1.19.0: lead with the recurring-weakness escalation when one exists.
+    # This is the "stop restating the diagnosis, start prescribing" signal:
+    # the coaching prompts are told to treat this line as the #1 fix and
+    # answer it with a concrete drill, not another passing mention.
+    if top_escalated:
+        esc_line = _format_recurring_weakness(top_escalated, games_with_motif_data)
+        if esc_line:
+            lines.append(esc_line)
+            lines.append("")
     if headline:
         lines.append(f"**Headline:** {headline}")
         lines.append("")
@@ -2630,6 +2853,12 @@ def build_trajectory_block(
         # v1.16.0: dominant phase of the top-missed motif (None when
         # the top motif's misses don't concentrate ≥60% in one phase).
         "motif_top_missed_phase": motif_top_phase if motif_top_count > 0 else None,
+        # v1.19.0: the recurring weakness this block led with (None when
+        # no motif reached focus/priority). Stored in coaching_meta_json.
+        "recurring_weakness": top_escalated["motif"] if top_escalated else None,
+        "recurring_weakness_tier": (
+            top_escalated["escalation"] if top_escalated else None
+        ),
     }
     return "\n".join(lines), diag
 

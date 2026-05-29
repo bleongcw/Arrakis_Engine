@@ -981,7 +981,11 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                         f"Computing insights for {display}...",
                         {"current_step": i + 1, "total_steps": len(rows)},
                     )
-                    compute_player_patterns(row["id"], db_path=db_path)
+                    # v1.19.0: explicit user-driven trigger — fire
+                    # priority-weakness Journal alerts (de-duped).
+                    compute_player_patterns(
+                        row["id"], db_path=db_path, emit_weakness_alerts=True
+                    )
                     players_updated += 1
 
                 pipeline_state.complete_task({"players_updated": players_updated})

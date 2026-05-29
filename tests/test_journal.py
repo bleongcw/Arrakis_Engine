@@ -2,7 +2,13 @@
 
 import pytest
 
-from src.journal import create_note, update_note, delete_note, MAX_NOTE_BODY_LEN
+from src.journal import (
+    create_note,
+    update_note,
+    delete_note,
+    create_weakness_alert,
+    MAX_NOTE_BODY_LEN,
+)
 from src.models import init_db, ensure_player
 
 
@@ -163,3 +169,82 @@ class TestDeleteNote:
         ).fetchone()
         conn.close()
         assert row is not None
+
+
+class TestCreateWeaknessAlert:
+    """v1.19.0: auto-filed priority-weakness journal entries with
+    fire-once de-dup within the window."""
+
+    def test_inserts_weakness_alert_row(self, db_path, player_id):
+        conn = init_db(db_path)
+        entry = create_weakness_alert(
+            conn, player_id, "fork", "priority", 9, 3, "middlegame",
+        )
+        conn.close()
+        assert entry is not None
+        assert entry["kind"] == "weakness_alert"
+        assert entry["provider"] is None
+        assert "fork" in entry["body"]
+        assert "9" in entry["body"]
+        import json
+        meta = json.loads(entry["metadata_json"])
+        assert meta["motif"] == "fork"
+        assert meta["tier"] == "priority"
+        assert meta["missed_games"] == 9
+        assert meta["streak"] == 3
+        assert meta["dominant_phase"] == "middlegame"
+
+    def test_body_includes_drill(self, db_path, player_id):
+        conn = init_db(db_path)
+        entry = create_weakness_alert(
+            conn, player_id, "fork", "priority", 9, 3, "middlegame",
+        )
+        conn.close()
+        assert "Drill:" in entry["body"]
+
+    def test_second_call_same_motif_is_noop(self, db_path, player_id):
+        conn = init_db(db_path)
+        first = create_weakness_alert(
+            conn, player_id, "fork", "priority", 9, 3, "middlegame",
+        )
+        second = create_weakness_alert(
+            conn, player_id, "fork", "priority", 10, 4, "middlegame",
+        )
+        conn.close()
+        assert first is not None
+        assert second is None  # fire-once within window
+        assert _count_entries(db_path, player_id, kind="weakness_alert") == 1
+
+    def test_different_motif_fires_separately(self, db_path, player_id):
+        conn = init_db(db_path)
+        create_weakness_alert(
+            conn, player_id, "fork", "priority", 9, 3, "middlegame",
+        )
+        other = create_weakness_alert(
+            conn, player_id, "pin", "priority", 8, 0, None,
+        )
+        conn.close()
+        assert other is not None
+        assert _count_entries(db_path, player_id, kind="weakness_alert") == 2
+
+    def test_entry_past_window_refires(self, db_path, player_id):
+        conn = init_db(db_path)
+        # Manually insert a fork alert dated 40 days ago (outside 30d window).
+        import json
+        conn.execute(
+            """INSERT INTO journal_entries
+            (player_id, kind, platform, body, refs_json, provider,
+             metadata_json, created_at)
+            VALUES (?, 'weakness_alert', 'chess.com', 'old alert', NULL, NULL,
+                    ?, datetime('now', '-40 days'))""",
+            (player_id, json.dumps({"motif": "fork", "tier": "priority"})),
+        )
+        conn.commit()
+        # A new run should re-fire since the prior alert is outside the window.
+        entry = create_weakness_alert(
+            conn, player_id, "fork", "priority", 9, 3, "middlegame",
+            period_days=30,
+        )
+        conn.close()
+        assert entry is not None
+        assert _count_entries(db_path, player_id, kind="weakness_alert") == 2

@@ -58,6 +58,7 @@ This game has been classified as: **{game_type}**
 ## Trajectory-Aware Coaching
 - Where the trajectory snapshot above (if present) shows measurable progress, acknowledge it concretely (e.g. "your endgame conversion has been climbing — this game shows why").
 - If this game illustrates a weakness that the trajectory flags as recurring, note the recurrence GENTLY — once, in passing. Don't re-lecture the player on it.
+- v1.19.0 EXCEPTION: if the trajectory opens with a "⚠ RECURRING WEAKNESS" line (a focus/priority escalation), that weakness is persisting game after game — do NOT keep it gentle. Lead your Top 3 Improvements with it and ESCALATE: prescribe one specific, observable drill ("10 middlegame fork puzzles daily; before every capture, ask what your knight forks"), not a restated diagnosis ("watch for forks"). If the line says it is the #1 fix, say so plainly. Stop repeating the same advice — give the player a concrete fix to work on.
 - Tie this game's key_lesson and practical_focus to the broader trajectory where the connection is real. Do NOT restate the numbers — the trajectory is for you to reason from, not to read back to the player.
 
 ## Focus Areas for {tier_label} Players

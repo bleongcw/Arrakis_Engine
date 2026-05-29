@@ -1,6 +1,6 @@
 # Arrakis Engine Roadmap
 
-*Updated 2026-05-18 — current release v1.6.0*
+*Updated 2026-05-29 — current release v1.19.0*
 
 This is the public-facing roadmap. The full release history is in
 [CHANGELOG.md](CHANGELOG.md); architectural details are in
@@ -165,8 +165,13 @@ real-world miles.
   useful" per game; feed that signal into prompt selection or future tone.
 - **Per-player tone preferences** — different siblings have different
   communication styles; let coaching tone be set per player, not per session.
-- **Recurring weakness escalation** — when a pattern persists across N games,
-  surface it more prominently rather than repeating the same advice.
+- ~~**Recurring weakness escalation** — when a pattern persists across N games,
+  surface it more prominently rather than repeating the same advice.~~
+  **Shipped v1.19.0.** Distinct-game spread + recency streak classify each
+  missed motif into watch/focus/priority tiers; escalated weaknesses lead the
+  coaching prompts (with a prescribed drill, not a restated diagnosis), show a
+  badge on the Tactical Themes card, and file a one-time "Priority Weakness"
+  Journal alert.
 
 ### Pattern depth
 

@@ -71,6 +71,33 @@ describe("EntryCard", () => {
     expect(screen.getByText(/📝 Note/)).toBeInTheDocument();
   });
 
+  // v1.19.0: recurring-weakness alert kind.
+  it("renders the ⚠️ icon + 'Priority Weakness' label for weakness_alert", () => {
+    const alert = {
+      ...baseEntry,
+      kind: "weakness_alert",
+      provider: null,
+      refs: [],
+      body: "🔴 New priority weakness: fork — missed in 9 recent games.",
+    };
+    render(<EntryCard entry={alert} player="evan" games={baseGames} />);
+    expect(screen.getByText(/Priority Weakness/)).toBeInTheDocument();
+  });
+
+  it("does NOT show Edit/Delete on weakness_alert entries (immutable)", () => {
+    const alert = {
+      ...baseEntry,
+      kind: "weakness_alert",
+      provider: null,
+      refs: [],
+      body: "🔴 New priority weakness: fork.",
+    };
+    render(<EntryCard entry={alert} player="evan" games={baseGames} />);
+    expect(
+      screen.queryByRole("button", { name: /Edit note/ }),
+    ).not.toBeInTheDocument();
+  });
+
   it("renders platform badge", () => {
     render(<EntryCard entry={baseEntry} player="evan" games={baseGames} />);
     expect(screen.getByText("chess.com")).toBeInTheDocument();
