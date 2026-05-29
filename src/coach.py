@@ -160,7 +160,10 @@ Produce a JSON response with these exact keys:
    "pin", "skewer" → "skewer", "discovered_check" → "discovered check",
    "mate_threat" → "mate threat", "removing_defender" → "removing the
    defender", "hanging_piece" → "free piece capture", "trapped_piece" →
-   "trapped piece." Do NOT invent motifs that aren't annotated.
+   "trapped piece." v1.17.0 added: "back_rank_mate" → "back-rank mate",
+   "deflection" → "deflection", "overloaded_defender" → "overloaded defender",
+   "zugzwang" → "zugzwang" (use sparingly — advanced endgame concept).
+   Do NOT invent motifs that aren't annotated.
 
    ## ♔ Endgame
    1-2 sentences. If the game reached an endgame (moves >30): assess conversion

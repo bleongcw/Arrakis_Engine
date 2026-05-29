@@ -4,6 +4,76 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.17.0] - 2026-05-29
+
+### Added
+- **4 new tactical motif detectors** completing the v1.14.0
+  vocabulary. v1.14.0 explicitly named these as deferred; v1.17.0
+  ships them:
+  - 🏰 **back_rank_mate** — the classical pawn-walled back-rank
+    mate. Slotted BEFORE mate_threat in the specificity order so
+    both fire on the right positions and the LLM has the more
+    specific label available. Strict pattern: requires escape
+    squares blocked by the mated side's own PAWNS (the textbook
+    image kids learn first).
+  - ↗️ **deflection** — threat-based variant of removing_defender.
+    Our move attacks an enemy defender that's MORE valuable than
+    our attacker (so they can't trade — they must move), and once
+    they move, the piece they were defending hangs. Excludes
+    captures (those are removing_defender) to avoid double-tagging.
+  - 🤹 **overloaded_defender** — enemy piece defending two
+    valuable pieces, where attacking one forces the defender to
+    choose. Conservative: requires the overloaded defender to be
+    the SOLE defender of both targets (no other defenders pick up
+    the slack).
+  - ⛓ **zugzwang** — endgame-only, intentionally narrow.
+    Fires only when total non-king material ≤4 AND the enemy has
+    1-3 legal moves AND every legal move is a king move AND the
+    king is not currently in check (true zugzwang, not check
+    response). Captures classical K+P opposition patterns; under-
+    tags rather than over-tags. If real-world false negatives
+    surface for middlegame zugzwangs, tighten v1.17.x.
+
+- **Aggregation + LLM prompt + frontend MOTIF_LABELS all extended**
+  to surface the 4 new motifs automatically. No schema change —
+  `motifs_json` is unstructured text. The MotifThemes Patterns
+  card + MotifBadgeRow on Critical Moments cards render the new
+  motifs as soon as they appear in the data.
+
+- **`_MOTIF_IDENTIFIERS` extended from 8 to 12** in
+  `src/patterns.py`. Aggregator's per-motif loop picks them up
+  with no per-motif code path.
+
+- **LLM motif-citation rule in `GAME_COACHING_PROMPT`** gains the
+  4 new natural-language mappings (back-rank mate / deflection /
+  overloaded defender / zugzwang). Zugzwang explicitly marked
+  "use sparingly — advanced endgame concept."
+
+### Tests
+- 12 new unit tests in `tests/test_motifs.py`:
+  - `TestBackRankMate` × 3 (classic / near-miss / unrelated)
+  - `TestDeflection` × 3 (queen-defender pattern / value-asymmetry
+    near-miss / non-capture unrelated)
+  - `TestOverloadedDefender` × 3 (rook-defends-two pattern /
+    extra-defender near-miss / unrelated)
+  - `TestZugzwang` × 3 (K+P opposition / middlegame material gate
+    near-miss / legal-non-king-move unrelated)
+- 2 existing tests updated to reference `_MOTIF_IDENTIFIERS` len
+  rather than the magic number 8 (future-proof against further
+  motif additions).
+- 1 existing test swapped "zugzwang" placeholder for
+  "future_motif_v99" (zugzwang is now a real motif).
+- Backend: 573 → **585** (+12 new, -0 net change from refactors)
+
+### Optional post-ship action
+
+Run `python main.py rescan-motifs --player evanleong` to backfill
+the 4 new motifs on Evan's 583 games. The aggregator and Patterns
+card will surface them on the next `python main.py patterns` run.
+No data migration required — just additive `motifs_json` updates.
+
+---
+
 ## [1.16.4] - 2026-05-29
 
 ### Changed (breaking)

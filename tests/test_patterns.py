@@ -435,8 +435,12 @@ class TestComputeMotifSummary:
         assert result["total_critical_moves"] == 0
         assert result["top_missed"] is None
         assert result["top_missed_count"] == 0
-        # by_motif always lists all 8 identifiers, even when empty, with 0s
-        assert len(result["by_motif"]) == 8
+        # by_motif always lists ALL known motif identifiers, even when
+        # empty, with 0s. v1.14.0 shipped 8; v1.17.0 added 4 more (12 total).
+        # Reference _MOTIF_IDENTIFIERS so future motif additions don't
+        # break this test.
+        from src.patterns import _MOTIF_IDENTIFIERS
+        assert len(result["by_motif"]) == len(_MOTIF_IDENTIFIERS)
         for entry in result["by_motif"]:
             assert entry["missed"] == 0
             assert entry["found"] == 0
@@ -575,15 +579,18 @@ class TestComputeMotifSummary:
         assert result["total_critical_moves"] == 1
 
     def test_unknown_motif_identifier_ignored(self):
-        # Future / unknown motif strings don't blow up — silently dropped
+        # Future / unknown motif strings don't blow up — silently dropped.
+        # v1.15.0 used "zugzwang" here as a placeholder; v1.17.0 made
+        # zugzwang a real motif, so use a clearly-synthetic string.
         games = [{"id": 1, "player_color": "white", "date_played": _today()}]
         moves = {1: [
             {"side": "white", "move_number": 10,
-             "motifs_json": _mj(best=["zugzwang"], missed=["zugzwang"])},
+             "motifs_json": _mj(best=["future_motif_v99"],
+                                missed=["future_motif_v99"])},
         ]}
         result = _compute_motif_summary(games, moves, period_days=30)
         # Move counts toward total_critical_moves, but no per-motif bucket
-        # exists for "zugzwang" so it contributes zero to all 8 known motifs.
+        # exists for "future_motif_v99" so it contributes zero to all known motifs.
         assert result["total_critical_moves"] == 1
         assert result["top_missed"] is None
 

@@ -56,28 +56,43 @@ PIECE_VALUES: dict[int, int] = {
 
 # Motif name constants — kept here so callers (coach.py, frontend type
 # union, tests) can refer to them by symbol rather than string literals.
+MOTIF_BACK_RANK_MATE = "back_rank_mate"   # v1.17.0: more specific than mate_threat
 MOTIF_MATE_THREAT = "mate_threat"
 MOTIF_DISCOVERED_CHECK = "discovered_check"
 MOTIF_FORK = "fork"
 MOTIF_PIN = "pin"
 MOTIF_SKEWER = "skewer"
 MOTIF_REMOVING_DEFENDER = "removing_defender"
+MOTIF_DEFLECTION = "deflection"             # v1.17.0: threat-based variant of removing_defender
+MOTIF_OVERLOADED_DEFENDER = "overloaded_defender"  # v1.17.0
 MOTIF_HANGING_PIECE = "hanging_piece"
 MOTIF_TRAPPED_PIECE = "trapped_piece"
+MOTIF_ZUGZWANG = "zugzwang"                 # v1.17.0: endgame-only, intentionally narrow
 
 
 # Order matters: most-specific-first. detect_motifs() preserves this
 # order in its returned list so the prompt's "primary motif" reads as
 # the most distinctive label when multiple apply.
+#
+# v1.17.0: back_rank_mate placed BEFORE mate_threat so the more specific
+# label wins when both apply (every back-rank mate is also a mate threat).
+# deflection / overloaded_defender slot between the "concrete" tactical
+# motifs (pin/skewer) and the material-state motifs (hanging/trapped)
+# because they describe a tactical mechanism. Zugzwang sits last —
+# rare, advanced concept, intentionally narrow detector.
 _DETECTOR_ORDER = (
+    MOTIF_BACK_RANK_MATE,
     MOTIF_MATE_THREAT,
     MOTIF_DISCOVERED_CHECK,
     MOTIF_FORK,
     MOTIF_PIN,
     MOTIF_SKEWER,
     MOTIF_REMOVING_DEFENDER,
+    MOTIF_DEFLECTION,
+    MOTIF_OVERLOADED_DEFENDER,
     MOTIF_HANGING_PIECE,
     MOTIF_TRAPPED_PIECE,
+    MOTIF_ZUGZWANG,
 )
 
 
@@ -173,6 +188,56 @@ def _square_is_safe_for(board: chess.Board, square: int, color: bool) -> bool:
 # ---------------------------------------------------------------------------
 # Detectors — each is `detect_X(board_before, move, pv) -> str | None`
 # ---------------------------------------------------------------------------
+
+
+def detect_back_rank_mate(
+    board: chess.Board, move: chess.Move, pv: list[chess.Move] | None
+) -> str | None:
+    """v1.17.0: classical back-rank mate pattern.
+
+    Conditions (all required):
+      1. The move IS checkmate.
+      2. The mated king is on its own back rank (rank 1 for white,
+         rank 8 for black).
+      3. The 3 escape squares one rank in front (rank 2/7) — those
+         that exist (file-adjacent + same file as king) — are ALL
+         occupied by the mated side's own pawns.
+
+    The pawn-wall requirement is what makes this the *classical*
+    back-rank mate (the trapped-by-own-pawns image kids learn first).
+    A mate where the escape squares are blocked by minor pieces or
+    attacked by other enemy pieces is still a mate_threat, just not
+    the canonical back-rank pattern. Conservative on purpose.
+
+    Slotted BEFORE mate_threat in _DETECTOR_ORDER so the more
+    specific label wins — but both will fire (mate_threat is a
+    superset), and the frontend will show whichever the LLM cites.
+    """
+    after = board.copy()
+    after.push(move)
+    if not after.is_checkmate():
+        return None
+    # After our move, after.turn is the side now to move (the mated side).
+    mated_color = after.turn
+    king_sq = after.king(mated_color)
+    if king_sq is None:
+        return None
+    # Back rank: rank 0 (visual rank 1) for white, rank 7 (rank 8) for black.
+    back_rank = 0 if mated_color == chess.WHITE else 7
+    if chess.square_rank(king_sq) != back_rank:
+        return None
+    # Escape rank: one in front of the back rank.
+    escape_rank = 1 if mated_color == chess.WHITE else 6
+    king_file = chess.square_file(king_sq)
+    # Check the (up to) 3 squares directly above the king's rank.
+    escape_files = [f for f in (king_file - 1, king_file, king_file + 1)
+                    if 0 <= f <= 7]
+    for f in escape_files:
+        sq = chess.square(f, escape_rank)
+        p = after.piece_at(sq)
+        if p is None or p.color != mated_color or p.piece_type != chess.PAWN:
+            return None
+    return MOTIF_BACK_RANK_MATE
 
 
 def detect_mate_threat(
@@ -454,6 +519,140 @@ def detect_removing_defender(
     return None
 
 
+def detect_deflection(
+    board: chess.Board, move: chess.Move, pv: list[chess.Move] | None
+) -> str | None:
+    """v1.17.0: threat-based defender removal.
+
+    Distinct from removing_defender (which CAPTURES the defender).
+    Deflection threatens a defender so it must move or trade
+    unfavorably, abandoning its protective duty. After the defender
+    moves, the piece it was defending hangs.
+
+    Conditions:
+      1. The move is NOT a capture (captures are handled by
+         removing_defender — avoid double-tagging).
+      2. After the move, the moving piece attacks an enemy defender E
+         that is MORE valuable than the attacker (so E can't just trade
+         level — they're forced to move).
+      3. E defends an enemy piece V (worth ≥3) such that V has no
+         other defender (E is the sole protector). When E moves, V
+         hangs.
+
+    Conservative — the value-asymmetry requirement (attacker < E)
+    avoids false positives where E could just trade.
+    """
+    if board.is_capture(move):
+        return None  # captures are removing_defender territory
+    moving_piece = board.piece_at(move.from_square)
+    if moving_piece is None:
+        return None
+    after = board.copy()
+    after.push(move)
+    enemy_color = not moving_piece.color
+    attacker_value = _piece_value(moving_piece)
+    # What enemy pieces does the moving piece now attack?
+    for defender_sq in after.attacks(move.to_square):
+        defender = after.piece_at(defender_sq)
+        if defender is None or defender.color != enemy_color:
+            continue
+        defender_value = _piece_value(defender)
+        # The defender must be more valuable than our attacker —
+        # otherwise they can trade level and aren't "forced to move".
+        if attacker_value >= defender_value:
+            continue
+        # What does this defender defend? Look at the squares it
+        # attacks (which, for friendlies on those squares, means
+        # defense).
+        for victim_sq in after.attacks(defender_sq):
+            victim = after.piece_at(victim_sq)
+            if victim is None or victim.color != enemy_color:
+                continue
+            if victim.piece_type == chess.KING:
+                continue
+            if _piece_value(victim) < 3:
+                continue
+            # Is the defender the sole defender of `victim`?
+            # Count other enemy defenders (excluding the defender
+            # itself and the king).
+            other_defenders = [
+                sq for sq in after.attackers(enemy_color, victim_sq)
+                if sq != defender_sq
+                and after.piece_at(sq) is not None
+                and after.piece_at(sq).piece_type != chess.KING
+            ]
+            if not other_defenders:
+                # If `victim` has only `defender` protecting it AND
+                # `defender` is now under threat → deflection.
+                return MOTIF_DEFLECTION
+    return None
+
+
+def detect_overloaded_defender(
+    board: chess.Board, move: chess.Move, pv: list[chess.Move] | None
+) -> str | None:
+    """v1.17.0: enemy piece defending two important things.
+
+    Conditions (after our move):
+      1. The moving piece attacks an enemy piece A (worth ≥3) defended
+         by exactly one enemy piece E (the "defender").
+      2. E ALSO defends another enemy piece B (worth ≥3), and B has
+         no other defender besides E.
+      3. So if E recaptures when we take A, B hangs; if E moves to
+         save B, A falls. Either way, the enemy loses material.
+
+    Distinct from deflection: the overloaded defender is currently
+    in TWO defensive roles simultaneously — not just threatened
+    once.
+    """
+    moving_piece = board.piece_at(move.from_square)
+    if moving_piece is None:
+        return None
+    after = board.copy()
+    after.push(move)
+    enemy_color = not moving_piece.color
+    for victim_a_sq in after.attacks(move.to_square):
+        victim_a = after.piece_at(victim_a_sq)
+        if victim_a is None or victim_a.color != enemy_color:
+            continue
+        if victim_a.piece_type == chess.KING:
+            continue
+        if _piece_value(victim_a) < 3:
+            continue
+        # Find the unique defender of victim_a (must be exactly 1,
+        # ignoring the king).
+        defenders = [
+            sq for sq in after.attackers(enemy_color, victim_a_sq)
+            if after.piece_at(sq) is not None
+            and after.piece_at(sq).piece_type != chess.KING
+        ]
+        if len(defenders) != 1:
+            continue
+        defender_sq = defenders[0]
+        # What ELSE does this defender protect (another enemy piece
+        # worth >=3 with no other defender)?
+        for victim_b_sq in after.attacks(defender_sq):
+            if victim_b_sq == victim_a_sq:
+                continue
+            victim_b = after.piece_at(victim_b_sq)
+            if victim_b is None or victim_b.color != enemy_color:
+                continue
+            if victim_b.piece_type == chess.KING:
+                continue
+            if _piece_value(victim_b) < 3:
+                continue
+            # victim_b's defenders, excluding the overloaded one
+            other_defenders_b = [
+                sq for sq in after.attackers(enemy_color, victim_b_sq)
+                if sq != defender_sq
+                and after.piece_at(sq) is not None
+                and after.piece_at(sq).piece_type != chess.KING
+            ]
+            if not other_defenders_b:
+                return MOTIF_OVERLOADED_DEFENDER
+    return None
+
+
 def detect_hanging_piece(
     board: chess.Board, move: chess.Move, pv: list[chess.Move] | None
 ) -> str | None:
@@ -576,6 +775,64 @@ def detect_trapped_piece(
     return None
 
 
+def detect_zugzwang(
+    board: chess.Board, move: chess.Move, pv: list[chess.Move] | None
+) -> str | None:
+    """v1.17.0: intentionally narrow zugzwang detector.
+
+    Zugzwang in middlegame positions is very hard to detect
+    statically (it requires a Stockfish-quality eval comparison
+    across every legal reply). This detector fires only in classic
+    late-endgame patterns where the enemy has almost no legal
+    moves AND every legal move is by their king:
+
+      1. Late endgame: total non-king material ≤ 4 points
+         (essentially K+P endgames or simpler).
+      2. After our move, the enemy has 1 or 2 legal moves total
+         (not 0 — that's stalemate, a different motif).
+      3. EVERY legal move is by the enemy king.
+      4. The enemy king is currently NOT in check (true zugzwang —
+         forced to move into a worse position even when not under
+         attack).
+
+    Intentionally narrow. Under-tags rather than over-tags. If real-
+    world false positives surface, tighten further; if real
+    middlegame zugzwangs need detection, extend with PV-based
+    heuristics in a v1.17.x patch.
+    """
+    after = board.copy()
+    after.push(move)
+    # Material gate
+    total_material = 0
+    for sq in chess.SQUARES:
+        p = after.piece_at(sq)
+        if p is None or p.piece_type == chess.KING:
+            continue
+        total_material += _piece_value(p)
+    if total_material > 4:
+        return None
+    # Not zugzwang if the enemy is currently in check (then they
+    # MUST move because of check, not because of zugzwang).
+    if after.is_check():
+        return None
+    legal = list(after.legal_moves)
+    # Classic K+P opposition zugzwang typically leaves the cornered
+    # king 1-3 legal squares (e.g. Ka7, Ka8, Kc8). Cap at 3 to catch
+    # the canonical patterns while still rejecting "real choice"
+    # positions with many moves available.
+    if not (1 <= len(legal) <= 3):
+        return None
+    enemy_color = after.turn
+    enemy_king_sq = after.king(enemy_color)
+    if enemy_king_sq is None:
+        return None
+    # Every legal move must originate from the king square.
+    for m in legal:
+        if m.from_square != enemy_king_sq:
+            return None
+    return MOTIF_ZUGZWANG
+
+
 def _target_legal_destinations(board: chess.Board, from_sq: int) -> list[int]:
     """Approximate the legal destination squares for the piece on from_sq.
 
@@ -625,14 +882,18 @@ def _is_pseudo_legal_move(
 
 
 _DETECTORS = {
+    MOTIF_BACK_RANK_MATE: detect_back_rank_mate,
     MOTIF_MATE_THREAT: detect_mate_threat,
     MOTIF_DISCOVERED_CHECK: detect_discovered_check,
     MOTIF_FORK: detect_fork,
     MOTIF_PIN: detect_pin,
     MOTIF_SKEWER: detect_skewer,
     MOTIF_REMOVING_DEFENDER: detect_removing_defender,
+    MOTIF_DEFLECTION: detect_deflection,
+    MOTIF_OVERLOADED_DEFENDER: detect_overloaded_defender,
     MOTIF_HANGING_PIECE: detect_hanging_piece,
     MOTIF_TRAPPED_PIECE: detect_trapped_piece,
+    MOTIF_ZUGZWANG: detect_zugzwang,
 }
 
 

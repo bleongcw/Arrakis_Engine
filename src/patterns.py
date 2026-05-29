@@ -1457,19 +1457,25 @@ def _compute_opening_acpl(games: list[dict],
 
 # ── v1.15.0 Motif Aggregation ─────────────────────────────────────────────
 
-# Canonical 8 motif identifiers from src/motifs.py. Hard-coded here (not
+# Canonical motif identifiers from src/motifs.py. Hard-coded here (not
 # imported) to keep patterns.py free of motif-detection imports — the
 # detector module is heavy (chess.Board work). Order is alphabetical, NOT
 # specificity order — sorts happen downstream by missed-count.
+# v1.14.0 shipped the first 8; v1.17.0 added back_rank_mate, deflection,
+# overloaded_defender, zugzwang.
 _MOTIF_IDENTIFIERS = (
+    "back_rank_mate",        # v1.17.0
+    "deflection",            # v1.17.0
     "discovered_check",
     "fork",
     "hanging_piece",
     "mate_threat",
+    "overloaded_defender",   # v1.17.0
     "pin",
     "removing_defender",
     "skewer",
     "trapped_piece",
+    "zugzwang",              # v1.17.0
 )
 
 
