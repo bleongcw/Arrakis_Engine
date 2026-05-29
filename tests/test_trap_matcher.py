@@ -69,6 +69,91 @@ class TestLoadTrapLibrary:
             assert "depth" in e
             assert e["depth"] == len(e["moves"])
 
+    # ── v1.18.0: expanded trap library regression locks ─────────────
+
+    def test_v18_0_trap_count_at_least_400(self):
+        """v1.18.0: dropped the curated 36-pattern allowlist (102
+        entries) for a keyword-substring filter on Lichess's full
+        openings dataset. Expected ~600-1500+ entries depending on
+        Lichess's published count. This guard catches accidental
+        regression to the old narrow allowlist.
+
+        If this test starts failing, check:
+          - scripts/build_traps.py TRAP_KEYWORDS rule is intact
+          - frontend/public/data/traps.json was rebuilt with the
+            v1.18.0 filter (re-run scripts/build_traps.py)
+          - Lichess didn't drastically shrink their published
+            openings dataset
+        """
+        lib = _load_trap_library()
+        assert len(lib) >= 400, (
+            f"trap library has {len(lib)} entries; expected ≥400 "
+            f"after v1.18.0 expansion. Did the curated allowlist "
+            f"sneak back in? Re-run scripts/build_traps.py."
+        )
+
+    def test_v18_0_includes_non_curated_named_traps(self):
+        """v1.18.0: the curated v1.4.0 allowlist missed many named
+        traps Lichess publishes. Confirm representative ones now
+        show up. Stockholm Variation (Englund Gambit subline),
+        Krause Variation (in several openings), and Halloween Attack
+        all surface in the v1.18.0 dataset."""
+        lib = _load_trap_library()
+        joined = " | ".join(e["name"] for e in lib)
+        assert "Stockholm" in joined, (
+            "v1.18.0 expansion should include Stockholm Variation — "
+            "the curated v1.4.0 allowlist excluded it."
+        )
+        assert "Krause" in joined, (
+            "v1.18.0 expansion should include Krause Variation."
+        )
+        assert "Halloween" in joined, (
+            "v1.18.0 expansion should include Halloween Attack / "
+            "Gambit lines."
+        )
+
+    def test_v18_0_keeps_curated_v14_traps(self):
+        """v1.18.0 must NOT regress on the practical v1.4.0 curated
+        trap list. Caveats:
+          - Some v1.4.0 names ('Scholar's Mate', 'Légal', 'Blackburne
+            Shilling') aren't in Lichess's published openings.json at
+            all — they were defensive entries that matched nothing in
+            v1.4.0 either. Not asserted here.
+          - 'Marshall Trap' / 'Monticelli Trap' exist in Lichess but
+            at depth ≥29 plies, beyond MAX_TRAP_DEPTH=16. The depth
+            cap correctly excludes them as theoretical lines, not
+            beginner traps. Not asserted here.
+          - 'Fishing Pole' exists at depth 12 but lacks the
+            TRAP_KEYWORDS — kept via TRAP_NAME_SUPPLEMENT.
+        """
+        lib = _load_trap_library()
+        joined = " | ".join(e["name"] for e in lib)
+        for name_pattern in [
+            # Pure-keyword matches (v1.4.0 originals)
+            "Stafford Gambit", "Fried Liver", "Englund Gambit",
+            "Halloween Gambit", "Wayward Queen Attack",
+            "Lasker", "Noah's Ark", "Siberian",
+            # Supplement-rescued (no keyword match, but kid-coaching-relevant)
+            "Fishing Pole",
+        ]:
+            assert name_pattern in joined, (
+                f"v1.18.0 regression: '{name_pattern}' (curated v1.4.0 "
+                f"trap, expected to still be present) is missing from "
+                f"the library. Did the filter / TRAP_NAME_SUPPLEMENT "
+                f"change exclude it?"
+            )
+
+    def test_v18_0_respects_depth_cap(self):
+        """v1.18.0 keeps the MAX_TRAP_DEPTH = 16 plies cap. The
+        depth cap is the load-bearing guard against false positives
+        on deep theoretical lines named '...Attack' or '...Gambit'."""
+        lib = _load_trap_library()
+        for e in lib:
+            assert e["depth"] <= 16, (
+                f"trap '{e['name']}' has depth {e['depth']} > 16 plies; "
+                f"the v1.18.0 filter must keep MAX_TRAP_DEPTH=16."
+            )
+
 
 class TestMatchTrap:
     def test_no_moves_returns_none(self):

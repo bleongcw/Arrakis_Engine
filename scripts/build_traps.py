@@ -51,42 +51,41 @@ TRAPS_OUT = REPO_ROOT / "frontend" / "public" / "data" / "traps.json"
 # "Petrov's Defense: Stafford Gambit" and its variations).
 #
 # Grow this list as we discover more traps that bleed ELO from kids.
-TRAP_NAME_PATTERNS = (
-    # Well-known beginner gambits
-    "Stafford Gambit",
-    "Elephant Gambit",
-    "Latvian Gambit",
-    "Englund Gambit",
-    "Halloween Gambit",
-    "Cochrane Gambit",
-    "Damiano Defense",          # 2...f6 — punished hard
-    "Tennison Gambit",
-    "From's Gambit",
-    "Blackburne Shilling",      # Blackburne Shilling Gambit
-    "Albin Counter",            # Albin Counter-Gambit
-    # Aggressive king attacks vs unprepared opponents
-    "Wayward Queen Attack",     # Scholar's Mate setup
-    "Fried Liver Attack",       # Two Knights Defense
-    "Lolli Attack",             # Italian — early Ng5/Bxf7+ ideas
-    "Max Lange Attack",         # Italian — sharp tactics
-    "Traxler",                  # Traxler Counterattack
-    # Named TRAPS proper
-    "Fishing Pole",
-    "Légal",
-    "Legal Trap",
-    "Lasker Trap",
-    "Noah's Ark",
-    "Magnus Smith Trap",
-    "Marshall Trap",
-    "Monticelli Trap",
-    "Mortimer Trap",
-    "Wormald",
-    "Tarrasch Trap",
-    "Siberian Trap",
-    "Réti Endgame",
-    # Quick-mate setups
-    "Fool's Mate",
-    "Scholar's Mate",
+# v1.18.0: keyword-based filter. Any Lichess-named opening whose
+# name contains one of these substrings AND whose move sequence is
+# ≤MAX_TRAP_DEPTH plies counts as a trap.
+#
+# Trade-off vs the v1.4.0 curated allowlist (36 hand-picked
+# patterns → 102 entries): broader coverage (~600+ entries),
+# small false-positive rate (some openings named "X Attack" are
+# strategic setups not aggressive traps), but Bernard's
+# YouFallFor card surfaces meaningful named-trap matches the
+# curated list missed — Stockholm Trap, Krause Variation,
+# Halloween Attack, etc.
+#
+# The depth cap is the actual guard against "noise" — a deep
+# theoretical line named "Anything Attack" still doesn't qualify
+# because its signature requires ≥16 plies of agreement to match,
+# which beginner games rarely exhibit. Bernard explicitly
+# approved keeping the depth cap during v1.18.0 planning.
+TRAP_KEYWORDS = (
+    "Trap",
+    "Gambit",
+    "Attack",
+    "Mate",
+    "Sacrifice",
+)
+
+# A small supplement of beginner-trap names that Lichess publishes
+# under names lacking the TRAP_KEYWORDS substrings. Added in v1.18.0
+# after diagnosing the keyword-filter casualties of the v1.4.0
+# curated allowlist drop. Keep this list short and conservative —
+# only well-known beginner traps that are obviously kid-coaching
+# relevant. The depth cap (MAX_TRAP_DEPTH) still applies to these.
+TRAP_NAME_SUPPLEMENT = (
+    "Fishing Pole",         # Ruy Lopez Berlin sideline
+    # Future additions go here. Keep ≤5 entries — if the list grows
+    # it's a signal the TRAP_KEYWORDS rule needs revisiting instead.
 )
 
 # Cap on how deep into the opening a trap signature can extend. Traps that
@@ -162,13 +161,29 @@ def _parse_tsv(text: str) -> list[dict]:
 
 
 def _is_trap(entry: dict) -> bool:
-    """Return True if this opening matches the curated trap allowlist
-    AND its move sequence is shallow enough to qualify as a beginner trap.
+    """v1.18.0: keyword-based trap filter + small supplement.
+
+    Returns True if EITHER:
+      (a) The opening name contains any TRAP_KEYWORDS substring, OR
+      (b) The opening name contains any TRAP_NAME_SUPPLEMENT pattern
+          (for well-known beginner traps that Lichess publishes under
+          names like "X Variation" without keyword markers).
+
+    AND the move sequence is ≤MAX_TRAP_DEPTH plies (the load-
+    bearing guard against deep theoretical lines slipping in).
+
+    Replaced the v1.4.0 curated 36-pattern allowlist (102 entries)
+    for broader coverage (~1400+ entries from Lichess's full
+    dataset).
     """
     if entry["depth"] > MAX_TRAP_DEPTH:
         return False
     name = entry["name"]
-    return any(pattern in name for pattern in TRAP_NAME_PATTERNS)
+    if any(kw in name for kw in TRAP_KEYWORDS):
+        return True
+    if any(p in name for p in TRAP_NAME_SUPPLEMENT):
+        return True
+    return False
 
 
 def main():

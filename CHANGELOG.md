@@ -4,6 +4,68 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.18.0] - 2026-05-29
+
+### Changed
+- **Expanded the Lichess trap library from 102 → 1,475 entries.**
+  v1.4.0 shipped a hand-curated 36-pattern allowlist
+  (`TRAP_NAME_PATTERNS`) that selected 102 named traps from
+  Lichess's full 3,209-opening dataset. v1.18.0 replaces the
+  allowlist with a generic substring filter on five keywords:
+
+  ```python
+  TRAP_KEYWORDS = ("Trap", "Gambit", "Attack", "Mate", "Sacrifice")
+  ```
+
+  Plus a small `TRAP_NAME_SUPPLEMENT` allowlist for beginner traps
+  Lichess publishes under names without the keywords (currently:
+  Fishing Pole).
+
+  The `MAX_TRAP_DEPTH = 16` plies cap is preserved — it's the
+  load-bearing guard against deep theoretical lines named
+  "Anything Attack" matching games where they don't really fire.
+
+  **Bernard's YouFallFor card now surfaces ~14× more named traps**
+  — Stockholm Variation (Englund Gambit), Krause Variation
+  (Queen's Gambit Declined Semi-Tarrasch), 6 Krause sublines
+  across other openings, Halloween Attack lines, Bongcloud Attack,
+  Levitsky Attack, and ~1300 others the curated list missed.
+
+### Tests
+- 4 new regression tests in
+  `tests/test_trap_matcher.py::TestLoadTrapLibrary`:
+  - `test_v18_0_trap_count_at_least_400` — guard against accidental
+    regression to the narrow allowlist
+  - `test_v18_0_includes_non_curated_named_traps` — Stockholm /
+    Krause / Halloween all surface
+  - `test_v18_0_keeps_curated_v14_traps` — every v1.4.0 trap that
+    Lichess actually publishes (under the depth cap) is still
+    present. Documents which curated names are excluded:
+    - Lichess-doesn't-publish: Scholar's Mate, Légal, Blackburne
+      Shilling
+    - Depth ≥29 (over the 16-ply cap): Marshall Trap, Monticelli
+      Trap
+    - Keyword-missing but kept via supplement: Fishing Pole
+  - `test_v18_0_respects_depth_cap` — every entry has depth ≤ 16
+- Backend: 585 → **589** (+4)
+
+### Recovery / no-op for existing data
+
+The trap-matching pipeline (`_match_trap`,
+`_aggregate_traps_by_outcome`, `_compute_loss_openings`,
+`_compute_your_arsenal`) is data-shape-agnostic. The next
+`python main.py patterns` run automatically picks up the expanded
+trap matches — no special backfill step.
+
+### File sizes
+- `frontend/public/data/traps.json`: 19 KB → **287 KB**
+- `frontend/public/data/openings.json`: 482 KB (unchanged)
+
+Frontend loads `traps.json` once on Patterns page load. 287 KB is
+well within budget.
+
+---
+
 ## [1.17.0] - 2026-05-29
 
 ### Added
