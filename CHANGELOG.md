@@ -4,6 +4,59 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.18.1] - 2026-05-29
+
+### Fixed
+- **`rescan-motifs --player <slug>` returned "No analyzed games
+  match".** A v1.16.4 miss: when v1.16.4 went slug-only, it updated
+  4 CLI lookup functions (cmd_note / cmd_review / cmd_trend /
+  cmd_fide_update) but **missed `cmd_rescan_motifs`**, which still
+  filtered by `WHERE p.username = ?`. So `python main.py
+  rescan-motifs --player evanleong` matched nothing (evanleong is
+  the slug; the row's username is nevergiveupgreatthings).
+
+  The v1.16.3 static guard only scans `dashboard_server.py`, not
+  `main.py`, so it didn't catch this. v1.18.1 fixes the lookup and
+  also makes `cmd_harvest` and `cmd_report` (which filter
+  config-loaded player dicts, not DB rows) accept slug via the new
+  `_player_matches` / `_config_slug` helpers — so `--player
+  evanleong` works consistently across the entire CLI surface now.
+
+  Symptom Bernard hit:
+  ```
+  $ python main.py rescan-motifs --player evanleong
+  No analyzed games match. Run `python main.py analyze` first.
+  ```
+  (The games WERE analyzed — the lookup just used the wrong column.)
+
+### Added
+- **`_config_slug(player)` + `_player_matches(player, requested)`**
+  helpers in `main.py`. Config-loaded player dicts don't have the
+  DB's auto-derived slug, so these mirror `src.models._slugify`
+  (lowercase display_name, strip non-alphanumeric) to keep CLI
+  `--player` matching consistent whether or not `config.yaml` sets
+  an explicit `slug`.
+
+### Tests
+- 8 new tests in `tests/test_main_cli.py`:
+  - `TestConfigSlugHelpers` × 7 — explicit slug / derived /
+    username-fallback / empty-fallback / matches-by-slug /
+    matches-by-username / rejects-unrelated
+  - `TestRescanMotifsSlug::test_rescan_resolves_by_slug` — the
+    regression lock for the exact bug (rescan-motifs --player
+    <slug> resolves, doesn't report zero games)
+- Backend: 589 → **597** (+8)
+
+### Note on the bug class
+
+This is the same "slug refactor missed a site" class as v1.16.3
+(which added a static guard for `dashboard_server.py`). The
+guard's scope didn't extend to `main.py`. A follow-up could add
+`main.py` to the static guard's scan, but the CLI lookups are
+fewer and now test-covered; deferred unless a third miss surfaces.
+
+---
+
 ## [1.18.0] - 2026-05-29
 
 ### Changed

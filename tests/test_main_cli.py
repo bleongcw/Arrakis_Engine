@@ -253,3 +253,83 @@ class TestCmdTrendSlugSupport:
         assert "WARN" in out
         assert "ghost" in out
         assert called == [], "unknown identifier should not invoke generate"
+
+
+class TestConfigSlugHelpers:
+    """v1.16.5: _config_slug + _player_matches for config-dict filtering
+    in cmd_harvest / cmd_report. These filter config.yaml player dicts
+    (not DB rows), so they need their own slug derivation."""
+
+    def test_config_slug_explicit(self):
+        p = {"username": "nevergiveupgreatthings", "slug": "evan",
+             "display_name": "Evan Leong"}
+        assert main_module._config_slug(p) == "evan"
+
+    def test_config_slug_derived_from_display_name(self):
+        p = {"username": "nevergiveupgreatthings", "display_name": "Evan Leong"}
+        assert main_module._config_slug(p) == "evanleong"
+
+    def test_config_slug_falls_back_to_username(self):
+        p = {"username": "kayaistoast"}
+        assert main_module._config_slug(p) == "kayaistoast"
+
+    def test_config_slug_empty_fallback(self):
+        assert main_module._config_slug({}) == "player"
+
+    def test_player_matches_by_slug(self):
+        p = {"username": "nevergiveupgreatthings", "display_name": "Evan Leong"}
+        assert main_module._player_matches(p, ["evanleong"]) is True
+
+    def test_player_matches_by_username(self):
+        p = {"username": "nevergiveupgreatthings", "display_name": "Evan Leong"}
+        assert main_module._player_matches(p, ["nevergiveupgreatthings"]) is True
+
+    def test_player_matches_rejects_unrelated(self):
+        p = {"username": "nevergiveupgreatthings", "display_name": "Evan Leong"}
+        assert main_module._player_matches(p, ["estellaleong"]) is False
+
+
+class TestRescanMotifsSlug:
+    """v1.16.5: rescan-motifs --player accepts slug (regression lock
+    for the v1.16.4 miss that made `rescan-motifs --player evanleong`
+    return 'No analyzed games match')."""
+
+    def _make_args(self, player=None, limit=None):
+        return argparse.Namespace(player=player, limit=limit)
+
+    def test_rescan_resolves_by_slug(self, db_path, capsys):
+        """A player whose slug differs from username (evanleong vs
+        nevergiveupgreatthings) must be found by slug in rescan-motifs.
+        Insert a complete game with a motifs-eligible move."""
+        from src.models import init_db, ensure_player
+        conn = init_db(db_path)
+        pid = ensure_player(
+            conn, "nevergiveupgreatthings", display_name="Evan Leong",
+            slug="evanleong", age=9, rating=1100,
+        )
+        # Minimal analyzed game so rescan has something to walk.
+        conn.execute(
+            """INSERT INTO games
+            (player_id, game_url, pgn, player_color, player_rating,
+             opponent_rating, result, time_control, time_class,
+             date_played, analysis_status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (pid, "https://chess.com/g/x",
+             '[White "x"]\n[Black "y"]\n\n1. e4 e5 2. Nf3 *',
+             "white", 1100, 1050, "win", "600", "rapid",
+             "2026-05-01", "complete"),
+        )
+        conn.commit()
+        conn.close()
+
+        # Should NOT print "No analyzed games match" when given the slug.
+        main_module.cmd_rescan_motifs(
+            self._make_args(player="evanleong"),
+            _config(db_path),
+        )
+        out = capsys.readouterr().out
+        assert "No analyzed games match" not in out, (
+            "v1.16.5 regression: rescan-motifs --player evanleong (slug) "
+            "should resolve, not report zero games."
+        )
+        assert "Rescanning 1 games" in out or "Rescanning" in out

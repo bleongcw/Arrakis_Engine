@@ -32,6 +32,32 @@ def load_config(path: str = "config.yaml") -> dict:
         return yaml.safe_load(f)
 
 
+def _config_slug(player: dict) -> str:
+    """v1.16.5: the URL/CLI slug for a config-loaded player dict.
+
+    Uses the explicit `slug` key if present, else derives it the same
+    way src.models._slugify does (lowercase display_name, strip all
+    non-alphanumeric). Mirrors the DB-side derivation so CLI --player
+    matching is consistent whether or not config.yaml sets slug.
+    """
+    import re
+    if player.get("slug"):
+        return player["slug"]
+    source = player.get("display_name") or player.get("username") or ""
+    return re.sub(r"[^a-z0-9]+", "", source.lower()) or "player"
+
+
+def _player_matches(player: dict, requested: list[str]) -> bool:
+    """v1.16.5: True if a config player matches a --player value by
+    slug OR chess.com username. Keeps `--player` consistent with the
+    slug-only model the API/URL use, while still accepting the
+    chess.com handle for backward-compatible harvest scripts."""
+    return (
+        _config_slug(player) in requested
+        or player.get("username") in requested
+    )
+
+
 def cmd_harvest(args, config):
     """Harvest games from chess.com and/or lichess for configured players."""
     db_path = config["database"]["path"]
@@ -43,7 +69,11 @@ def cmd_harvest(args, config):
 
     players = config["players"]
     if args.player:
-        players = [p for p in players if p["username"] in args.player]
+        # v1.16.5: --player accepts slug OR chess.com username. Config
+        # entries may carry an explicit `slug`; fall back to the
+        # auto-derived slug (lowercase display_name, no separator) so
+        # `--player evanleong` matches even when slug isn't set in YAML.
+        players = [p for p in players if _player_matches(p, args.player)]
 
     for player in players:
         username = player["username"]
@@ -340,7 +370,8 @@ def cmd_report(args, config):
     db_path = config["database"]["path"]
     players = config["players"]
     if args.player:
-        players = [p for p in players if p["username"] in args.player]
+        # v1.16.5: accept slug OR chess.com username
+        players = [p for p in players if _player_matches(p, args.player)]
 
     period = "monthly" if args.monthly else "weekly"
     output_dir = args.output or "reports"
@@ -564,7 +595,11 @@ def cmd_rescan_motifs(args, config):
            "WHERE g.analysis_status = 'complete'")
     params = []
     if args.player:
-        sql += " AND p.username = ?"
+        # v1.16.5: accept slug OR chess.com username (this was a
+        # v1.16.4 miss — rescan-motifs wasn't in the 4 cmd functions
+        # updated, and the static guard only scans dashboard_server.py).
+        sql += " AND (p.slug = ? OR p.username = ?)"
+        params.append(args.player)
         params.append(args.player)
     sql += " ORDER BY g.date_played DESC"
     if args.limit:
