@@ -4,6 +4,42 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.18.4] - 2026-05-29
+
+### Docs
+- **Full documentation refresh to v1.18.3.** README.md, CLAUDE.md, and
+  docs/architecture.md had drifted ~10 versions — they were frozen at
+  v1.8.0, missing the entire motif arc, Journal, Recent Form Review,
+  slug routing, trap expansion, mobile viewport, and chart rework.
+  This brings all three current. No code changes.
+
+  Corrected facts across the docs:
+  - Version v1.8.0 → **v1.18.3**
+  - Backend tests 362–384 → **597**; frontend 66–76 → **205**
+  - Traps ~102 → **1,475** (v1.18.0 substring filter)
+  - Added the **12 tactical motifs** (was unmentioned), the
+    `_compute_motif_summary` aggregation + per-phase splits, and the
+    Tactical Themes Patterns card
+  - Added the **Journal** subsystem (journal_entries table, reviews +
+    parent notes, `/[player]/journal` route, `journal.py`)
+  - Documented the **slug ≠ username** model (v1.16.x): slug for
+    URLs/API/CLI, chess.com username for the harvester only;
+    `_resolve_player_id` resolver; slug-only lookups
+  - Updated schema tables (`motifs_json`, `journal_entries`, `slug`,
+    `motif_summary`, `coaching_meta` motif fields)
+  - Updated the CLI command list (`trend`, `review`, `note`,
+    `rescan-motifs`, `backfill-acpl`) and API endpoint tables
+    (`/api/journal`, `/api/journal/review`, `/api/journal/note`)
+  - Updated file trees (`motifs.py`, `journal.py`, `lib/motifs.ts`,
+    `lib/chart-format.ts`; removed the deleted `export.py`)
+  - Noted mobile viewport (v1.18.2) and the time-scale rating chart
+    (v1.18.3)
+
+  CHANGELOG itself was already per-release accurate and is unchanged
+  except for this entry. ROADMAP was already current (v1.18.2 edit).
+
+---
+
 ## [1.18.3] - 2026-05-29
 
 ### Fixed

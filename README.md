@@ -221,14 +221,16 @@ For advanced options (compile Stockfish from source, configure multiple provider
 
 ![Arrakis Engine Architecture](docs/screenshots/Arrakis-Engine-Architecture-TB.jpg)
 
-The pipeline is five layers:
+The pipeline is layered:
 1. **Stockfish engine evaluation** — objective, per-move centipawn analysis with clock time extraction
 2. **LLM coaching interpretation** — transforms raw engine output into human-readable insights
 3. **Pattern aggregation** — tracks trends across games over weeks and months
 4. **LLM trend summaries** — interprets cross-game patterns into coaching narratives
 5. **Time pressure analysis** — per-move clock data reveals time management patterns and pressure-induced blunders
+6. **Tactical-motif detection** (v1.14.0–v1.17.0) — 12 detectors tag each critical move with the themes it executes or misses (fork, pin, skewer, …, zugzwang), aggregated cross-game with per-phase concentration and surfaced in coaching + the Tactical Themes Patterns card
+7. **Journal** (v1.10.0–v1.12.0) — a chronological diary of coaching artifacts: LLM-generated Recent Form Reviews + manual Parent Notes, in a threaded feed
 
-The frontend is a fully mobile-responsive Next.js 16 + React 19 dashboard with player-scoped URLs (`/<player>/games`, `/<player>/patterns`, `/<player>/reports`).
+The frontend is a mobile-responsive Next.js 16 + React 19 dashboard with player-scoped URLs keyed on a stable **slug** (v1.16.x) — `/<slug>/games`, `/<slug>/patterns`, `/<slug>/journal`, `/<slug>/reports` — so chess.com renames never break bookmarks.
 
 ## Full Installation Guide
 
@@ -400,13 +402,19 @@ database:
 | `python main.py harvest` | Fetch games from Chess.com and Lichess for all configured players |
 | `python main.py analyze` | Run Stockfish analysis on all pending games |
 | `python main.py coach` | Generate LLM coaching insights (supports `--limit`, `--provider`, `--history`) |
-| `python main.py patterns` | Compute cross-game pattern statistics |
+| `python main.py patterns` | Compute cross-game pattern statistics (incl. motif aggregation) |
+| `python main.py trend` | **(v1.15.2)** Regenerate the LLM trend summary (Coaching Summary card) |
+| `python main.py review` | **(v1.9.0)** Generate a Recent Form Review across the last N coached games |
+| `python main.py note` | **(v1.12.0)** Add a Parent Note to the Journal |
+| `python main.py rescan-motifs` | **(v1.14.0)** Backfill tactical-motif tags on existing games (no Stockfish) |
 | `python main.py report` | Generate Markdown coaching reports |
 | `python main.py serve` | **(v1.5.0)** Launch backend + frontend together (recommended for end users; supports `--port`, `--frontend-port`, `--install`) |
 | `python main.py dashboard` | Launch only the API backend (use `serve` for the full app) |
 | `python main.py fide-update` | Update a player's FIDE rating |
-| `python main.py backfill-clocks` | Backfill clock data from PGN annotations for existing games |
+| `python main.py backfill-acpl` / `backfill-clocks` | Backfill capped ACPL / clock data on existing games |
 | `python main.py run-all` | Run the full pipeline end-to-end |
+
+`--player` accepts the player **slug** (v1.16.4), e.g. `--player evanleong`.
 
 ### Command details
 
@@ -847,42 +855,45 @@ Arrakis_Engine/
 │   │   ├── theme-toggle.tsx   # Dark/light mode toggle
 │   │   ├── pipeline-control-panel.tsx # Data Updates panel (harvest/analyze/patterns/coach)
 │   │   ├── game-detail/       # ChessBoard, EvalChart, MoveList, CoachingPanels, ComparisonSummary
-│   │   ├── patterns/          # 16 visualization components + Self-Analysis (Fix Your Openings + Trap Patterns)
+│   │   ├── patterns/          # visualization components + MotifThemes (v1.15.0) + Self-Analysis
+│   │   ├── journal/           # (v1.11.0) TimelineThread, DayGroup, EntryCard, AddNoteForm
 │   │   ├── hunter/            # OpponentSearch + TargetedPrep (v1.4.1+)
 │   │   ├── settings/          # Players, Analysis, ApiKeys, Coaching sections
 │   │   └── ui/                # shadcn/ui primitives (card, table, button, etc.)
 │   ├── hooks/                 # useChessNavigation (currentFen, endFen, moves), usePipeline, useCoaching
 │   │   └── __tests__/         # (v1.6.0) Vitest specs for use-chess-navigation (clock-comment guard, boundaries)
 │   ├── lib/                   # API client (api.ts), types (types.ts), providers (providers.ts), utils
-│   │   └── chess/             # (v1.6.0) Shared chess helpers: parseMoveText, lichessAnalysisUrl, opening matching
-│   │       └── __tests__/     # Helper unit tests (incl. v1.4.5 Lichess-URL regression lock)
-│   ├── components/**/__tests__/  # (v1.6.0) Component smoke + interaction tests (targeted-prep, you-fall-for, opening-explorer)
-│   ├── vitest.config.ts       # (v1.6.0) Vitest harness (jsdom + Testing Library)
-│   ├── vitest.setup.ts        # (v1.6.0) Global mocks: next/navigation, next/link
+│   │   ├── chess/             # (v1.6.0) Shared chess helpers: parseMoveText, lichessAnalysisUrl, opening matching
+│   │   ├── motifs.ts          # (v1.15.0) Shared MOTIF_LABELS — 12 emoji+label pairs
+│   │   ├── summary.ts         # (v1.14.1) parseTrendSummary — JSON-array tolerant
+│   │   └── chart-format.ts    # (v1.18.3) Date-axis helpers for the time-scale chart
 │   └── public/data/
 │       ├── openings.json      # 3,690-entry Lichess CC0 opening database
-│       └── traps.json         # 102-entry curated beginner-trap library (v1.4.0+)
+│       └── traps.json         # 1,475-entry Lichess trap/gambit/attack library (v1.18.0)
 ├── scripts/
 │   └── build_traps.py         # Rebuilds openings.json + traps.json from Lichess CC0
 ├── docs/
 │   ├── architecture.md        # Tracked: contributor architecture reference
 │   └── screenshots/           # Architecture diagram and screenshots
-├── tests/                 # Backend test suite (362 tests across 3 tiers)
+├── tests/                 # Backend test suite (597 tests across 3 tiers)
 │   ├── conftest.py        # Shared fixtures (db, player, stockfish, llm)
-│   ├── test_models.py
+│   ├── test_models.py                # Schema, ensure_player, migrations, _slugify (v1.16.1)
 │   ├── test_harvester.py
 │   ├── test_analyzer.py
+│   ├── test_motifs.py                # v1.14.0/v1.17.0 — 12 motif detectors + calibration
 │   ├── test_coach.py
-│   ├── test_patterns.py
+│   ├── test_patterns.py              # patterns + motif summary + phase split + prompt wiring
+│   ├── test_journal.py               # v1.12.0 Journal helpers
 │   ├── test_tiers.py
-│   ├── test_export.py
 │   ├── test_report.py
-│   ├── test_dashboard_server.py
+│   ├── test_dashboard_server.py      # API endpoints + slug resolver + static guard
+│   ├── test_main_cli.py              # v1.15.3 — CLI dispatch + slug resolution
 │   ├── test_llm_providers.py         # Provider registry, model resolution, dispatch
-│   ├── test_scheduler.py             # 4-step pipeline, cancel, provider passthrough
+│   ├── test_scheduler.py             # Pipeline orchestration, cancel, provider passthrough
 │   ├── test_loss_openings.py         # v1.4.0 Self-Analysis aggregation
 │   ├── test_trap_matcher.py          # v1.4.0 trap library + matching + recent_game_ids
 │   ├── test_hunter.py                # v1.4.1+ Hunter Mode (cache, accumulation, reps)
+│   ├── test_dev_runner.py            # v1.5.0 `serve` subprocess orchestration
 │   ├── test_analyzer_integration.py  # Stockfish integration (pytest -m integration)
 │   ├── test_coach_live.py            # LLM API live tests (pytest -m live)
 │   └── test_pipeline_e2e.py          # Full pipeline E2E (requires both)
@@ -895,45 +906,43 @@ Arrakis_Engine/
 
 | Table | Purpose |
 |---|---|
-| `players` | Player profiles (username, display name, age, rating, FIDE ID/rating) |
+| `players` | Player profiles (username = chess.com handle, **slug** = URL/API/CLI id (v1.16.1), display name, age, rating, FIDE ID/rating) |
 | `games` | Game records with PGN, ratings, result, platform, ACPL, analysis/coaching status |
-| `move_analysis` | Per-move Stockfish evaluation (capped centipawn, win prob, classification, clock_seconds) |
-| `game_coaching` | LLM-generated coaching output per game (narrative, feedback, opening analysis) |
-| `player_patterns` | Aggregated pattern statistics per player per period (incl. Self-Analysis from v1.4.0) |
+| `move_analysis` | Per-move Stockfish evaluation (capped centipawn, win prob, classification, clock_seconds, **motifs_json** v1.14.0) |
+| `game_coaching` | LLM-generated coaching output per game (narrative, feedback, opening analysis, coaching_meta) |
+| `player_patterns` | Aggregated pattern statistics per player per period (incl. Self-Analysis v1.4.0 + **motif_summary** v1.15.0) |
+| `journal_entries` (v1.10.0) | Chronological coaching diary — Recent Form Reviews + Parent Notes |
 | `opponent_cache` (v1.4.1) | Hunter Mode profile JSON cache, 24h TTL |
 | `opponent_games` (v1.4.4) | Hunter Mode accumulating PGN cache, sliding-window pruned |
 
 ## Running Tests
 
-**428 tests total** — 362 backend (pytest) + 66 frontend (Vitest). Backend tests are organized into three tiers using pytest markers; integration and live tests are excluded by default. Frontend tests run sub-second and cover the chess helper library, the `use-chess-navigation` hook, and three component smoke suites.
+**~802 tests total** — 597 backend (pytest) + 205 frontend (Vitest). Backend tests are organized into three tiers using pytest markers; integration (`-m integration`, Stockfish) and live (`-m live`, LLM key) tiers are excluded by default. Frontend tests run in a few seconds and cover the chess + chart + motif helper libraries, the `use-chess-navigation` hook, and the component suites.
 
 ### Commands
 
 ```bash
 # Unit tests only (default — fast, no external dependencies)
 python -m pytest tests/ -v
-# → 227 tests in ~14s, all mocked
+# → 597 tests in ~30s, all mocked
 
 # Stockfish integration tests (requires Stockfish binary)
 python -m pytest tests/ -m integration -v
-# → 7 tests: real Stockfish analysis on Scholar's Mate (~25s)
+# → real Stockfish analysis on Scholar's Mate
 
 # LLM API live tests (requires ARRAKIS_ANTHROPIC_API_KEY or ARRAKIS_OPENAI_API_KEY)
 python -m pytest tests/ -m live -v
-# → 5 tests: real coaching API calls (~3min, ~$0.05 per run)
+# → real coaching + structured-output + motif-citation compliance (~$0.30 per run)
 
-# Full pipeline E2E (requires both Stockfish + API key)
-python -m pytest tests/ -m "integration and live" -v
-# → 1 test: analyze → coach end-to-end (~1min)
-
-# Everything
-python -m pytest tests/ -m "" -v
-# → All 362 tests (~5min)
+# Frontend (Vitest)
+cd frontend && npx vitest run
+# → 205 tests in ~3s
+cd frontend && npx next build      # type-check
 ```
 
 ### Test Coverage by Module
 
-**Unit tests** (227 tests — all mocked, no external dependencies):
+**Unit tests** (597 backend tests — all mocked, no external dependencies):
 
 | File | Tests | Coverage |
 |------|-------|---------|
@@ -973,7 +982,7 @@ The `llm_provider` fixture checks for `ARRAKIS_ANTHROPIC_API_KEY` first, falls b
 
 ### Frontend tests (Vitest, v1.6.0+)
 
-**66 tests across 7 files**, sub-second full run. No external dependencies; jsdom + Testing Library + `@testing-library/jest-dom`.
+**205 tests**, few-second full run. No external dependencies; jsdom + Testing Library + `@testing-library/jest-dom`. Covers the chess + chart-format + motif helper libraries, the `use-chess-navigation` hook, and the Patterns / Journal / game-detail / settings / layout component suites.
 
 ```bash
 cd frontend

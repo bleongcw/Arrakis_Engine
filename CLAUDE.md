@@ -5,7 +5,7 @@ Local Python app that pulls games from Chess.com and Lichess, runs Stockfish ana
 and uses reasoning LLMs to generate age-appropriate coaching insights with
 pattern tracking over time. Inspired by Eleanor, Evan, and Estella.
 
-Current release: **v1.6.0** (2026-05-18). See `CHANGELOG.md` for history.
+Current release: **v1.18.3** (2026-05-29). See `CHANGELOG.md` for full history.
 
 ## Architecture
 - Python 3.11+, SQLite (WAL mode), local Stockfish on Apple Silicon
@@ -14,12 +14,29 @@ Current release: **v1.6.0** (2026-05-18). See `CHANGELOG.md` for history.
 - Fourth layer: LLM-powered trend summaries interpreting cross-game patterns
 - Fifth layer: time pressure analysis from per-move clock data
 - Sixth layer (v1.4+): Self-Analysis (loss openings, trap patterns) + Hunter Mode (opponent prep)
-- Frontend: Next.js 16 + React 19 + shadcn/ui + Tailwind CSS + Recharts (mobile responsive)
+- Seventh layer (v1.14–v1.17): tactical-motif detection — 12 detectors tag each
+  critical move with the themes it executes or misses (fork, pin, skewer,
+  discovered check, mate threat, removing the defender, hanging piece, trapped
+  piece, back-rank mate, deflection, overloaded defender, zugzwang)
+- Eighth layer (v1.15–v1.16): cross-game motif aggregation with per-phase
+  (opening/middlegame/endgame) breakdown, surfaced in coaching prompts + the
+  Tactical Themes Patterns card
+- Journal (v1.10–v1.12): chronological diary of coaching artifacts — Recent Form
+  Reviews + manual Parent Notes, threaded social-feed UI
+- Frontend: Next.js 16 + React 19 + shadcn/ui + Tailwind CSS + Recharts (mobile
+  responsive — viewport meta tag added v1.18.2)
 
 ## Players
 - Configured in `config.yaml` initially; managed via Settings page after that.
-  DB is the source of truth (chess.com username, lichess username, display name,
-  age, rating, FIDE ID).
+  DB is the source of truth.
+- Three distinct identifiers (v1.16.x):
+  - **`username`** — the chess.com / lichess handle, used ONLY by the harvester's
+    API calls. Mutable (chess.com allows renames).
+  - **`slug`** — the URL / API `?player=` / CLI `--player` identifier. Auto-derived
+    from `display_name` (lowercase, strip non-alphanumeric → "Evan Leong" =
+    "evanleong"). v1.16.4 made lookups slug-only; v1.18.1 extended that to
+    rescan-motifs + harvest/report CLI.
+  - **`display_name`** — what every visible label shows.
 
 ## Key Configuration
 - Stockfish: depth 22, 6 threads, 512MB hash, path configured in `config.yaml`
@@ -41,6 +58,8 @@ Current release: **v1.6.0** (2026-05-18). See `CHANGELOG.md` for history.
 - ACPL capped at ±1000cp (matches Lichess / chess.com convention)
 - Move classifications: excellent (<30cp loss), good (<50), inaccuracy (<100),
   mistake (<300), blunder (300+)
+- Motif detection threshold: critical moves with |cp_loss| ≥ 50 get scanned
+  (`MOTIF_DETECTION_THRESHOLD_CP` in `src/analyzer.py`)
 - Tier-adjusted thresholds via `src/tiers.py` (Beginner → Elementary → Intermediate
   → Advanced → Expert)
 - Coaching output has two tones: child-facing (age-appropriate, concrete, encouraging)
@@ -51,14 +70,17 @@ Current release: **v1.6.0** (2026-05-18). See `CHANGELOG.md` for history.
 ```
 /                           → redirects to /dashboard
 /dashboard                  → all players overview + pipeline control panel
-/<player>/games             → game list for player
-/<player>/games/<id>        → game detail (board, eval, coaching panels)
-/<player>/games/compare     → side-by-side game comparison
-/<player>/patterns          → 16 pattern visualizations + Self-Analysis section
-/<player>/hunt              → Hunter Mode (opponent prep)
-/<player>/reports           → monthly/weekly coaching reports with PDF export
+/<slug>/games               → game list for player
+/<slug>/games/<id>          → game detail (board, eval, coaching panels, motif badges)
+/<slug>/games/compare       → side-by-side game comparison
+/<slug>/patterns            → pattern visualizations + Self-Analysis + Tactical Themes
+/<slug>/journal             → chronological coaching diary (reviews + parent notes)
+/<slug>/hunt                → Hunter Mode (opponent prep)
+/<slug>/reports             → monthly/weekly coaching reports with PDF export
 /settings                   → players, Stockfish config, API keys, coaching settings
 ```
+`<slug>` is the player slug (v1.16.x). Legacy chess.com-username URLs no longer
+resolve (v1.16.4 slug-only).
 
 ## Project Structure
 ```
@@ -69,68 +91,67 @@ ArrakisEngine/
 ├── ROADMAP.md
 ├── CONTRIBUTING.md
 ├── CODE_OF_CONDUCT.md
+├── INSTRUCTION.md             # user install guide
 ├── LICENSE                    # AGPL-3.0
 ├── config.yaml.example
 ├── requirements.txt
 ├── requirements-dev.txt
-├── main.py                    # CLI entry point
+├── main.py                    # CLI entry point (15 subcommands)
 ├── src/
 │   ├── harvester.py           # chess.com + lichess game fetcher
-│   ├── analyzer.py            # Stockfish analysis engine + clock extraction
+│   ├── analyzer.py            # Stockfish analysis + clock extraction + motif tagging
+│   ├── motifs.py              # v1.14.0/v1.17.0 — 12 tactical-motif detectors
 │   ├── llm_providers.py       # Unified LLM provider abstraction (8 providers)
 │   ├── coach.py               # LLM coaching layer (configurable history depth)
-│   ├── patterns.py            # 20 cross-game patterns + LLM trend summaries
+│   ├── patterns.py            # cross-game patterns + motif aggregation + trend summaries
+│   ├── journal.py             # v1.12.0 — Journal entry helpers (reviews + notes)
 │   ├── hunter.py              # v1.4.1+ Hunter Mode (opponent prep)
-│   ├── models.py              # SQLite schema (6 tables) + idempotent migrations
+│   ├── models.py              # SQLite schema + idempotent migrations + _slugify
 │   ├── tiers.py               # Adaptive tier system (rating-based)
 │   ├── scheduler.py           # Auto-pipeline daemon
 │   ├── pipeline_state.py      # Single-task lock across CLI/scheduler/dashboard
 │   ├── dev_runner.py          # v1.5.0 — `serve` subprocess orchestration
 │   ├── report.py              # Report generator
-│   ├── export.py              # Data export utilities
 │   └── dashboard_server.py    # SQLite REST API (GET/POST/PUT/DELETE)
+│                              # (export.py removed in v1.13.3 — API-only now)
 ├── frontend/                  # Next.js 16 + React 19 + shadcn/ui dashboard
 │   ├── app/
-│   │   ├── layout.tsx         # Root layout (providers, header, nav)
+│   │   ├── layout.tsx         # Root layout + Viewport export (v1.18.2 mobile)
 │   │   ├── page.tsx           # Home → /dashboard
-│   │   ├── providers.tsx      # ThemeProvider + PlayerProvider
+│   │   ├── providers.tsx      # ThemeProvider + PlayerProvider (slug-aware)
 │   │   ├── dashboard/page.tsx # All-players overview + pipeline control
 │   │   ├── settings/page.tsx  # Players, Stockfish, API keys, coaching settings
-│   │   └── [player]/          # Player-scoped routes
+│   │   └── [player]/          # Player-scoped routes (segment = slug)
 │   │       ├── games/         # List + detail + compare
-│   │       ├── patterns/      # 16 charts + Self-Analysis (Fix Your Openings + Trap Patterns)
+│   │       ├── patterns/      # Charts + Self-Analysis + Tactical Themes
+│   │       ├── journal/       # v1.10.0+ threaded coaching diary
 │   │       ├── hunt/          # v1.4.2+ Hunter Mode UI
 │   │       └── reports/       # Coaching reports
 │   ├── components/
-│   │   ├── app-header.tsx
-│   │   ├── nav-bar.tsx        # Dashboard / Games / Patterns / Hunt / Reports
-│   │   ├── pipeline-control-panel.tsx
-│   │   ├── game-detail/       # ChessBoard, MoveControls, eval chart, coaching
-│   │   ├── patterns/          # 16 visualization components + Self-Analysis components
+│   │   ├── app-header.tsx, nav-bar.tsx, player-selector.tsx
+│   │   ├── game-detail/       # ChessBoard, MoveControls, eval chart, coaching panels (motif badges)
+│   │   ├── patterns/          # visualization components + MotifThemes + Self-Analysis
+│   │   ├── journal/           # v1.11.0 TimelineThread, DayGroup, EntryCard, AddNoteForm
 │   │   ├── hunter/            # v1.4.2+ OpponentSearch, TargetedPrep
 │   │   ├── settings/          # Players, Stockfish, API keys, Coaching sections
 │   │   └── ui/                # shadcn/ui primitives (Base UI under the hood)
-│   ├── hooks/                 # useChessNavigation (returns currentFen, endFen, moves)
-│   │   └── __tests__/         # v1.6.0 — Vitest specs (clock-comment guard, boundaries)
+│   ├── hooks/                 # useChessNavigation, use-pipeline, use-coaching
 │   ├── lib/                   # API client, types, providers metadata
-│   │   └── chess/             # v1.6.0 — shared chess helpers (parseMoveText, lichessAnalysisUrl, opening matching)
-│   │       └── __tests__/     # Helper unit tests (incl. v1.4.5 Lichess-URL lock)
-│   ├── components/**/__tests__/  # v1.6.0 — component smoke + interaction tests (targeted-prep, you-fall-for, opening-explorer)
-│   ├── vitest.config.ts       # v1.6.0 — Vitest harness (jsdom + Testing Library)
-│   ├── vitest.setup.ts        # v1.6.0 — global mocks (next/navigation, next/link)
+│   │   ├── chess/             # shared chess helpers (parseMoveText, lichess URL, openings)
+│   │   ├── motifs.ts          # v1.15.0 shared MOTIF_LABELS (12 emoji+label pairs)
+│   │   ├── summary.ts         # parseTrendSummary (JSON-array tolerant, v1.14.1)
+│   │   └── chart-format.ts    # v1.18.3 date-axis helpers (time-scale chart)
 │   └── public/data/
 │       ├── openings.json      # 3,690-entry Lichess CC0 opening database
-│       └── traps.json         # 102-entry curated beginner-trap library
+│       └── traps.json         # 1,475-entry Lichess trap/gambit/attack library (v1.18.0)
 ├── scripts/
 │   └── build_traps.py         # Rebuilds openings.json + traps.json from Lichess
 ├── docs/
 │   ├── architecture.md        # Tracked: contributor architecture reference
-│   ├── roadmap.md             # Gitignored: private working roadmap
-│   ├── what_we_have_built_so_far.md  # Gitignored: implementation snapshot
 │   └── screenshots/           # Architecture diagram + UI screenshots
 ├── data/
 │   └── chess_coach.db         # SQLite database (auto-created, gitignored)
-├── tests/                     # Backend pytest suite (362 tests across 3 tiers)
+├── tests/                     # Backend pytest suite (597 tests across 3 tiers)
 └── reports/                   # Generated coach reports (gitignored)
 ```
 
@@ -138,116 +159,111 @@ ArrakisEngine/
 
 | Table | Purpose |
 |---|---|
-| `players` | Player profiles |
+| `players` | Player profiles (+ `slug` v1.16.1, `is_active` soft-delete) |
 | `games` | Stored games with PGN |
-| `move_analysis` | Per-move Stockfish results |
-| `game_coaching` | LLM coaching output |
-| `player_patterns` | Aggregated pattern stats (JSON blob) |
+| `move_analysis` | Per-move Stockfish results (+ `clock_seconds`, `motifs_json` v1.14.0) |
+| `game_coaching` | LLM coaching output (+ `player_feedback`, `coaching_meta_json`) |
+| `player_patterns` | Aggregated pattern stats JSON (+ `trend_summary`, motif_summary) |
+| `journal_entries` (v1.10.0) | Chronological coaching diary — `kind`='review'\|'note' |
 | `opponent_cache` (v1.4.1) | Hunter Mode profile JSON cache (24h TTL) |
 | `opponent_games` (v1.4.4) | Hunter Mode accumulating PGN cache (sliding window) |
 
-## Pattern Components (16 visualizations + Self-Analysis section)
+`move_analysis.motifs_json` shape: `{"played": [...], "best": [...], "missed": [...]}`,
+NULL on non-critical moves.
+
+## Tactical Motifs (`src/motifs.py`, v1.14.0 + v1.17.0)
+
+12 detectors, each a pure function `detect_X(board, move, pv) -> str | None`,
+specificity-ordered. Run on both the played move and the engine's best move;
+the delta is the "missed" set.
+
+`fork`, `pin`, `skewer`, `discovered_check`, `mate_threat`, `removing_defender`,
+`hanging_piece`, `trapped_piece` (v1.14.0) + `back_rank_mate`, `deflection`,
+`overloaded_defender`, `zugzwang` (v1.17.0).
+
+Aggregated by `_compute_motif_summary` in `patterns.py` into per-motif missed/found
+counts with per-phase splits + a dominant-phase tag (≥60% concentration, ≥3
+instances). Surfaced in `TREND_PROMPT`, `build_trajectory_block`, and the frontend
+`<MotifThemes>` card. Skewer detector calibrated in v1.15.1 (require
+attacker-value < front-piece-value).
+
+## Pattern Components (Patterns page)
 
 Move quality donut, ACPL trend, danger zones, phase performance, endgame conversion,
-critical positions, tactical misses, comeback/collapse, repertoire consistency,
-opening performance, opening ACPL, opening repertoire tracker, time pressure,
-time control performance, rating progression, coaching summary.
+critical positions, tactical misses (Tactical Awareness), **Tactical Themes**
+(v1.15.0 motif aggregation), comeback/collapse, repertoire consistency, opening
+performance, opening ACPL, opening repertoire tracker, time pressure, time control
+performance, rating progression (v1.18.3 time-scale axis + brush zoom), coaching
+summary (LLM trend summary).
 
-**Self-Analysis (v1.4.0+)** adds: Fix Your Openings (loss/strength by opening),
-Trap Patterns (Your Arsenal + You Fall For with click-to-expand mini-board,
-recent game links, Lichess deep links).
+**Self-Analysis (v1.4.0+):** Fix Your Openings, Trap Patterns (Your Arsenal + You
+Fall For with click-to-expand mini-board, recent game links, Lichess deep links).
 
-**Hunter Mode (v1.4.1+)** is its own page. Each opening row click-to-expands with
-mini-board, "Game N of 5" flip controls, annotated move list with deviation
-highlighting against canonical book theory, and "Study on Lichess" deep link.
+**Hunter Mode (v1.4.1+)** is its own page (opponent prep).
 
 ## API Endpoints
 
+All `?player=X` params + path slugs resolve by **slug** (v1.16.4). Backend helper
+`_resolve_player_id(conn, identifier)` in `dashboard_server.py`.
+
 ### GET
-- `/api/players` — all players with tier info
+- `/api/players` — all players with tier info + slug
 - `/api/games?player=X[&...]` — filtered game list
 - `/api/games/<id>` — game detail with moves + coaching
-- `/api/patterns?player=X` — all 20 pattern metrics + trend_summary
+- `/api/patterns?player=X` — pattern metrics + trend_summary + motif_summary
+- `/api/journal?player=X[&platform=&kind=&limit=]` — chronological diary entries
 - `/api/report?player=X&period=monthly|weekly` — structured report data
-- `/api/status` — pipeline status counts
-- `/api/pipeline/status` — current task
-- `/api/settings` — analysis + API key + coaching settings
-- `/api/schedule/status` — scheduler state
+- `/api/status`, `/api/pipeline/status`, `/api/settings`, `/api/schedule/status`
 - `/api/hunt/profile?opponent=X&platform=Y` — (v1.4.1+) opponent profile
 
 ### POST
 - `/api/players` — add player
 - `/api/coach` — trigger coaching for a single game
 - `/api/trend-summary` — LLM trend summary
+- `/api/journal/review` — generate Recent Form Review entry (v1.10.0)
+- `/api/journal/note` — create Parent Note (v1.12.0)
 - `/api/pipeline/{harvest,analyze,patterns,coach,run-all,cancel}` — pipeline triggers
 - `/api/schedule/{toggle,interval}` — scheduler control
 - `/api/hunt/refresh` — force opponent profile re-fetch (v1.4.1+)
 
 ### PUT / DELETE
-- `PUT /api/players/<id>`
-- `PUT /api/settings/{analysis,api-keys,coaching}`
+- `PUT /api/players/<id>`, `PUT /api/settings/{analysis,api-keys,coaching}`
+- `PUT /api/journal/note/<id>`, `DELETE /api/journal/note/<id>` (v1.12.0)
 - `DELETE /api/players/<id>` (soft-delete via `is_active`)
+
+## CLI Commands (`main.py`)
+
+`harvest`, `analyze`, `coach`, `patterns`, `trend` (v1.15.2 — LLM trend summary),
+`review` (v1.9.0 — Recent Form Review), `note` (v1.12.0 — Parent Note),
+`report`, `dashboard`, `serve` (v1.5.0), `rescan-motifs` (v1.14.0 — backfill motif
+tags, no Stockfish), `backfill-acpl`, `backfill-clocks`, `fide-update`, `run-all`.
+
+`--player` accepts the slug (v1.16.4 slug-only; v1.18.1 fixed rescan-motifs +
+harvest + report).
 
 ## Testing
 
-**428 tests total** — 362 backend (pytest, 16 test files, three tiers via
-`pyproject.toml` markers) + 66 frontend (Vitest, 7 test files, sub-second).
+**~802 tests total** — 597 backend (pytest, three tiers via `pyproject.toml`
+markers) + 205 frontend (Vitest). Integration (`-m integration`, needs Stockfish)
+and live (`-m live`, needs an LLM key) tiers are excluded by default.
 
 ### Running Tests
 ```bash
-# Backend (pytest)
-pytest                                  # ~318 unit tests (~14s, no deps)
+pytest                                  # default unit tier (~30s, no deps)
 pytest -m integration                   # Stockfish tests (requires binary)
-pytest -m live                          # LLM API tests (~$0.05)
-pytest -m "integration and live"        # Full pipeline E2E
-pytest --override-ini "addopts="        # All 362 backend tests across all tiers
-
-# Frontend (Vitest, v1.6.0+)
-cd frontend && pnpm test:run            # 66 tests, sub-second — what CI runs
-cd frontend && pnpm test                # watch mode
+pytest -m live                          # LLM API tests (~$0.30)
+cd frontend && npx vitest run           # 205 frontend tests, ~3s
+cd frontend && npx next build           # type-check
 ```
 
-### Tier 1: Unit Tests (default)
-All external dependencies mocked. No Stockfish or API keys needed.
-
-| File | Approx tests | What it covers |
-|---|---|---|
-| test_models.py | ~16 | Schema init, ensure_player upsert, migrations |
-| test_harvester.py | ~20 | chess.com + lichess parsing, dedup |
-| test_analyzer.py | ~19 | Eval/win-prob formulas, classification |
-| test_coach.py | ~24 | Move formatting, JSON parsing, history depth (v1.3) |
-| test_patterns.py | ~38 | All pattern aggregations + edge cases |
-| test_loss_openings.py (v1.4.0) | 10 | Loss/strong opening aggregation |
-| test_trap_matcher.py (v1.4.0) | 31 | Trap library + longest-prefix matching + recent_game_ids (v1.4.3) |
-| test_hunter.py (v1.4.1+) | 41 | Profile aggregation, cache, accumulating games (v1.4.4), reps |
-| test_tiers.py | ~21 | Rating→tier, tier-specific classification |
-| test_report.py | ~9 | Report generation, ACPL interpretation |
-| test_dashboard_server.py | ~18 | API endpoints + client-disconnect handling (v1.3.1) |
-| test_scheduler.py | ~10 | Pipeline orchestration |
-| test_export.py | ~7 | JSON export, edge cases |
-| test_dev_runner.py (v1.5.0) | 30 | `serve` orchestration: pnpm resolution, subprocess argv, Next.js ready-line parsing, SIGTERM→SIGKILL teardown |
-
-### Tier 2: Integration Tests (`pytest -m integration`)
-Requires Stockfish binary. Uses Scholar's Mate for fast deterministic analysis.
-
-### Tier 3: Live Tests (`pytest -m live`)
-Requires at least one cloud API key. Uses whichever is available.
-
-### Frontend tests (Vitest, v1.6.0+)
-Sub-second full run. No external deps; jsdom + Testing Library + `@testing-library/jest-dom`.
-
-| File | Tests | What it covers |
-|---|---|---|
-| lib/chess/__tests__/pgn.test.ts | 11 | `parseMoveText` — prefixes, result markers, whitespace |
-| lib/chess/__tests__/openings.test.ts | 18 | `normalizeOpeningName`, `findCanonicalLine` (exact/normalized/longest-prefix), `findDeviationIndex` |
-| lib/chess/__tests__/lichess.test.ts | 6 | v1.4.5 regression lock — `/analysis/standard/{FEN}` form, forbids `?pgn=` |
-| hooks/__tests__/use-chess-navigation.test.ts | 17 | Empty/invalid PGN safety, v1.4.5 clock-comment leak guard, FEN-length invariant, boundary nav, board orientation, keyboard handler with focus guard |
-| components/hunter/__tests__/targeted-prep.test.tsx | 5 | Opponent header, click-to-expand mini-board, Lichess URL form, Refresh callback, empty-state |
-| components/patterns/__tests__/you-fall-for.test.tsx | 4 | Trap rows, recent-game links to `/<player>/games/<id>`, Lichess URL form, empty-state |
-| components/patterns/__tests__/opening-explorer.test.tsx | 5 | Game-list links, SAN via parseMoveText, ECO badge after book fetch, mini-board mount |
-
-CI runs `pnpm test:run` between install and build in the frontend job
-(`.github/workflows/ci.yml`), so test regressions fail fast before build.
+### Notable test files
+- `test_motifs.py` — per-motif detectors incl. v1.15.1 skewer calibration
+- `test_patterns.py` — pattern aggregations + motif summary + phase split + prompt wiring
+- `test_main_cli.py` (v1.15.3) — CLI dispatch, slug resolution
+- `test_dashboard_server.py` — API endpoints + slug resolver + static guard
+- `test_coach_live.py` (`-m live`) — per-model structured-output + motif-citation compliance
+- Frontend: `chart-format.test.ts`, `motif-themes.test.tsx`, `layout.test.tsx`,
+  `player-selector.test.tsx`, `summary.test.ts`, + chess-helper + component suites
 
 ### Patch-target rule
 Functions imported locally inside another function (e.g. `from src.coach import
@@ -256,49 +272,43 @@ module — `@patch("src.coach.coach_pending")` — not at the consuming module.
 
 ## Key Technical Decisions
 - **DB as the source of truth for players** — UI-driven CRUD, not config.yaml
+- **slug ≠ username** — slug for URLs/API/CLI, username for the chess.com API only
+  (v1.16.x). Slug-only lookups; one explicit `WHERE username = ?` exception
+  (player-creation existence check), enforced by a static guard test.
 - **Soft-delete via `is_active`** — preserves game history
 - **Reasoning models required** — hard contract enforced in `llm_providers.py`
+- **LLM output is plain text, never JSON** — `TREND_PROMPT` /
+  `RECENT_FORM_REVIEW_PROMPT` emphatically forbid JSON (v1.15.4); the frontend
+  `parseTrendSummary` is JSON-array tolerant as belt-and-braces (v1.14.1).
+- **Motif tags are conservative** — false negatives preferred over false positives;
+  min-value SEE heuristic; specificity-ordered so the most distinctive label leads.
 - **Single-task pipeline lock** — across CLI + scheduler + dashboard
 - **`ARRAKIS_` prefix on env keys** — avoids collisions with other tools
-- **`useChessNavigation` is the canonical source for parsed game moves** — chess.js
-  handles PGN annotations like `{[%clk ...]}` correctly. Avoid regex-parsing PGN
-  bodies in components; consume `nav.moves` instead. (v1.4.5 lesson)
-- **Base UI `render` prop pattern** — avoids nested `<button>` hydration errors
-  with `DialogClose`. (v1.0.2 lesson)
-- **Portal-based info modals** — escapes `Card overflow:hidden` clipping. (v1.0.1)
-- **Lichess deep link format** — use `/analysis/standard/{FEN}`, not `?pgn=`.
-  (v1.4.5 lesson; locked in by `frontend/lib/chess/__tests__/lichess.test.ts`
-  + assertions in all three component tests as of v1.6.0)
-- **Shared chess helpers live in `frontend/lib/chess/`** (v1.6.0) — `parseMoveText`,
-  `lichessAnalysisUrl`, `normalizeOpeningName`, `findCanonicalLine`,
-  `findDeviationIndex`, `LibraryOpening`. Import from there instead of
-  copying into a component; the previous duplication is what hid the
-  v1.4.5 regressions for as long as it did.
+- **Lichess deep link format** — `/analysis/standard/{FEN}`, not `?pgn=` (v1.4.5 lesson)
+- **Shared chess + motif helpers in `frontend/lib/`** — single source of truth to
+  avoid the duplication that hid the v1.4.5 regressions.
 
 ## Two-Server Setup
 
-The app runs as two cooperating servers. Two ways to start:
-
 **Recommended (v1.5.0+) — single command:**
 ```bash
-python main.py serve
+python main.py serve     # spawns both servers; Ctrl+C stops both
 ```
-Spawns both servers, prints a unified banner, Ctrl+C stops both. See
-`src/dev_runner.py` for the orchestration. Optional flags: `--port` (backend),
-`--frontend-port` (frontend), `--install` (auto-runs `pnpm install` if
-`node_modules` is missing).
+Requires `pnpm` (or `corepack enable`). Optional flags: `--port`, `--frontend-port`,
+`--install`.
 
-**Manual two-terminal mode** (for hot-reload visibility on each side):
+**Manual two-terminal mode:**
 
 | | Port | Start with |
 |---|---|---|
 | Python API backend | 8000 | `python main.py dashboard` |
-| Next.js frontend | 3000 | `cd frontend && pnpm dev` |
+| Next.js frontend | 3000 | `cd frontend && npx next dev` |
 
-Open `http://localhost:3000` (the frontend). It calls back to the API on 8000.
+Open `http://localhost:3000`. It calls back to the API on 8000.
 
 ## Git Workflow
-- Commit after each working component
-- Keep `data/`, `reports/`, `docs/` (mostly), `.claude/`, `.mcp.json` in `.gitignore`
+- Commit after each working component; ship via branch → ff-merge → tag `vX.Y.Z` → push → `gh release create`
+- Keep `data/`, `reports/`, `.claude/`, `.mcp.json` in `.gitignore`
 - Never commit API keys
-- Tag releases as `vX.Y.Z`; ship via `gh release create`
+- **Reserved for commercial Atreides version** (not public): tournament-game
+  photo-upload + OCR ingest.

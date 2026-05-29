@@ -1,6 +1,6 @@
 # Arrakis Engine — Architecture
 
-*Last updated: 2026-05-25 — corresponds to v1.8.0*
+*Last updated: 2026-05-29 — corresponds to v1.18.3*
 
 This document describes the technical architecture of Arrakis Engine: how the pieces fit together, what runs where, and the design decisions behind them. It is aimed at contributors and developers reading the codebase. For end-user / setup docs, see [README.md](../README.md). For changelog, see [CHANGELOG.md](../CHANGELOG.md).
 
@@ -17,6 +17,15 @@ The core insight is **two-step analysis**:
 
 A third **pattern aggregation** layer runs across all of a player's games to surface trends that no single-game review can show (e.g. "blunders cluster between moves 30–40 across the last 20 games").
 
+Two later layers build on this:
+- **Tactical-motif detection** (v1.14.0–v1.17.0): `motifs.py` tags each critical move
+  with the 12 themes it executes or misses (fork, pin, skewer, …, zugzwang). These
+  feed a cross-game aggregation (`_compute_motif_summary`) with per-phase breakdown
+  that lands in coaching prompts + the Tactical Themes Patterns card.
+- **Journal** (v1.10.0–v1.12.0): a chronological diary of coaching artifacts —
+  LLM-generated Recent Form Reviews and manual Parent Notes — stored in
+  `journal_entries` and rendered as a threaded social feed.
+
 ### High-level flow
 
 ```
@@ -26,13 +35,13 @@ chess.com / Lichess API
    harvester.py  ──► SQLite (games)
         │
         ▼
-   analyzer.py   ──► SQLite (move_analysis)         [Stockfish, depth 22]
+   analyzer.py   ──► SQLite (move_analysis)         [Stockfish depth 22 + motif tags]
         │
         ▼
      coach.py    ──► SQLite (game_coaching)         [LLM reasoning model]
         │
         ▼
-   patterns.py   ──► SQLite (player_patterns)       [aggregation across games]
+   patterns.py   ──► SQLite (player_patterns)       [aggregation + motif summary]
         │
         ▼
 dashboard_server.py  ──► Next.js frontend            [REST API + dashboard UI]
@@ -84,6 +93,23 @@ The backend is intentionally dependency-light — `http.server` is enough for a 
   - Blunder: `≥ 300 cp`
 - Win probability: Lichess formula — `winPct = 50 + 50 × (2 / (1 + exp(-0.00368208 × cp)) − 1)`.
 - Configurable depth (22), threads (6), hash (512 MB), and per-move time limit.
+- **Motif tagging** (v1.14.0): for each critical move (|cp_loss| ≥ 50), the analyzer
+  calls `motifs.detect_motifs` on both the played move and the engine's best move,
+  storing the result as `move_analysis.motifs_json`.
+
+### `motifs.py` — tactical-motif detection (v1.14.0, v1.17.0)
+- 12 pure-Python detectors, each `detect_X(board, move, pv) -> str | None`, depending
+  only on `python-chess` primitives (`board.attackers`, `board.is_pinned`,
+  `board.gives_check`, a min-value SEE heuristic, PV-walking for mate look-ahead).
+- The 12: `fork`, `pin`, `skewer`, `discovered_check`, `mate_threat`,
+  `removing_defender`, `hanging_piece`, `trapped_piece` (v1.14.0) + `back_rank_mate`,
+  `deflection`, `overloaded_defender`, `zugzwang` (v1.17.0).
+- `detect_motifs(board, move, pv)` runs all detectors in specificity order and returns
+  the matching identifiers. Conservative by design — false negatives preferred over
+  false positives. The skewer detector was calibrated in v1.15.1 to require
+  attacker-value < front-piece-value (the original over-fired ~10–18×).
+- Standalone: no DB / analyzer / coach imports. Backfillable via
+  `python main.py rescan-motifs` (no Stockfish — reuses stored `pv_line`/`best_move`).
 
 ### `coach.py` + `llm_providers.py` — LLM coaching layer
 - `llm_providers.py` is the unified abstraction for **8 providers**: Anthropic, OpenAI, Google, xAI, Mistral, DeepSeek, Qwen, and Ollama. Each provider is registered with its SDK type, default model, API key env var, and request shape. Current default reasoning models (v1.7.0): Claude Opus 4.7 (`claude-opus-4-7`), GPT-5.5 Pro (`gpt-5.5-pro-2026-04-23`), Gemini 2.5 Pro.
@@ -109,7 +135,12 @@ The four metrics added in v1.4.0 are the **Self-Analysis** family — they answe
 | `trap_falls` | longest-prefix match against `frontend/public/data/traps.json` (curated CC0 Lichess subset) | Recurring named traps your opponents use to beat you |
 | `your_arsenal` | mirror for wins | Recurring named traps you successfully use |
 
-The trap library is built once by `python scripts/build_traps.py`, which fetches the Lichess [`chess-openings`](https://github.com/lichess-org/chess-openings) CC0 TSV data, filters to ~100 shallow named traps (≤16 plies), and writes `frontend/public/data/traps.json` and the full opening book at `frontend/public/data/openings.json`. Both files are vendored in the repo so runtime has no network dependency. Re-run when Lichess updates upstream (a few times per year).
+The trap library is built once by `python scripts/build_traps.py`, which fetches the Lichess [`chess-openings`](https://github.com/lichess-org/chess-openings) CC0 TSV data, filters to named traps / gambits / attacks / mates (≤16 plies), and writes `frontend/public/data/traps.json` and the full opening book at `frontend/public/data/openings.json`. v1.18.0 broadened the filter from a ~100-entry curated allowlist to a substring match over the full Lichess set → **1,475 traps** (openings: 3,690). Both files are vendored so runtime has no network dependency. Re-run when Lichess updates upstream (a few times per year).
+
+**Motif aggregation (v1.15.0–v1.16.0):** `_compute_motif_summary(games, moves_by_game, period_days)` rolls the per-move `motifs_json` tags up into a player-level view — per-motif missed/found counts over the 30-day window, with per-phase (opening/middlegame/endgame) splits and a `dominant_missed_phase` tag (set when one phase holds ≥60% of misses and total ≥3). Surfaced three ways: the `TREND_PROMPT` motif section, the per-game `build_trajectory_block` recurring-themes block, and the frontend `<MotifThemes>` Patterns card. The prompts ask the LLM to name the motif (and its dominant phase, if any) in a practice recommendation when it crosses the ≥5-instance bar.
+
+### `journal.py` — coaching diary (v1.12.0)
+Helpers over the `journal_entries` table. Two entry kinds: `'review'` (LLM-generated Recent Form Review across the last N coached games — `compute_recent_form_review` in `patterns.py`, v1.9.0) and `'note'` (manual Parent Note, v1.12.0). Entries accumulate chronologically and render as a threaded social feed on `/[player]/journal`. Reviews name specific games by date + opponent and identify the cross-game through-line; v1.15.0 made them motif-aware.
 
 | Metric | What it answers |
 |---|---|
@@ -133,6 +164,7 @@ The trap library is built once by `python scripts/build_traps.py`, which fetches
 | Strong openings (v1.4.0) | Which openings win most often, by color |
 | Trap falls (v1.4.0) | Recurring named traps the player loses to |
 | Your arsenal (v1.4.0) | Recurring named traps the player wins with |
+| Motif summary / Tactical Themes (v1.15.0–v1.16.0) | Which named tactical themes the player misses most, with per-phase concentration |
 
 ### `report.py` — markdown reports
 Weekly / monthly markdown reports for coaches: game-by-game summaries, ACPL trend, pattern highlights, annotated critical positions. Saved to `reports/`.
@@ -189,7 +221,8 @@ Single-process Python HTTP server. SQLite WAL mode + 30s busy timeout; returns 5
 | GET | `/api/players` | List active players with tier + stats |
 | GET | `/api/games?player=X` | Game list with filters |
 | GET | `/api/games/{id}` | Game detail with analysis + coaching |
-| GET | `/api/patterns?player=X` | All 20 pattern metrics + trend summary |
+| GET | `/api/patterns?player=X` | Pattern metrics + trend summary + motif_summary |
+| GET | `/api/journal?player=X` | (v1.10.0) Chronological diary entries |
 | GET | `/api/report?player=X&period=Y` | Generated report data |
 | GET | `/api/status` | Health check |
 | GET | `/api/pipeline/status` | Current pipeline task |
@@ -199,7 +232,11 @@ Single-process Python HTTP server. SQLite WAL mode + 30s busy timeout; returns 5
 | POST | `/api/players` | Add player |
 | POST | `/api/coach` | Trigger coaching for a game |
 | POST | `/api/trend-summary` | Generate AI trend summary |
+| POST | `/api/journal/review` | (v1.10.0) Generate a Recent Form Review entry |
+| POST | `/api/journal/note` | (v1.12.0) Create a Parent Note |
 | POST | `/api/pipeline/{harvest,analyze,patterns,run-all}` | Trigger pipeline steps |
+
+All `?player=X` params resolve by **slug** (v1.16.4) via the `_resolve_player_id` helper. `PUT`/`DELETE /api/journal/note/{id}` edit/delete notes (v1.12.0).
 | POST | `/api/schedule/{toggle,interval}` | Scheduler control |
 | POST | `/api/hunt/refresh` | (v1.4.1) Force refresh of an opponent profile (bypass 24h cache) |
 | PUT | `/api/players/{id}` | Edit player |
@@ -216,21 +253,24 @@ Single-file SQLite. Schema migrations run via `init_db()` at startup — column 
 
 | Table | Key fields |
 |---|---|
-| `players` | username, display_name, age, rating, fide_id, fide_rating, lichess_username, is_active |
+| `players` | username (chess.com handle), **slug** (v1.16.1 — URL/API/CLI id, partial UNIQUE index), display_name, age, rating, fide_id, fide_rating, lichess_username, is_active |
 | `games` | player_id, game_url, pgn, player_color, ratings, result, time_class, platform, analysis_status, coaching_status, date_played |
-| `move_analysis` | game_id, move_number, side, move_played, best_move, eval_cp, swing_cp, win_prob, classification, pv_line |
-| `game_coaching` | game_id, provider, narrative, key_lesson, practical_focus, coach_notes, player_feedback, critical_moments_json, opening_analysis_json, **coaching_meta_json** (v1.7.0; v1.8.0 adds trajectory_injected / trajectory_age_days / trajectory_weakest_phase / trajectory_trend_direction / trajectory_tokens_estimate) |
-| `player_patterns` | player_id, period_start, period_end, stats_json, trend_summary, updated_at |
+| `move_analysis` | game_id, move_number, side, move_played, best_move, eval_cp, swing_cp, win_prob, classification, pv_line, **clock_seconds**, **motifs_json** (v1.14.0 — `{played, best, missed}`, NULL on non-critical moves) |
+| `game_coaching` | game_id, provider, narrative, key_lesson, practical_focus, coach_notes, player_feedback, critical_moments_json, opening_analysis_json, **coaching_meta_json** (v1.7.0; trajectory_* v1.8.0; motif_top_missed / motif_top_missed_phase v1.15.0/v1.16.0) |
+| `player_patterns` | player_id, period_start, period_end, stats_json (includes **motif_summary** v1.15.0 with per-phase splits v1.16.0), trend_summary, recent_form_review (legacy, superseded by journal_entries), updated_at |
+| `journal_entries` (v1.10.0) | player_id, **kind** ('review'\|'note'), platform, body, refs_json, provider, metadata_json, created_at — chronological coaching diary |
 | `opponent_cache` (v1.4.1) | username, platform, profile_json, fetched_at — 24h TTL cache for Hunter Mode profile JSON |
 | `opponent_games` (v1.4.4) | username, platform, game_url, pgn, player_color, result, opening_name, eco, date_played, fetched_at — accumulating local PGN cache for Hunter Mode (sliding window + optional cap) |
 
 ### Design decisions
 
 - **DB as the source of truth for players** — the dashboard, scheduler, and CLI all read from `players`, not from `config.yaml`. `config.yaml` is for engine + API config only.
+- **slug ≠ username (v1.16.x)** — `username` is the chess.com/lichess handle, used only by the harvester. `slug` (auto-derived from `display_name` via `_slugify`) is the identifier for URLs, the API `?player=` param, and the CLI `--player` flag. v1.16.4 made lookups slug-only (one explicit `WHERE username = ?` exception: the player-creation existence check, enforced by a static guard test). Decoupling means chess.com renames don't break bookmarks.
 - **Soft-delete via `is_active`** — removing a player archives them; game history is preserved.
 - **WAL mode** — concurrent reads while the analyzer holds a write lock.
 - **Coaching status is a separate column from analysis status** — a game can be analyzed but not yet coached, which the UI surfaces as a filterable state.
 - **`date_played` is full datetime, not just date** — needed so coaching runs in true chronological order across multiple games on the same day.
+- **`motifs_json` is sparse** — only critical moves (|cp_loss| ≥ 50) carry motif tags, so the column stays small. `rescan-motifs` backfills it from existing `move_analysis` rows without re-running Stockfish.
 
 ---
 
@@ -247,10 +287,13 @@ Next.js 16 + React 19 + TypeScript + Tailwind + shadcn/ui (built on Base UI prim
 | `/[player]/games` | Filterable games list with compare-mode checkbox |
 | `/[player]/games/[id]` | Game detail (board, eval chart, coaching panels) |
 | `/[player]/games/compare` | Two boards side-by-side, synchronized navigation |
-| `/[player]/patterns` | 18 pattern components + AI coaching summary (16 charts + Self-Analysis section with Fix Your Openings & Trap Patterns) |
+| `/[player]/patterns` | Pattern components + AI coaching summary + Self-Analysis (Fix Your Openings & Trap Patterns) + **Tactical Themes** (v1.15.0 motif aggregation). Rating Progression chart uses a time-scale axis + brush zoom (v1.18.3). |
+| `/[player]/journal` | (v1.10.0) Chronological coaching diary — threaded feed of Recent Form Reviews + Parent Notes (v1.11.0 timeline, v1.12.0 add/edit/delete notes) |
 | `/[player]/hunt` | (v1.4.2) Hunter Mode — opponent search + Their Weaknesses / Their Strengths view |
 | `/[player]/reports` | Period selector, time-class filter, print-to-PDF |
 | `/settings` | Players, Stockfish config, API keys, coaching settings |
+
+Route segment `[player]` is the **slug** (v1.16.x), not the chess.com username.
 
 ### Key conventions
 
@@ -293,7 +336,7 @@ The `ARRAKIS_` prefix avoids collisions with other tools that use the unprefixed
 
 ## 7. Testing
 
-**460 tests total** — 384 backend (pytest) + 76 frontend (Vitest, v1.6.0+). Counts as of v1.8.0; see CHANGELOG for per-release deltas.
+**~802 tests total** — 597 backend (pytest) + 205 frontend (Vitest). Counts as of v1.18.3; see CHANGELOG for per-release deltas. Backend integration (`-m integration`, Stockfish) and live (`-m live`, LLM key) tiers are excluded by default.
 
 ### Backend (`tests/`)
 
