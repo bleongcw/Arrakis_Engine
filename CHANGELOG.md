@@ -4,6 +4,23 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.18.5] - 2026-05-29
+
+### Removed
+- **The "Recent Form Review moved to its own tab → Open Journal" pointer
+  banner** at the top of the Patterns page. Added in v1.10.0 when the
+  Recent Form Review card relocated to the Journal tab, it was always
+  meant to be temporary ("drop this banner after a couple of releases"
+  per its own code comment). The Journal tab has been a permanent
+  fixture for 8 releases now, so the redirect hint is long-stale.
+  Removed the banner and its now-orphaned `next/link` import.
+
+### Tests
+- No new tests. Frontend suite unchanged at **205**; `next build` clean
+  (confirms the orphaned import was fully removed).
+
+---
+
 ## [1.18.4] - 2026-05-29
 
 ### Docs
