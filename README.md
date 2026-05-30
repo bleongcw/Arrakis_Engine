@@ -229,8 +229,11 @@ The pipeline is layered:
 5. **Time pressure analysis** — per-move clock data reveals time management patterns and pressure-induced blunders
 6. **Tactical-motif detection** (v1.14.0–v1.17.0) — 12 detectors tag each critical move with the themes it executes or misses (fork, pin, skewer, …, zugzwang), aggregated cross-game with per-phase concentration and surfaced in coaching + the Tactical Themes Patterns card
 7. **Journal** (v1.10.0–v1.12.0) — a chronological diary of coaching artifacts: LLM-generated Recent Form Reviews + manual Parent Notes, in a threaded feed
+8. **Recurring weakness escalation** (v1.19.0) — when a missed motif PERSISTS across games (distinct-game spread + recency streak), coaching escalates from "watch for forks" to a prescribed drill, the Tactical Themes card shows a 🔴/🟠/🟡 badge, and a fire-once "Priority Weakness" Journal alert is filed
+9. **Hunter Mode Deep Scan** (v1.20.0) — opt-in Stockfish + motif analysis of an opponent's games surfaces the tactical themes *they* miss ("Tactical Blind Spots" — the patterns to bait them into)
+10. **Tournament Prep** (v1.21.0) — a saved, named roster of opponents with a combined cross-opponent analysis: which openings to play (the field loses to them) / avoid (the field wins with them) + a field-wide tactical blind-spots panel
 
-The frontend is a mobile-responsive Next.js 16 + React 19 dashboard with player-scoped URLs keyed on a stable **slug** (v1.16.x) — `/<slug>/games`, `/<slug>/patterns`, `/<slug>/journal`, `/<slug>/reports` — so chess.com renames never break bookmarks.
+The frontend is a mobile-responsive Next.js 16 + React 19 dashboard with player-scoped URLs keyed on a stable **slug** (v1.16.x) — `/<slug>/games`, `/<slug>/patterns`, `/<slug>/journal`, `/<slug>/hunt`, `/<slug>/tournament`, `/<slug>/reports` — so chess.com renames never break bookmarks.
 
 ## Full Installation Guide
 
@@ -407,6 +410,8 @@ database:
 | `python main.py review` | **(v1.9.0)** Generate a Recent Form Review across the last N coached games |
 | `python main.py note` | **(v1.12.0)** Add a Parent Note to the Journal |
 | `python main.py rescan-motifs` | **(v1.14.0)** Backfill tactical-motif tags on existing games (no Stockfish) |
+| `python main.py hunt-scan` | **(v1.20.0)** Deep-scan an opponent's recent games for tactical blind spots (`--opponent`, `--platform`, `--games`) |
+| `python main.py tournament-prep` | **(v1.21.0)** Warm a tournament roster's profiles + print the top opening targets (`--id`) |
 | `python main.py report` | Generate Markdown coaching reports |
 | `python main.py serve` | **(v1.5.0)** Launch backend + frontend together (recommended for end users; supports `--port`, `--frontend-port`, `--install`) |
 | `python main.py dashboard` | Launch only the API backend (use `serve` for the full app) |
@@ -713,6 +718,16 @@ A separate page (`/[player]/hunt`) for opponent prep. Enter an opponent's userna
 
 Profile JSON is cached per `(opponent, platform)` for **24 hours**. Click **Refresh** on the prep view to force a re-fetch. Disable the feature globally by setting `features.hunter_mode: false` in `config.yaml`.
 
+**Deep Scan — Tactical Blind Spots (v1.20.0):** the opening profile tells you *what* an opponent plays; Deep Scan tells you *which tactics they miss*. Click **Deep Scan (Stockfish)** on the prep view to run the 12 motif detectors over the opponent's last N games (config `features.hunter_scan_games`, default 20) at full depth. It surfaces a **Tactical Blind Spots** card — the themes the opponent misses most ("Bait pins — misses 82% of pin tactics") — using the same card as your own Tactical Themes. Opt-in only (it's a multi-minute engine pass, never automatic), runs as a background job, and is **incremental**: a re-scan only analyzes newly-fetched games. CLI: `python main.py hunt-scan --opponent <name>`.
+
+**Tournament Prep (v1.21.0):** prep a whole event at once. The **Tournament** tab (`/[player]/tournament`) holds saved, named rosters of opponents. Add opponents (or use **"Add to tournament"** from the Hunt page), hit **Prep Roster**, and Arrakis aggregates the field:
+
+- **Opening targets** — openings the field collectively loses to ("Prep the Italian — 5 of 8 opponents lose to it") — your attacking targets.
+- **Opening cautions** — openings the field wins with ("Avoid the Najdorf — 4 win with it") — lines to dodge.
+- **Field blind spots** — the tactical themes the (Deep-Scanned) field collectively misses, with explicit scan coverage.
+
+Combined analysis is cache-only (no Stockfish) and fast; the field blind-spots panel fills in as you Deep-Scan individual opponents. Tune the shared-opening threshold + roster cap via `features.tournament_min_shared` / `features.tournament_max_opponents`. CLI: `python main.py tournament-prep --id <n>`.
+
 ## Web Dashboard
 
 Built with Next.js 16, React 19, shadcn/ui, Tailwind CSS, and Recharts. Fully mobile-responsive (320px+). Requires Node.js 18+.
@@ -820,9 +835,11 @@ Arrakis_Engine/
 │   ├── coach.py           # LLM coaching layer (configurable history depth, 8 providers)
 │   ├── llm_providers.py   # Unified LLM provider abstraction (Claude, OpenAI, Gemini, Grok, Mistral, DeepSeek, Qwen, Ollama)
 │   ├── tiers.py           # Adaptive tier system (Beginner → Expert)
-│   ├── patterns.py        # 20 cross-game pattern metrics + Self-Analysis + LLM trend summaries
-│   ├── hunter.py          # v1.4.1+ Hunter Mode (opponent prep, accumulating PGN cache)
-│   ├── export.py          # JSON export
+│   ├── patterns.py        # 20 cross-game pattern metrics + Self-Analysis + LLM trend summaries + weakness escalation (v1.19.0)
+│   ├── motifs.py          # (v1.14.0/v1.17.0) 12 tactical-motif detectors
+│   ├── journal.py         # (v1.12.0) Journal CRUD + weakness_alert (v1.19.0)
+│   ├── hunter.py          # v1.4.1+ Hunter Mode (opponent prep, accumulating PGN cache) + Deep Scan (v1.20.0)
+│   ├── tournament.py      # (v1.21.0) Tournament Prep — roster CRUD + combined cross-opponent analysis
 │   ├── dashboard_server.py # REST API server (GET/POST/PUT/DELETE)
 │   ├── pipeline_state.py  # In-memory pipeline task state (thread-safe)
 │   ├── scheduler.py       # Automated pipeline scheduler (harvest → analyze → patterns → coach)
@@ -842,6 +859,9 @@ Arrakis_Engine/
 │   │       ├── games/[id]/page.tsx    # Game detail: board, eval, coaching
 │   │       ├── games/compare/page.tsx # Side-by-side game comparison
 │   │       ├── patterns/page.tsx      # Pattern analytics + AI trend summary
+│   │       ├── journal/page.tsx       # (v1.10.0) Threaded coaching diary
+│   │       ├── hunt/page.tsx          # (v1.4.1+) Opponent prep + Deep Scan (v1.20.0)
+│   │       ├── tournament/page.tsx    # (v1.21.0) Tournament Prep — rosters + combined analysis
 │   │       └── reports/page.tsx       # Coaching reports (Rapid/Daily/All + PDF)
 │   ├── components/
 │   │   ├── app-header.tsx     # Title bar + player selector
@@ -857,7 +877,8 @@ Arrakis_Engine/
 │   │   ├── game-detail/       # ChessBoard, EvalChart, MoveList, CoachingPanels, ComparisonSummary
 │   │   ├── patterns/          # visualization components + MotifThemes (v1.15.0) + Self-Analysis
 │   │   ├── journal/           # (v1.11.0) TimelineThread, DayGroup, EntryCard, AddNoteForm
-│   │   ├── hunter/            # OpponentSearch + TargetedPrep (v1.4.1+)
+│   │   ├── hunter/            # OpponentSearch + TargetedPrep (v1.4.1+) + OpponentBlindSpots (v1.20.0) + AddToTournament (v1.21.0)
+│   │   ├── tournament/        # (v1.21.0) OpeningTargets + OpponentCard
 │   │   ├── settings/          # Players, Analysis, ApiKeys, Coaching sections
 │   │   └── ui/                # shadcn/ui primitives (card, table, button, etc.)
 │   ├── hooks/                 # useChessNavigation (currentFen, endFen, moves), usePipeline, useCoaching
@@ -892,7 +913,8 @@ Arrakis_Engine/
 │   ├── test_scheduler.py             # Pipeline orchestration, cancel, provider passthrough
 │   ├── test_loss_openings.py         # v1.4.0 Self-Analysis aggregation
 │   ├── test_trap_matcher.py          # v1.4.0 trap library + matching + recent_game_ids
-│   ├── test_hunter.py                # v1.4.1+ Hunter Mode (cache, accumulation, reps)
+│   ├── test_hunter.py                # v1.4.1+ Hunter Mode (cache, accumulation, reps) + Deep Scan (v1.20.0)
+│   ├── test_tournament.py            # (v1.21.0) Tournament Prep CRUD + combined analysis
 │   ├── test_dev_runner.py            # v1.5.0 `serve` subprocess orchestration
 │   ├── test_analyzer_integration.py  # Stockfish integration (pytest -m integration)
 │   ├── test_coach_live.py            # LLM API live tests (pytest -m live)
@@ -911,9 +933,10 @@ Arrakis_Engine/
 | `move_analysis` | Per-move Stockfish evaluation (capped centipawn, win prob, classification, clock_seconds, **motifs_json** v1.14.0) |
 | `game_coaching` | LLM-generated coaching output per game (narrative, feedback, opening analysis, coaching_meta) |
 | `player_patterns` | Aggregated pattern statistics per player per period (incl. Self-Analysis v1.4.0 + **motif_summary** v1.15.0) |
-| `journal_entries` (v1.10.0) | Chronological coaching diary — Recent Form Reviews + Parent Notes |
+| `journal_entries` (v1.10.0) | Chronological coaching diary — Recent Form Reviews + Parent Notes + Priority Weakness alerts (v1.19.0) |
 | `opponent_cache` (v1.4.1) | Hunter Mode profile JSON cache, 24h TTL |
-| `opponent_games` (v1.4.4) | Hunter Mode accumulating PGN cache, sliding-window pruned |
+| `opponent_games` (v1.4.4) | Hunter Mode accumulating PGN cache, sliding-window pruned (+ per-game `motifs_json`/`analyzed_at` for Deep Scan, v1.20.0) |
+| `tournaments` / `tournament_opponents` (v1.21.0) | Tournament Prep — player-scoped named rosters of opponents |
 
 ## Running Tests
 
@@ -953,8 +976,9 @@ cd frontend && npx next build      # type-check
 | `test_patterns.py` | 38 | Game phase classification, results aggregation, rating performance, accuracy, consistency, danger zones, endgame conversion, comeback/collapse detection, opening ACPL, tactical misses, repertoire consistency, opening name extraction |
 | `test_tiers.py` | 21 | Rating→tier boundary mapping (Beginner→Expert), tier-specific move thresholds, config validation |
 | `test_report.py` | 9 | Report generation (weekly/monthly), ACPL interpretation thresholds, time control tables, missing data handling |
-| `test_dashboard_server.py` | 14 | HTTP endpoints (players/games/status/patterns), filtering (result, time class, date range, player), CORS headers, 404 |
-| `test_export.py` | 7 | JSON export, PGN preview truncation, coaching data, missing analysis, patterns |
+| `test_dashboard_server.py` | 42 | HTTP endpoints (players/games/status/patterns/hunt/tournament), filtering (result, time class, date range, player), CORS headers, 404 |
+| `test_hunter.py` | 49 | Hunter Mode opponent profiles, cache/accumulation, Deep Scan aggregation + incremental skip (v1.20.0) |
+| `test_tournament.py` | 15 | Tournament Prep roster CRUD + combined opening/blind-spot analysis (v1.21.0) |
 | `test_llm_providers.py` | 52 | Provider registry validation (8 providers), thinking tag stripping, model resolution (explicit/config/default), provider dispatch (Anthropic/OpenAI/Google/Mistral/Ollama), API key detection, availability listing |
 | `test_scheduler.py` | 6 | 4-step pipeline execution (harvest→analyze→patterns→coach), player filter passthrough, cancel event propagation, provider passthrough, progress update verification (1/4–4/4), Stockfish validation |
 
