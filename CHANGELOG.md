@@ -4,6 +4,59 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.21.0] - 2026-05-30
+
+### Added
+- **Tournament Prep — multi-opponent Hunter Mode.** Hunter Mode scouted one
+  opponent at a time; real prep is for an *event*. v1.21.0 adds a saved, named
+  **roster** of opponents with a **combined cross-opponent analysis** so a kid
+  can prep a whole tournament field at once.
+
+  **Persistence (`src/models.py`, `src/tournament.py`).** Two new tables —
+  `tournaments` (player-scoped, named, optional event date/notes) +
+  `tournament_opponents` (roster, de-duped on username+platform). `tournament.py`
+  owns the CRUD (mirrors `journal.py`: ValueError → 400/404). No opponent data
+  is duplicated — the roster references usernames; profiles live in the Hunter
+  Mode caches.
+
+  **Combined analysis (`compute_tournament_prep`).** Cache-only (no network, no
+  Stockfish) aggregation across the roster:
+  - **Opening targets / cautions** — groups each opponent's weak/strong openings
+    by `(opening, color)`: "Prep the Italian — 5 of 8 lose to it" /
+    "Avoid the Najdorf — 4 win with it." Only openings ≥`tournament_min_shared`
+    opponents share surface (keeps single-opponent noise out).
+  - **Field blind spots** — sums the v1.20.0 per-opponent Deep-Scan motif
+    summaries into a field-level `motif_summary` (rendered by the existing
+    `<MotifThemes>` card) + `scan_coverage`, so partial coverage never reads as
+    "the whole field."
+  - Opponents without a cached profile are marked `pending`.
+
+  **Surfaces.** A new **Tournament** tab → list of saved events + a detail view
+  with roster management (reuses `OpponentSearch`), a **Prep Roster** button
+  (background job that warms every opponent's opening-profile cache; fast, no
+  Stockfish; progress via `pipeline_state`), an **Opening Targets** panel, a
+  per-opponent card grid (each links to the full Hunt view + shows Deep-Scan
+  coverage), and a **Field Blind Spots** card. The Hunt page gains an **"Add to
+  tournament"** control — scout one opponent, drop them onto a roster.
+  CLI: `python main.py tournament-prep --id <n>`.
+
+  **API.** GET `/api/tournaments` + `/api/tournament`; POST
+  `/api/tournament/{create,add-opponent,remove-opponent,delete}` +
+  `/api/pipeline/tournament-prep` (background, single-task lock). All guarded by
+  `features.hunter_mode`. Additive schema (two new tables) — no breaking change.
+
+### Tests
+- Backend **639 → 658** (+19): roster CRUD + validation, `compute_tournament_prep`
+  aggregation (opening grouping/threshold, cautions, field blind-spots sum,
+  pending opponents, scan coverage), the HTTP create→add→list→prep flow, and the
+  `tournament-prep` CLI dispatch.
+- Frontend **213 → 216** (+3): `OpeningTargets` headline + prep/avoid lists +
+  empty state.
+- Manual smoke: created a roster for `evanleong`, added cached opponents, ran
+  Prep Roster → "Prep the Italian — 2 of this field lose to it."
+
+---
+
 ## [1.20.0] - 2026-05-29
 
 ### Added

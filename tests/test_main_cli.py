@@ -402,3 +402,55 @@ class TestCmdHuntScan:
         main_module.cmd_hunt_scan(self._args(), _config(db_path))
         out = capsys.readouterr().out
         assert "ERROR" in out and "Stockfish not found" in out
+
+
+class TestCmdTournamentPrep:
+    """v1.21.0: `python main.py tournament-prep --id N` warms the roster
+    (patched) + prints the top opening targets."""
+
+    def test_warms_and_prints_targets(self, db_path, monkeypatch, capsys):
+        from src.models import init_db, ensure_player
+        from src.hunter import set_cached_profile
+        from src import tournament as T
+
+        conn = init_db(db_path)
+        pid = ensure_player(conn, "evan", display_name="Evan", slug="evanleong")
+        prof = {
+            "total_games": 6,
+            "results": {"wins": 1, "losses": 5, "draws": 0, "win_rate": 16.7},
+            "weaknesses": {"white": [{"name": "Kings Gambit", "eco": "C30",
+                                      "total": 5, "wins": 1, "losses": 4,
+                                      "draws": 0, "rate": 80.0}],
+                           "black": []},
+            "strengths": {"white": [], "black": []},
+        }
+        set_cached_profile(conn, "oppa", "chess.com", prof)
+        set_cached_profile(conn, "oppb", "chess.com", prof)
+        conn.close()
+
+        t = T.create_tournament(pid, "Club", db_path=db_path)
+        T.add_opponent(t["id"], "oppa", db_path=db_path)
+        T.add_opponent(t["id"], "oppb", db_path=db_path)
+
+        # Patch the network warm so the test never hits chess.com/lichess.
+        warmed = []
+        monkeypatch.setattr(
+            "src.hunter.get_or_fetch_profile",
+            lambda u, p, dbp, **kw: warmed.append(u) or {},
+        )
+
+        cfg = _config(db_path)
+        cfg["features"] = {"tournament_min_shared": 2}
+        main_module.cmd_tournament_prep(
+            argparse.Namespace(id=t["id"]), cfg,
+        )
+        out = capsys.readouterr().out
+        assert sorted(warmed) == ["oppa", "oppb"]
+        assert "Kings Gambit" in out
+
+    def test_unknown_tournament_reports_error(self, db_path, capsys):
+        main_module.cmd_tournament_prep(
+            argparse.Namespace(id=99999), _config(db_path),
+        )
+        out = capsys.readouterr().out
+        assert "ERROR" in out

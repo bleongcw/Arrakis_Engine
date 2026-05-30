@@ -1,14 +1,17 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import { useParams } from "next/navigation";
 import { Card, CardContent } from "@/components/ui/card";
 import { OpponentSearch } from "@/components/hunter/opponent-search";
 import { TargetedPrep } from "@/components/hunter/targeted-prep";
 import { OpponentBlindSpots } from "@/components/hunter/opponent-blind-spots";
+import { AddToTournament } from "@/components/hunter/add-to-tournament";
 import { fetchHunterProfile, refreshHunterProfile } from "@/lib/api";
 import type { OpponentProfile, HuntPlatform } from "@/lib/types";
 
 export default function HuntPage() {
+  const { player } = useParams<{ player: string }>();
   const [profile, setProfile] = useState<OpponentProfile | null>(null);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -111,12 +114,21 @@ export default function HuntPage() {
 
       {profile && (
         <Card>
-          <CardContent className="pt-6">
+          <CardContent className="pt-6 space-y-4">
             <TargetedPrep
               profile={profile}
               onRefresh={handleRefresh}
               refreshing={refreshing}
             />
+            {lastQuery && player && (
+              <div className="pt-3 border-t border-border">
+                <AddToTournament
+                  player={player}
+                  opponent={lastQuery.opponent}
+                  platform={lastQuery.platform}
+                />
+              </div>
+            )}
           </CardContent>
         </Card>
       )}

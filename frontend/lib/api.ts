@@ -12,6 +12,9 @@ import type {
   CoachingSettings,
   OpponentProfile,
   HuntPlatform,
+  Tournament,
+  TournamentOpponent,
+  TournamentPrep,
 } from "./types";
 
 const BASE = "/api";
@@ -397,6 +400,72 @@ export async function triggerHuntScan(
   platform: HuntPlatform
 ): Promise<{ status: string; message: string }> {
   return postPipeline("hunt-scan", { opponent, platform });
+}
+
+// ── v1.21.0 Tournament Prep ──────────────────────────────────────────────
+
+async function postTournament<T = unknown>(
+  endpoint: string,
+  body: Record<string, unknown>
+): Promise<T> {
+  const res = await fetch(`${BASE}/tournament/${endpoint}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Tournament ${endpoint} failed: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function listTournaments(
+  player: string
+): Promise<{ tournaments: Tournament[] }> {
+  return fetchJSON(`${BASE}/tournaments?player=${encodeURIComponent(player)}`);
+}
+
+export async function getTournament(id: number): Promise<TournamentPrep> {
+  return fetchJSON<TournamentPrep>(`${BASE}/tournament?id=${id}`);
+}
+
+export async function createTournament(
+  player: string,
+  name: string,
+  event_date?: string,
+  notes?: string
+): Promise<Tournament & { opponents: TournamentOpponent[] }> {
+  return postTournament("create", { player, name, event_date, notes });
+}
+
+export async function addTournamentOpponent(
+  tournament_id: number,
+  opponent: string,
+  platform: HuntPlatform
+): Promise<TournamentOpponent> {
+  return postTournament("add-opponent", { tournament_id, opponent, platform });
+}
+
+export async function removeTournamentOpponent(
+  tournament_id: number,
+  opponent_id: number
+): Promise<{ status: string }> {
+  return postTournament("remove-opponent", { tournament_id, opponent_id });
+}
+
+export async function deleteTournament(
+  tournament_id: number
+): Promise<{ status: string }> {
+  return postTournament("delete", { tournament_id });
+}
+
+/** Warm every opponent's profile cache (background job; poll pipeline status,
+ *  task "tournament_prep"). */
+export async function triggerTournamentPrep(
+  tournament_id: number
+): Promise<{ status: string; message: string }> {
+  return postPipeline("tournament-prep", { tournament_id });
 }
 
 /** Force a fresh fetch of an opponent's profile (bypasses 24h cache). */

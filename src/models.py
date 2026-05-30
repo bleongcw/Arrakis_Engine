@@ -397,6 +397,42 @@ def _migrate(conn: sqlite3.Connection):
         conn.execute("ALTER TABLE opponent_games ADD COLUMN analyzed_at TEXT")
         conn.commit()
 
+    # v1.21.0: Tournament Prep — a player-scoped, named roster of opponents
+    # for an upcoming event + combined cross-opponent analysis. Builds on
+    # the Hunter Mode opponent cache (no opponent data is duplicated here —
+    # the roster just references usernames; profiles live in opponent_cache).
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS tournaments (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            player_id   INTEGER NOT NULL REFERENCES players(id),
+            name        TEXT NOT NULL,
+            event_date  TEXT,
+            notes       TEXT,
+            created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_tournaments_player "
+        "ON tournaments(player_id)"
+    )
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS tournament_opponents (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            tournament_id INTEGER NOT NULL REFERENCES tournaments(id),
+            username      TEXT NOT NULL,
+            platform      TEXT NOT NULL DEFAULT 'chess.com',
+            seed          INTEGER,
+            added_at      TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(tournament_id, username, platform)
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_tournament_opponents_lookup "
+        "ON tournament_opponents(tournament_id)"
+    )
+    conn.commit()
+
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS players (

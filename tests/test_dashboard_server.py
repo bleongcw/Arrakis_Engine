@@ -574,6 +574,61 @@ class TestHuntDeepScanAPI:
         assert data["motif_summary"]["top_missed"] == "fork"
 
 
+class TestTournamentAPI:
+    """v1.21.0: tournament roster CRUD + combined prep over HTTP."""
+
+    def _post(self, base_url, path, body):
+        req = urllib.request.Request(
+            base_url + path, data=json.dumps(body).encode(),
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        with urllib.request.urlopen(req) as resp:
+            return json.loads(resp.read().decode())
+
+    def test_create_add_list_prep_flow(self, live_server, db_with_data):
+        from src.models import init_db
+        from src.hunter import set_cached_profile
+
+        conn = init_db(db_with_data)
+        prof = {
+            "total_games": 8,
+            "results": {"wins": 3, "losses": 4, "draws": 1, "win_rate": 37.5},
+            "weaknesses": {"white": [{"name": "Italian", "eco": "C50",
+                                      "total": 4, "wins": 1, "losses": 3,
+                                      "draws": 0, "rate": 75.0}],
+                           "black": []},
+            "strengths": {"white": [], "black": []},
+        }
+        set_cached_profile(conn, "oppa", "chess.com", prof)
+        set_cached_profile(conn, "oppb", "chess.com", prof)
+        conn.close()
+
+        # db_with_data seeds a player; resolve its slug for the create call.
+        players = api_get(live_server, "/api/players")
+        slug = players["players"][0]["slug"] if isinstance(players, dict) else players[0]["slug"]
+
+        t = self._post(live_server, "/api/tournament/create",
+                       {"player": slug, "name": "Club Champs"})
+        assert t["name"] == "Club Champs"
+        self._post(live_server, "/api/tournament/add-opponent",
+                   {"tournament_id": t["id"], "opponent": "oppa"})
+        self._post(live_server, "/api/tournament/add-opponent",
+                   {"tournament_id": t["id"], "opponent": "oppb"})
+
+        listed = api_get(live_server, f"/api/tournaments?player={slug}")
+        assert any(x["id"] == t["id"] and x["opponent_count"] == 2
+                   for x in listed["tournaments"])
+
+        prep = api_get(live_server, f"/api/tournament?id={t['id']}")
+        assert prep["opening_targets"][0]["opening"] == "Italian"
+        assert prep["opening_targets"][0]["opponent_count"] == 2
+        assert prep["scan_coverage"]["total"] == 2
+
+    def test_missing_id_errors(self, live_server):
+        data = api_get(live_server, "/api/tournament")
+        assert "error" in data
+
+
 class TestCorsHeaders:
     def test_response_has_cors(self, live_server):
         """API responses should include CORS headers."""

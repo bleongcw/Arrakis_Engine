@@ -239,6 +239,51 @@ def cmd_hunt_scan(args, config):
           f"{summary['games_analyzed']} games).")
 
 
+def cmd_tournament_prep(args, config):
+    """v1.21.0: Warm a tournament roster's opponent profiles + print the
+    top combined opening targets. Reads/creates nothing — operates on an
+    existing tournament id (create rosters via the dashboard).
+    """
+    from src.models import init_db
+    from src.tournament import get_tournament, compute_tournament_prep
+    from src.hunter import get_or_fetch_profile
+
+    db_path = config["database"]["path"]
+    features = config.get("features") or {}
+    min_shared = features.get("tournament_min_shared", 2)
+
+    try:
+        roster = get_tournament(args.id, db_path=db_path)
+    except ValueError as e:
+        print(f"ERROR: {e}")
+        return
+
+    opponents = roster["opponents"]
+    print(f"Prepping '{roster['name']}' — {len(opponents)} opponents.")
+    for i, opp in enumerate(opponents):
+        print(f"  Warming {opp['username']} ({i + 1}/{len(opponents)})...",
+              flush=True)
+        try:
+            get_or_fetch_profile(
+                opp["username"], opp["platform"], db_path,
+                lookback_months=features.get("hunter_lookback_months", 6),
+                max_games=features.get("hunter_max_games_per_opponent"),
+            )
+        except Exception as e:
+            print(f"    WARN: {opp['username']} failed: {e}")
+
+    prep = compute_tournament_prep(args.id, db_path=db_path, min_shared=min_shared)
+    targets = prep["opening_targets"]
+    if not targets:
+        print("No shared opening targets yet "
+              f"(need ≥{min_shared} opponents sharing an opening).")
+        return
+    print("Top opening targets (openings the field loses to):")
+    for r in targets[:5]:
+        print(f"  • {r['opening']} as {r['color']} — "
+              f"{r['opponent_count']} opponents, {r['agg_rate']}% loss rate")
+
+
 def cmd_note(args, config):
     """v1.12.0: Append a parent-authored note to the player's Journal.
 
@@ -1034,6 +1079,16 @@ def main():
         help="Number of recent games to scan (default: features.hunter_scan_games or 20)",
     )
 
+    # tournament-prep (v1.21.0) — warm a roster + print top opening targets
+    tprep_parser = subparsers.add_parser(
+        "tournament-prep",
+        help="(v1.21.0) Warm a tournament roster's profiles + print opening targets",
+    )
+    tprep_parser.add_argument(
+        "--id", type=int, required=True,
+        help="Tournament id (create rosters via the dashboard)",
+    )
+
     # backfill-clocks
     backfill_parser = subparsers.add_parser("backfill-clocks", help="Backfill clock data from PGN annotations")
 
@@ -1095,6 +1150,8 @@ def main():
         cmd_rescan_motifs(args, config)
     elif args.command == "hunt-scan":
         cmd_hunt_scan(args, config)
+    elif args.command == "tournament-prep":
+        cmd_tournament_prep(args, config)
     elif args.command == "backfill-clocks":
         cmd_backfill_clocks(args, config)
     elif args.command == "run-all":

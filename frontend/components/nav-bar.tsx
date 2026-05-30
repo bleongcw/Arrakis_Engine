@@ -14,6 +14,8 @@ const NAV_ITEMS = [
   // overview) and Hunt (opponent prep) as the narrative companion to Patterns.
   { href: "/journal", label: "Journal", playerScoped: true },
   { href: "/hunt", label: "Hunt", playerScoped: true },
+  // v1.21.0: Tournament Prep — multi-opponent rosters built on Hunt.
+  { href: "/tournament", label: "Tournament", playerScoped: true },
   { href: "/reports", label: "Reports", playerScoped: true },
 ];
 

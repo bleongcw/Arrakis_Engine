@@ -405,6 +405,75 @@ export interface OpponentProfile {
 
 export type HuntPlatform = "chess.com" | "lichess";
 
+// ── v1.21.0 Tournament Prep ──────────────────────────────────────────────
+
+export interface Tournament {
+  id: number;
+  player_id: number;
+  name: string;
+  event_date: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+  opponent_count?: number;
+}
+
+export interface TournamentOpponent {
+  id: number;
+  username: string;
+  platform: HuntPlatform;
+  seed: number | null;
+  added_at: string;
+}
+
+/** A combined opening row across the roster (target = field loses to it,
+ *  caution = field wins with it). */
+export interface OpeningTarget {
+  opening: string;
+  eco: string | null;
+  color: "white" | "black";
+  opponent_count: number;
+  total_games: number;
+  outcome_games: number;
+  agg_rate: number;
+  opponents: string[];
+}
+
+export interface TournamentPrepOpponent {
+  id: number;
+  username: string;
+  platform: HuntPlatform;
+  status: "ready" | "pending";
+  summary: {
+    total_games: number;
+    wins: number;
+    losses: number;
+    draws: number;
+    win_rate: number;
+  } | null;
+  deep_scan: {
+    analyzed_games: number;
+    total_cached: number;
+    last_analyzed_at: string | null;
+  };
+}
+
+/** Full combined prep view returned by GET /api/tournament?id=. */
+export interface TournamentPrep {
+  tournament: {
+    id: number;
+    name: string;
+    event_date: string | null;
+    notes: string | null;
+  };
+  opponents: TournamentPrepOpponent[];
+  opening_targets: OpeningTarget[];
+  opening_cautions: OpeningTarget[];
+  field_blind_spots: PatternStats["motif_summary"] | null;
+  scan_coverage: { scanned: number; total: number };
+  error?: string;
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 
 export interface TrapEntry {
@@ -495,7 +564,7 @@ export interface ScheduleState {
 }
 
 export interface PipelineState {
-  task: "harvest" | "analyze" | "patterns" | "run_all" | "coach" | "hunt_scan" | null;
+  task: "harvest" | "analyze" | "patterns" | "run_all" | "coach" | "hunt_scan" | "tournament_prep" | null;
   status: "running" | "complete" | "error" | "idle";
   progress: string;
   detail: {

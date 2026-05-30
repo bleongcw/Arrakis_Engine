@@ -120,6 +120,16 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             self._handle_hunt_refresh(body)
         elif path == "/api/pipeline/hunt-scan":
             self._handle_hunt_scan(body)
+        elif path == "/api/tournament/create":
+            self._handle_tournament_create(body)
+        elif path == "/api/tournament/add-opponent":
+            self._handle_tournament_add_opponent(body)
+        elif path == "/api/tournament/remove-opponent":
+            self._handle_tournament_remove_opponent(body)
+        elif path == "/api/tournament/delete":
+            self._handle_tournament_delete(body)
+        elif path == "/api/pipeline/tournament-prep":
+            self._handle_tournament_prep(body)
         elif path == "/api/journal/note":
             # v1.12.0: parent-authored note
             self._handle_create_note(body)
@@ -1146,6 +1156,10 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                 data = self._api_schedule_status()
             elif path == "/api/hunt/profile":
                 data = self._api_hunt_profile(params)
+            elif path == "/api/tournaments":
+                data = self._api_tournaments(params)
+            elif path == "/api/tournament":
+                data = self._api_tournament(params)
             elif path == "/api/journal":
                 # v1.10.0: chronological journal entries (reviews, notes, etc.)
                 data = self._api_journal(params)
@@ -1601,6 +1615,9 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             "max_games": features.get("hunter_max_games_per_opponent"),
             # v1.20.0: how many recent games a Deep Scan analyzes.
             "scan_games": features.get("hunter_scan_games", 20),
+            # v1.21.0: Tournament Prep knobs.
+            "tournament_max_opponents": features.get("tournament_max_opponents", 32),
+            "tournament_min_shared": features.get("tournament_min_shared", 2),
         }
 
     def _api_hunt_profile(self, params):
@@ -1723,6 +1740,182 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
         self._send_json({
             "status": "started",
             "message": f"Deep-scanning {opponent}'s last {scan_games} games...",
+        })
+
+    # ── v1.21.0 Tournament Prep ──────────────────────────────────────
+
+    def _resolve_tournament_player(self, identifier):
+        """slug/username/id → player_id, or None."""
+        if not identifier:
+            return None
+        conn = get_connection(self.db_path)
+        try:
+            return _resolve_player_id(conn, identifier)
+        finally:
+            conn.close()
+
+    def _api_tournaments(self, params):
+        """GET /api/tournaments?player=<slug> — list a player's rosters."""
+        if not self._hunter_enabled():
+            return {"error": "Hunter Mode is disabled in config.yaml"}
+        player = (params.get("player") or [""])[0].strip()
+        pid = self._resolve_tournament_player(player)
+        if pid is None:
+            return {"error": f"Player '{player}' not found"}
+        from src.tournament import list_tournaments
+        return {"tournaments": list_tournaments(pid, db_path=self.db_path)}
+
+    def _api_tournament(self, params):
+        """GET /api/tournament?id=<n> — full combined prep view (cache-only)."""
+        if not self._hunter_enabled():
+            return {"error": "Hunter Mode is disabled in config.yaml"}
+        raw = (params.get("id") or [""])[0].strip()
+        if not raw.isdigit():
+            return {"error": "id query param is required"}
+        from src.tournament import compute_tournament_prep
+        min_shared = self._hunter_config().get("tournament_min_shared", 2)
+        try:
+            return compute_tournament_prep(
+                int(raw), db_path=self.db_path, min_shared=min_shared,
+            )
+        except ValueError as e:
+            return {"error": str(e)}
+
+    def _handle_tournament_create(self, body):
+        if not self._hunter_enabled():
+            self._send_json({"error": "Hunter Mode is disabled"}, 403)
+            return
+        body = body or {}
+        pid = self._resolve_tournament_player((body.get("player") or "").strip())
+        if pid is None:
+            self._send_json({"error": "player not found"}, 400)
+            return
+        from src.tournament import create_tournament
+        try:
+            t = create_tournament(
+                pid, body.get("name"),
+                event_date=body.get("event_date"), notes=body.get("notes"),
+                db_path=self.db_path,
+            )
+        except ValueError as e:
+            self._send_json({"error": str(e)}, 400)
+            return
+        self._send_json(t)
+
+    def _handle_tournament_add_opponent(self, body):
+        if not self._hunter_enabled():
+            self._send_json({"error": "Hunter Mode is disabled"}, 403)
+            return
+        body = body or {}
+        tid = body.get("tournament_id")
+        from src.tournament import add_opponent, get_tournament
+        # Enforce the per-roster opponent cap.
+        cap = self._hunter_config().get("tournament_max_opponents", 32)
+        try:
+            current = get_tournament(int(tid), db_path=self.db_path)
+            if len(current["opponents"]) >= cap:
+                self._send_json(
+                    {"error": f"Tournament is full (max {cap} opponents)"}, 400)
+                return
+            row = add_opponent(
+                int(tid), body.get("opponent", ""),
+                platform=body.get("platform", "chess.com"),
+                db_path=self.db_path,
+            )
+        except (ValueError, TypeError) as e:
+            self._send_json({"error": str(e)}, 400)
+            return
+        self._send_json(row)
+
+    def _handle_tournament_remove_opponent(self, body):
+        if not self._hunter_enabled():
+            self._send_json({"error": "Hunter Mode is disabled"}, 403)
+            return
+        body = body or {}
+        from src.tournament import remove_opponent
+        try:
+            remove_opponent(
+                int(body.get("tournament_id")),
+                int(body.get("opponent_id")),
+                db_path=self.db_path,
+            )
+        except (ValueError, TypeError) as e:
+            self._send_json({"error": str(e)}, 400)
+            return
+        self._send_json({"status": "removed"})
+
+    def _handle_tournament_delete(self, body):
+        if not self._hunter_enabled():
+            self._send_json({"error": "Hunter Mode is disabled"}, 403)
+            return
+        from src.tournament import delete_tournament
+        try:
+            delete_tournament(
+                int((body or {}).get("tournament_id")), db_path=self.db_path)
+        except (ValueError, TypeError) as e:
+            self._send_json({"error": str(e)}, 400)
+            return
+        self._send_json({"status": "deleted"})
+
+    def _handle_tournament_prep(self, body):
+        """POST /api/pipeline/tournament-prep {tournament_id} — warm every
+        opponent's opening-profile cache in the background (fast, no
+        Stockfish), so the combined view fills in. Reuses the single-task
+        pipeline_state lock."""
+        if not self._hunter_enabled():
+            self._send_json({"error": "Hunter Mode is disabled"}, 403)
+            return
+        tid = (body or {}).get("tournament_id")
+        from src import pipeline_state
+        from src.tournament import get_tournament
+        from src.hunter import get_or_fetch_profile
+
+        try:
+            roster = get_tournament(int(tid), db_path=self.db_path)
+        except (ValueError, TypeError) as e:
+            self._send_json({"error": str(e)}, 400)
+            return
+
+        if not pipeline_state.start_task("tournament_prep"):
+            current = pipeline_state.current_task()
+            self._send_json({"error": f"Another task is running: {current}"}, 409)
+            return
+
+        db_path = self.db_path
+        cfg = self._hunter_config()
+        opponents = roster["opponents"]
+        name = roster["name"]
+
+        def run():
+            try:
+                warmed = 0
+                total = len(opponents)
+                for i, opp in enumerate(opponents):
+                    pipeline_state.update_progress(
+                        f"Prepping {name}: {opp['username']} "
+                        f"({i + 1} of {total})...",
+                        {"games_processed": i + 1, "games_total": total},
+                    )
+                    try:
+                        get_or_fetch_profile(
+                            opp["username"], opp["platform"], db_path,
+                            lookback_months=cfg["lookback_months"],
+                            max_games=cfg["max_games"],
+                        )
+                        warmed += 1
+                    except Exception as e:  # one bad opponent shouldn't kill the run
+                        logger.warning("Tournament prep: %s failed: %s",
+                                       opp["username"], e)
+                pipeline_state.complete_task(
+                    {"warmed": warmed, "total": total})
+            except Exception as e:
+                logger.exception("Tournament prep failed: %s", e)
+                pipeline_state.fail_task(str(e))
+
+        threading.Thread(target=run, daemon=True).start()
+        self._send_json({
+            "status": "started",
+            "message": f"Prepping {len(opponents)} opponents for {name}...",
         })
 
     def log_message(self, format, *args):

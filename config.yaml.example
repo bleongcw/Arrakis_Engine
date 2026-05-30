@@ -128,5 +128,15 @@ features:
   # re-scan only analyzes newly-fetched games.
   hunter_scan_games: 20
 
+  # Tournament Prep (v1.21.0) — a saved, named roster of opponents with a
+  # combined cross-opponent analysis (which openings to play / avoid, plus
+  # field-wide tactical blind spots).
+  #   tournament_max_opponents — hard cap on roster size per event.
+  #   tournament_min_shared    — only surface an opening in the combined
+  #     view when at least this many opponents share it (keeps
+  #     single-opponent noise out of the headline).
+  tournament_max_opponents: 32
+  tournament_min_shared: 2
+
 database:
   path: data/chess_coach.db

@@ -1,6 +1,6 @@
 # Arrakis Engine Roadmap
 
-*Updated 2026-05-29 — current release v1.20.0*
+*Updated 2026-05-30 — current release v1.21.0*
 
 This is the public-facing roadmap. The full release history is in
 [CHANGELOG.md](CHANGELOG.md); architectural details are in
@@ -192,8 +192,11 @@ real-world miles.
 - **Trap detection on opponent games** — apply the v1.4.0 trap library to the
   opponent's accumulated games, surface "their favourite trap to play" /
   "their favourite trap to fall for".
-- **Tournament prep mode** — multi-opponent batch profiles for an upcoming
-  event with combined target-opening analysis.
+- ✅ **Tournament prep mode (shipped v1.21.0).** Saved, named opponent rosters
+  with a combined cross-opponent analysis — opening targets ("the field loses
+  to the Italian") / cautions ("avoid the Najdorf") + a field-wide tactical
+  blind-spots panel that aggregates over Deep-Scanned opponents. New Tournament
+  tab + a Hunt "Add to tournament" bridge. CLI: `python main.py tournament-prep`.
 
 ### Frontend polish
 
