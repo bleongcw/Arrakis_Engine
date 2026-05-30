@@ -4,6 +4,21 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.22.1] - 2026-05-30
+
+### Changed
+- **Route registry for the dashboard server (`src/dashboard_server.py`).**
+  HTTP dispatch is now table-driven — `do_GET`/`do_POST`/`do_PUT`/`do_DELETE`
+  look up module-level `_{GET,POST,PUT,DELETE}_ROUTES` dicts (exact path →
+  handler) and ordered regex-route lists, replacing the hardcoded if/elif
+  chains. New public `register_route(method, path, handler)` and
+  `register_regex_route(method, pattern, handler)` let out-of-tree code add
+  endpoints before `serve()` starts (e.g. the commercial Atreides build
+  registering `/api/import-pgn` into the core dashboard instead of running a
+  separate sidecar). Pure refactor — every existing endpoint registered
+  exactly as it dispatched before, proven by the unchanged
+  `test_dashboard_server.py` suite. (roadmap §6)
+
 ## [1.22.0] - 2026-05-30
 
 ### Added

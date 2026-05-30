@@ -1907,6 +1907,76 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             logger.debug(format, *args)
 
 
+# ── Built-in route registrations (v1.22.0) ───────────────────────────
+# Registered here, after the class, so DashboardHandler methods exist.
+# Mirrors the previous if/elif chains exactly — one entry per endpoint.
+
+# GET — handlers receive (self, params) and return the data to serialize.
+register_route("GET", "/api/players", lambda self, params: self._api_players())
+register_route("GET", "/api/games", lambda self, params: self._api_games_list(params))
+register_regex_route(
+    "GET", r"^/api/games/(\d+)$",
+    lambda self, params, gid: self._api_game_detail(int(gid)),
+)
+register_route("GET", "/api/patterns", lambda self, params: self._api_patterns(params))
+register_route("GET", "/api/report", lambda self, params: self._api_report(params))
+register_route("GET", "/api/status", lambda self, params: self._api_status())
+register_route("GET", "/api/pipeline/status", lambda self, params: self._api_pipeline_status())
+register_route("GET", "/api/settings", lambda self, params: self._handle_settings_get())
+register_route("GET", "/api/schedule/status", lambda self, params: self._api_schedule_status())
+register_route("GET", "/api/hunt/profile", lambda self, params: self._api_hunt_profile(params))
+register_route("GET", "/api/tournaments", lambda self, params: self._api_tournaments(params))
+register_route("GET", "/api/tournament", lambda self, params: self._api_tournament(params))
+register_route("GET", "/api/journal", lambda self, params: self._api_journal(params))
+
+# POST — handlers receive (self, body) and send their own response.
+register_route("POST", "/api/players", lambda self, body: self._handle_create_player(body))
+register_route("POST", "/api/coach", lambda self, body: self._handle_coach(body))
+register_route("POST", "/api/trend-summary", lambda self, body: self._handle_trend_summary(body))
+# v1.9.0 legacy alias + v1.10.0 canonical endpoint — same handler.
+register_route("POST", "/api/recent-form-review", lambda self, body: self._handle_recent_form_review(body))
+register_route("POST", "/api/journal/review", lambda self, body: self._handle_recent_form_review(body))
+register_route("POST", "/api/pipeline/harvest", lambda self, body: self._handle_pipeline_harvest(body))
+register_route("POST", "/api/pipeline/analyze", lambda self, body: self._handle_pipeline_analyze(body))
+register_route("POST", "/api/pipeline/patterns", lambda self, body: self._handle_pipeline_patterns(body))
+register_route("POST", "/api/pipeline/run-all", lambda self, body: self._handle_pipeline_run_all(body))
+register_route("POST", "/api/pipeline/coach", lambda self, body: self._handle_pipeline_coach(body))
+register_route("POST", "/api/pipeline/cancel", lambda self, body: self._handle_pipeline_cancel())
+register_route("POST", "/api/schedule/toggle", lambda self, body: self._handle_schedule_toggle(body))
+register_route("POST", "/api/schedule/interval", lambda self, body: self._handle_schedule_interval(body))
+register_route("POST", "/api/hunt/refresh", lambda self, body: self._handle_hunt_refresh(body))
+register_route("POST", "/api/pipeline/hunt-scan", lambda self, body: self._handle_hunt_scan(body))
+register_route("POST", "/api/tournament/create", lambda self, body: self._handle_tournament_create(body))
+register_route("POST", "/api/tournament/add-opponent", lambda self, body: self._handle_tournament_add_opponent(body))
+register_route("POST", "/api/tournament/remove-opponent", lambda self, body: self._handle_tournament_remove_opponent(body))
+register_route("POST", "/api/tournament/delete", lambda self, body: self._handle_tournament_delete(body))
+register_route("POST", "/api/pipeline/tournament-prep", lambda self, body: self._handle_tournament_prep(body))
+register_route("POST", "/api/journal/note", lambda self, body: self._handle_create_note(body))
+
+# PUT
+register_regex_route(
+    "PUT", r"^/api/players/(\d+)$",
+    lambda self, body, pid: self._handle_update_player(int(pid), body),
+)
+register_route("PUT", "/api/settings/analysis", lambda self, body: self._handle_update_analysis_settings(body))
+register_route("PUT", "/api/settings/api-keys", lambda self, body: self._handle_update_api_keys(body))
+register_route("PUT", "/api/settings/coaching", lambda self, body: self._handle_update_coaching_settings(body))
+register_regex_route(
+    "PUT", r"^/api/journal/note/(\d+)$",
+    lambda self, body, nid: self._handle_update_note(int(nid), body),
+)
+
+# DELETE
+register_regex_route(
+    "DELETE", r"^/api/players/(\d+)$",
+    lambda self, body, pid: self._handle_delete_player(int(pid)),
+)
+register_regex_route(
+    "DELETE", r"^/api/journal/note/(\d+)$",
+    lambda self, body, nid: self._handle_delete_note(int(nid)),
+)
+
+
 def run_dashboard(db_path: str, port: int = 8000, config: dict | None = None,
                   api_only_banner: bool = True):
     """Start the live dashboard server.

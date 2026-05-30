@@ -727,3 +727,40 @@ class TestClientDisconnectHandling:
         assert "Client disconnected" in source, (
             "_handle_api must log client disconnects at debug, not as ERROR"
         )
+
+
+class TestRouteRegistry:
+    """v1.22.0: out-of-tree code can register routes into the core dashboard."""
+
+    def test_register_get_and_post_route(self, live_server):
+        from src import dashboard_server as ds
+
+        ds.register_route(
+            "GET", "/api/_test-registry",
+            lambda self, params: {"ok": True, "via": "GET"},
+        )
+
+        captured = {}
+
+        def _post_handler(self, body):
+            captured["body"] = body
+            self._send_json({"ok": True, "via": "POST"})
+
+        ds.register_route("POST", "/api/_test-registry", _post_handler)
+        try:
+            got = api_get(live_server, "/api/_test-registry")
+            assert got == {"ok": True, "via": "GET"}
+
+            req = urllib.request.Request(
+                live_server + "/api/_test-registry",
+                data=json.dumps({"hello": "world"}).encode(),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req) as resp:
+                posted = json.loads(resp.read().decode())
+            assert posted == {"ok": True, "via": "POST"}
+            assert captured["body"] == {"hello": "world"}
+        finally:
+            ds._GET_ROUTES.pop("/api/_test-registry", None)
+            ds._POST_ROUTES.pop("/api/_test-registry", None)
