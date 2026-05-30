@@ -29,7 +29,13 @@ jobs:
         run: pip install -r requirements-dev.txt
 
       - name: Run tests
-        run: pytest tests/ -v --ignore=tests/test_live_llm.py -k "not stockfish and not integration"
+        # Exclude the Stockfish-binary (integration) and LLM-key (live) tiers
+        # via pytest markers — the canonical mechanism. The previous brittle
+        # `-k "not stockfish and not integration"` name-filter also skipped
+        # two healthy *mocked* unit tests (test_stockfish_missing_is_reported,
+        # test_stockfish_not_found_raises); `--ignore=tests/test_live_llm.py`
+        # pointed at a nonexistent file. Markers cover both tiers correctly.
+        run: pytest tests/ -v -m "not integration and not live"
         env:
           ARRAKIS_ANTHROPIC_API_KEY: ""
           ARRAKIS_OPENAI_API_KEY: ""
