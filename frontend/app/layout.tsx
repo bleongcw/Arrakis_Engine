@@ -31,7 +31,7 @@ export default function RootLayout({
       <body className="min-h-screen bg-background text-foreground font-sans" suppressHydrationWarning>
         <Providers>
           <AppHeader />
-          <NavBar />
+          <NavBar extraItems={[]} />
           <main className="max-w-7xl mx-auto px-3 sm:px-4 py-4 sm:py-6">{children}</main>
         </Providers>
       </body>

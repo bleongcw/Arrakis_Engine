@@ -31,6 +31,62 @@ logger = logging.getLogger(__name__)
 # Module-level scheduler manager, set by run_dashboard()
 _scheduler_manager = None
 
+# ── Route registry (v1.22.0) ─────────────────────────────────────────
+# HTTP dispatch is table-driven so out-of-tree code (e.g. the commercial
+# Atreides PGN-import module) can register routes into the core dashboard
+# before serve() starts, instead of running a separate sidecar process.
+#
+# Exact-match dicts map a path string -> handler. Regex lists hold
+# (compiled_pattern, handler) pairs tried in order after exact matches miss.
+#
+# Handler signatures:
+#   GET    handler(self, params) -> data            (data is JSON-serialized by caller)
+#   GET    regex: handler(self, params, *groups) -> data
+#   mutate handler(self, body)                      (handler sends its own response)
+#   mutate regex: handler(self, body, *groups)
+_GET_ROUTES: dict = {}
+_GET_REGEX_ROUTES: list = []
+_POST_ROUTES: dict = {}
+_POST_REGEX_ROUTES: list = []
+_PUT_ROUTES: dict = {}
+_PUT_REGEX_ROUTES: list = []
+_DELETE_ROUTES: dict = {}
+_DELETE_REGEX_ROUTES: list = []
+
+_EXACT_ROUTES = {
+    "GET": _GET_ROUTES,
+    "POST": _POST_ROUTES,
+    "PUT": _PUT_ROUTES,
+    "DELETE": _DELETE_ROUTES,
+}
+_REGEX_ROUTES = {
+    "GET": _GET_REGEX_ROUTES,
+    "POST": _POST_REGEX_ROUTES,
+    "PUT": _PUT_REGEX_ROUTES,
+    "DELETE": _DELETE_REGEX_ROUTES,
+}
+
+
+def register_route(method: str, path: str, handler):
+    """Register an exact-match route handler.
+
+    `method` is one of GET/POST/PUT/DELETE. `handler` receives
+    (self, params) for GET (returning the data to serialize) or
+    (self, body) for mutations (sending its own response).
+    """
+    _EXACT_ROUTES[method.upper()][path] = handler
+
+
+def register_regex_route(method: str, pattern, handler):
+    """Register a regex route handler, tried after exact matches.
+
+    `pattern` may be a string (compiled here) or a precompiled pattern.
+    `handler` receives the matched groups as trailing args:
+    (self, params, *groups) for GET or (self, body, *groups) for mutations.
+    """
+    compiled = re.compile(pattern) if isinstance(pattern, str) else pattern
+    _REGEX_ROUTES[method.upper()].append((compiled, handler))
+
 
 def dict_from_row(row):
     """Convert sqlite3.Row to dict."""
@@ -88,53 +144,7 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
         content_length = int(self.headers.get("Content-Length", 0))
         body = json.loads(self.rfile.read(content_length)) if content_length else {}
 
-        if path == "/api/players":
-            self._handle_create_player(body)
-        elif path == "/api/coach":
-            self._handle_coach(body)
-        elif path == "/api/trend-summary":
-            self._handle_trend_summary(body)
-        elif path == "/api/recent-form-review":
-            # v1.9.0 endpoint kept as legacy alias — same payload, same behavior
-            self._handle_recent_form_review(body)
-        elif path == "/api/journal/review":
-            # v1.10.0 — new canonical endpoint for generating a journal review entry
-            self._handle_recent_form_review(body)
-        elif path == "/api/pipeline/harvest":
-            self._handle_pipeline_harvest(body)
-        elif path == "/api/pipeline/analyze":
-            self._handle_pipeline_analyze(body)
-        elif path == "/api/pipeline/patterns":
-            self._handle_pipeline_patterns(body)
-        elif path == "/api/pipeline/run-all":
-            self._handle_pipeline_run_all(body)
-        elif path == "/api/pipeline/coach":
-            self._handle_pipeline_coach(body)
-        elif path == "/api/pipeline/cancel":
-            self._handle_pipeline_cancel()
-        elif path == "/api/schedule/toggle":
-            self._handle_schedule_toggle(body)
-        elif path == "/api/schedule/interval":
-            self._handle_schedule_interval(body)
-        elif path == "/api/hunt/refresh":
-            self._handle_hunt_refresh(body)
-        elif path == "/api/pipeline/hunt-scan":
-            self._handle_hunt_scan(body)
-        elif path == "/api/tournament/create":
-            self._handle_tournament_create(body)
-        elif path == "/api/tournament/add-opponent":
-            self._handle_tournament_add_opponent(body)
-        elif path == "/api/tournament/remove-opponent":
-            self._handle_tournament_remove_opponent(body)
-        elif path == "/api/tournament/delete":
-            self._handle_tournament_delete(body)
-        elif path == "/api/pipeline/tournament-prep":
-            self._handle_tournament_prep(body)
-        elif path == "/api/journal/note":
-            # v1.12.0: parent-authored note
-            self._handle_create_note(body)
-        else:
-            self._send_json({"error": "Not found"}, 404)
+        self._dispatch_mutation(_POST_ROUTES, _POST_REGEX_ROUTES, path, body)
 
     def do_PUT(self):
         parsed = urlparse(self.path)
@@ -143,36 +153,28 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
         content_length = int(self.headers.get("Content-Length", 0))
         body = json.loads(self.rfile.read(content_length)) if content_length else {}
 
-        player_match = re.match(r"^/api/players/(\d+)$", path)
-        if player_match:
-            self._handle_update_player(int(player_match.group(1)), body)
-        elif path == "/api/settings/analysis":
-            self._handle_update_analysis_settings(body)
-        elif path == "/api/settings/api-keys":
-            self._handle_update_api_keys(body)
-        elif path == "/api/settings/coaching":
-            self._handle_update_coaching_settings(body)
-        else:
-            note_match = re.match(r"^/api/journal/note/(\d+)$", path)
-            if note_match:
-                # v1.12.0: update parent note body
-                self._handle_update_note(int(note_match.group(1)), body)
-                return
-            self._send_json({"error": "Not found"}, 404)
+        self._dispatch_mutation(_PUT_ROUTES, _PUT_REGEX_ROUTES, path, body)
 
     def do_DELETE(self):
         parsed = urlparse(self.path)
         path = parsed.path
 
-        player_match = re.match(r"^/api/players/(\d+)$", path)
-        if player_match:
-            self._handle_delete_player(int(player_match.group(1)))
+        self._dispatch_mutation(_DELETE_ROUTES, _DELETE_REGEX_ROUTES, path, None)
+
+    def _dispatch_mutation(self, routes, regex_routes, path, body):
+        """Look up an exact route, then the regex routes, else 404.
+
+        Handlers send their own response (the registry stores them so that
+        out-of-tree code can register POST/PUT/DELETE endpoints too)."""
+        handler = routes.get(path)
+        if handler is not None:
+            handler(self, body)
             return
-        note_match = re.match(r"^/api/journal/note/(\d+)$", path)
-        if note_match:
-            # v1.12.0: delete parent note
-            self._handle_delete_note(int(note_match.group(1)))
-            return
+        for pattern, h in regex_routes:
+            m = pattern.match(path)
+            if m:
+                h(self, body, *m.groups())
+                return
         self._send_json({"error": "Not found"}, 404)
 
     def do_OPTIONS(self):
@@ -807,7 +809,7 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
         from src import pipeline_state
         from src.harvester import harvest_player
 
-        if not pipeline_state.start_task("harvest"):
+        if not pipeline_state.start_task("harvest", db_path=self.db_path):
             current = pipeline_state.current_task()
             self._send_json(
                 {"error": f"Another task is running: {current}"},
@@ -870,7 +872,7 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
         from src import pipeline_state
         from src.analyzer import analyze_pending
 
-        if not pipeline_state.start_task("analyze"):
+        if not pipeline_state.start_task("analyze", db_path=self.db_path):
             current = pipeline_state.current_task()
             self._send_json(
                 {"error": f"Another task is running: {current}"},
@@ -961,7 +963,7 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
         from src import pipeline_state
         from src.patterns import compute_player_patterns
 
-        if not pipeline_state.start_task("patterns"):
+        if not pipeline_state.start_task("patterns", db_path=self.db_path):
             current = pipeline_state.current_task()
             self._send_json(
                 {"error": f"Another task is running: {current}"},
@@ -1014,7 +1016,7 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
         from src import pipeline_state
         from src.scheduler import run_full_pipeline
 
-        if not pipeline_state.start_task("run_all"):
+        if not pipeline_state.start_task("run_all", db_path=self.db_path):
             current = pipeline_state.current_task()
             self._send_json(
                 {"error": f"Another task is running: {current}"},
@@ -1056,7 +1058,7 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
         from src import pipeline_state
         from src.coach import coach_pending
 
-        if not pipeline_state.start_task("coach"):
+        if not pipeline_state.start_task("coach", db_path=self.db_path):
             current = pipeline_state.current_task()
             self._send_json(
                 {"error": f"Another task is running: {current}"},
@@ -1133,39 +1135,20 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
     # ── API routing ──────────────────────────────────────────────
 
     def _handle_api(self, path, params):
-        """Route API requests to handler functions."""
+        """Route API requests to handler functions via the GET registry."""
         try:
-            if path == "/api/players":
-                data = self._api_players()
-            elif path == "/api/games":
-                data = self._api_games_list(params)
-            elif re.match(r"^/api/games/(\d+)$", path):
-                game_id = int(re.match(r"^/api/games/(\d+)$", path).group(1))
-                data = self._api_game_detail(game_id)
-            elif path == "/api/patterns":
-                data = self._api_patterns(params)
-            elif path == "/api/report":
-                data = self._api_report(params)
-            elif path == "/api/status":
-                data = self._api_status()
-            elif path == "/api/pipeline/status":
-                data = self._api_pipeline_status()
-            elif path == "/api/settings":
-                data = self._handle_settings_get()
-            elif path == "/api/schedule/status":
-                data = self._api_schedule_status()
-            elif path == "/api/hunt/profile":
-                data = self._api_hunt_profile(params)
-            elif path == "/api/tournaments":
-                data = self._api_tournaments(params)
-            elif path == "/api/tournament":
-                data = self._api_tournament(params)
-            elif path == "/api/journal":
-                # v1.10.0: chronological journal entries (reviews, notes, etc.)
-                data = self._api_journal(params)
+            handler = _GET_ROUTES.get(path)
+            if handler is not None:
+                data = handler(self, params)
             else:
-                self._send_json({"error": "Not found"}, 404)
-                return
+                for pattern, h in _GET_REGEX_ROUTES:
+                    m = pattern.match(path)
+                    if m:
+                        data = h(self, params, *m.groups())
+                        break
+                else:
+                    self._send_json({"error": "Not found"}, 404)
+                    return
 
             self._send_json(data)
 
@@ -1561,7 +1544,7 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
 
     def _api_pipeline_status(self):
         from src import pipeline_state
-        return pipeline_state.get_state()
+        return pipeline_state.get_state(db_path=self.db_path)
 
     def _api_schedule_status(self):
         if hasattr(self, '_scheduler_manager') and self._scheduler_manager:
@@ -1709,7 +1692,7 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
         from src import pipeline_state
         from src.hunter import deep_scan_opponent
 
-        if not pipeline_state.start_task("hunt_scan"):
+        if not pipeline_state.start_task("hunt_scan", db_path=self.db_path):
             current = pipeline_state.current_task()
             self._send_json({"error": f"Another task is running: {current}"}, 409)
             return
@@ -1876,7 +1859,7 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             self._send_json({"error": str(e)}, 400)
             return
 
-        if not pipeline_state.start_task("tournament_prep"):
+        if not pipeline_state.start_task("tournament_prep", db_path=self.db_path):
             current = pipeline_state.current_task()
             self._send_json({"error": f"Another task is running: {current}"}, 409)
             return

@@ -5,7 +5,16 @@ import { usePathname } from "next/navigation";
 import { usePlayerContext } from "@/app/providers";
 import { cn } from "@/lib/utils";
 
-const NAV_ITEMS = [
+// Shape of a nav entry. Exported so out-of-tree consumers (e.g. the
+// commercial Atreides build's PGN-import page) can compose their own
+// entries to pass via <NavBar extraItems> without forking this file.
+export type NavItem = {
+  href: string;
+  label: string;
+  playerScoped: boolean;
+};
+
+export const NAV_ITEMS: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", playerScoped: false },
   { href: "/games", label: "Games", playerScoped: true },
   { href: "/patterns", label: "Patterns", playerScoped: true },
@@ -19,14 +28,14 @@ const NAV_ITEMS = [
   { href: "/reports", label: "Reports", playerScoped: true },
 ];
 
-export function NavBar() {
+export function NavBar({ extraItems = [] }: { extraItems?: NavItem[] }) {
   const pathname = usePathname();
   const { currentPlayer } = usePlayerContext();
 
   return (
     <nav className="border-b border-border bg-card">
       <div className="max-w-7xl mx-auto px-2 sm:px-4 flex gap-0 overflow-x-auto [&::-webkit-scrollbar]:hidden">
-        {NAV_ITEMS.map(({ href, label, playerScoped }) => {
+        {[...NAV_ITEMS, ...extraItems].map(({ href, label, playerScoped }) => {
           const fullHref = playerScoped && currentPlayer
             ? `/${currentPlayer}${href}`
             : href;

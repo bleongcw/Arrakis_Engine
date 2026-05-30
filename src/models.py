@@ -433,6 +433,26 @@ def _migrate(conn: sqlite3.Connection):
     )
     conn.commit()
 
+    # v1.22.0: cross-process pipeline lock. A single row (id=1) backs the
+    # single-task lock in src/pipeline_state.py so that independent processes
+    # sharing this DB (e.g. the dashboard + an external importer) see each
+    # other's lock and never run Stockfish concurrently. Previously the lock
+    # was an in-memory threading.Lock, invisible across processes.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS pipeline_lock (
+            id           INTEGER PRIMARY KEY CHECK (id = 1),
+            task         TEXT,
+            status       TEXT NOT NULL DEFAULT 'idle',
+            holder       TEXT,
+            started_at   TEXT,
+            heartbeat_at TEXT
+        )
+    """)
+    conn.execute(
+        "INSERT OR IGNORE INTO pipeline_lock (id, status) VALUES (1, 'idle')"
+    )
+    conn.commit()
+
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS players (

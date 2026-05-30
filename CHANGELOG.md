@@ -4,6 +4,18 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.22.0] - 2026-05-30
+
+### Added
+- **Extensible nav bar (`frontend/components/nav-bar.tsx`).** `<NavBar>` now
+  accepts an optional `extraItems` prop (`NavItem[]`, defaults to `[]`),
+  rendered after the base `NAV_ITEMS` through the same player-scoping mapping
+  (player-scoped entries get the `/${currentPlayer}` prefix). The `NavItem`
+  type and `NAV_ITEMS` array are exported so out-of-tree code can compose its
+  own entries (e.g. the commercial Atreides build surfacing a PGN-import page)
+  without forking the component. The OSS `app/layout.tsx` caller passes
+  `extraItems={[]}` — no behavior change. (roadmap §6)
+
 ## [1.21.0] - 2026-05-30
 
 ### Added
