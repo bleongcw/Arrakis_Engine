@@ -567,9 +567,10 @@ class TestComputeOpponentMotifSummary:
     """v1.20.0: aggregate per-game opponent motif data into the
     MotifThemes-compatible shape."""
 
-    def test_none_when_no_analyzed_games(self, conn):
+    def test_none_when_no_analyzed_games(self, db_path):
+        init_db(db_path)
         assert compute_opponent_motif_summary("ghost", "chess.com",
-                                              db_path=None) is None
+                                              db_path=db_path) is None
 
     def test_sums_distinct_games_exactly(self, db_path):
         conn = init_db(db_path)
