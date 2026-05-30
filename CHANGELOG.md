@@ -4,6 +4,19 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.22.2] - 2026-05-30
+
+### Fixed
+- `tests/test_hunter.py::TestComputeOpponentMotifSummary::test_none_when_no_analyzed_games`
+  called `compute_opponent_motif_summary(..., db_path=None)`, which opens the
+  default DB via `get_connection` — but that DB never had `init_db()` run, so it
+  raised `sqlite3.OperationalError: no such table: opponent_games`
+  (`src/hunter.py`). It now uses the `db_path` fixture + `init_db(db_path)`
+  (mirroring the sibling `test_sums_distinct_games_exactly`), querying an
+  empty-but-existing `opponent_games` table and correctly returning `None`.
+  Production code was never affected — real runs always `init_db` first.
+  Full suite green (664 passed).
+
 ## [1.22.1] - 2026-05-30
 
 ### Changed
