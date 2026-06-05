@@ -156,6 +156,78 @@ class TestRunFullPipeline:
         _, kwargs = mock_coach.call_args
         assert kwargs.get("cancel_event") is cancel
 
+    # ── v1.22.4: cancel must stop the WHOLE pipeline, not just coaching ──
+
+    @patch("src.coach.coach_pending")
+    @patch("src.patterns.compute_player_patterns")
+    @patch("src.analyzer.analyze_pending")
+    @patch("src.harvester.harvest_player")
+    @patch("src.llm_providers.resolve_model")
+    @patch("src.scheduler.pipeline_state")
+    @patch("src.scheduler.get_connection")
+    @patch("src.scheduler.Path")
+    def test_cancel_during_analyze_skips_patterns_and_coach(
+        self, mock_path, mock_get_conn, mock_state, mock_resolve,
+        mock_harvest, mock_analyze, mock_patterns, mock_coach,
+    ):
+        """Cancelling mid-analyze must NOT proceed to patterns/coach — and
+        the cancel_event must be threaded into analyze_pending so it can stop
+        between games (the long pole)."""
+        mock_path.return_value.is_file.return_value = True
+        player = {"username": "t", "display_name": "T", "id": 1,
+                  "lichess_username": None}
+        mock_get_conn.return_value = _make_mock_conn([player])
+        mock_harvest.return_value = {"new": 1, "errors": 0}
+        mock_resolve.return_value = "claude-opus-4-7"
+
+        cancel = threading.Event()
+
+        def analyze_side_effect(*args, **kwargs):
+            cancel.set()  # simulate analyze_pending breaking out on cancel
+            return 2
+
+        mock_analyze.side_effect = analyze_side_effect
+
+        result = run_full_pipeline(_make_config(), "test.db", cancel_event=cancel)
+
+        mock_analyze.assert_called_once()
+        # cancel_event must reach the analyzer so it can stop between games.
+        assert mock_analyze.call_args.kwargs.get("cancel_event") is cancel
+        # downstream steps must be skipped.
+        mock_patterns.assert_not_called()
+        mock_coach.assert_not_called()
+        assert result.get("cancelled") is True
+        assert result["games_analyzed"] == 2
+
+    @patch("src.coach.coach_pending")
+    @patch("src.patterns.compute_player_patterns")
+    @patch("src.analyzer.analyze_pending")
+    @patch("src.harvester.harvest_player")
+    @patch("src.llm_providers.resolve_model")
+    @patch("src.scheduler.pipeline_state")
+    @patch("src.scheduler.get_connection")
+    @patch("src.scheduler.Path")
+    def test_cancel_before_analyze_skips_analyze(
+        self, mock_path, mock_get_conn, mock_state, mock_resolve,
+        mock_harvest, mock_analyze, mock_patterns, mock_coach,
+    ):
+        """A cancel requested before the analyze step stops the run after
+        harvest — analyze/patterns/coach are never reached."""
+        mock_path.return_value.is_file.return_value = True
+        player = {"username": "t", "display_name": "T", "id": 1,
+                  "lichess_username": None}
+        mock_get_conn.return_value = _make_mock_conn([player])
+        mock_harvest.return_value = {"new": 0, "errors": 0}
+
+        cancel = threading.Event()
+        cancel.set()
+        result = run_full_pipeline(_make_config(), "test.db", cancel_event=cancel)
+
+        mock_analyze.assert_not_called()
+        mock_patterns.assert_not_called()
+        mock_coach.assert_not_called()
+        assert result.get("cancelled") is True
+
     @patch("src.coach.coach_pending")
     @patch("src.patterns.compute_player_patterns")
     @patch("src.analyzer.analyze_pending")

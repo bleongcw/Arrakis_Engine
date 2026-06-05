@@ -26,6 +26,28 @@ logger = logging.getLogger(__name__)
 
 # ── Shared pipeline runner ────────────────────────────────
 
+def _is_cancelled(cancel_event) -> bool:
+    """v1.22.4: True if a cancellation has been requested."""
+    return cancel_event is not None and cancel_event.is_set()
+
+
+def _cancelled_result(new_games: int, games_analyzed: int,
+                      players_updated: int, errors: int) -> dict:
+    """Early-return result when run_full_pipeline is cancelled between steps.
+    Same shape as the normal return + a `cancelled` flag so the caller/UI can
+    distinguish a stopped run from a completed one."""
+    return {
+        "new_games": new_games,
+        "games_analyzed": games_analyzed,
+        "players_updated": players_updated,
+        "coached": 0,
+        "coach_errors": 0,
+        "skipped": 0,
+        "errors": errors,
+        "cancelled": True,
+    }
+
+
 def run_full_pipeline(
     config: dict,
     db_path: str,
@@ -99,6 +121,9 @@ def run_full_pipeline(
         total_new += stats.get("new", 0)
         total_errors += stats.get("errors", 0)
 
+    if _is_cancelled(cancel_event):
+        return _cancelled_result(total_new, 0, 0, total_errors)
+
     # Step 2: Analyze
     conn = get_connection(db_path)
     total_pending = conn.execute(
@@ -142,11 +167,17 @@ def run_full_pipeline(
         hash_mb=sf_config.get("hash_mb", 512),
         move_time_limit=sf_config.get("move_time_limit", 10.0),
         db_path=db_path,
+        cancel_event=cancel_event,
     )
 
     if total_pending > 0:
         stop_polling.set()
         poller.join(timeout=5)
+
+    # v1.22.4: stop here if cancelled during/after the (long) analyze step,
+    # rather than pressing on to patterns + coaching.
+    if _is_cancelled(cancel_event):
+        return _cancelled_result(total_new, games_analyzed, 0, total_errors)
 
     # Step 3: Patterns
     pipeline_state.update_progress(
@@ -168,6 +199,10 @@ def run_full_pipeline(
         )
         compute_player_patterns(row["id"], db_path=db_path)
         players_updated += 1
+
+    if _is_cancelled(cancel_event):
+        return _cancelled_result(total_new, games_analyzed, players_updated,
+                                 total_errors)
 
     # Step 4: Coach
     coaching_config = config.get("coaching", {})

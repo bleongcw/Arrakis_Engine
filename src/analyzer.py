@@ -372,10 +372,16 @@ def analyze_game(game_id: int, pgn_text: str, player_color: str,
 def analyze_pending(stockfish_path: str, depth: int = 22,
                     threads: int = 6, hash_mb: int = 512,
                     move_time_limit: float = 10.0,
-                    db_path: str | None = None) -> int:
+                    db_path: str | None = None,
+                    cancel_event=None) -> int:
     """Analyze all games with pending analysis status.
 
-    Returns the number of games analyzed.
+    Returns the number of games processed.
+
+    v1.22.4: ``cancel_event`` (a threading.Event) is checked before each game,
+    so a "Run All" / analyze cancellation stops between games instead of
+    grinding through every pending game (analysis is the long pole — minutes
+    per game). The in-progress game finishes; remaining games stay 'pending'.
 
     Raises FileNotFoundError if the Stockfish binary doesn't exist.
     """
@@ -408,7 +414,13 @@ def analyze_pending(stockfish_path: str, depth: int = 22,
 
     logger.info("Found %d games pending analysis", len(pending))
 
+    processed = 0
     for i, row in enumerate(pending):
+        # v1.22.4: honour a cancellation request between games.
+        if cancel_event is not None and cancel_event.is_set():
+            logger.info("Analysis cancelled after %d of %d games",
+                        processed, len(pending))
+            break
         # Determine tier from the game's player rating
         game_rating = row["player_rating"] or row["profile_rating"]
         game_tier = get_tier(game_rating)
@@ -437,5 +449,6 @@ def analyze_pending(stockfish_path: str, depth: int = 22,
             )
             err_conn.commit()
             err_conn.close()
+        processed += 1
 
-    return len(pending)
+    return processed

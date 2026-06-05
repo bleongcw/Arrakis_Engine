@@ -4,6 +4,31 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.22.4] - 2026-06-05
+
+### Fixed
+- **"Run All Steps" couldn't be cancelled during analysis.** Clicking Cancel
+  while the analyze step was running (minutes per game) did nothing — the
+  pipeline ground through every pending game before the cancel took effect.
+  Root cause: `run_full_pipeline` only passed the `cancel_event` to the *coach*
+  step (its docstring even said "the coaching step stops gracefully"); harvest,
+  analyze, and patterns ignored it. Now:
+  - `analyze_pending` accepts a `cancel_event` and checks it **before each
+    game**, so analysis stops between games (the in-progress game finishes;
+    the rest stay `pending` and resume on the next run).
+  - `run_full_pipeline` threads the `cancel_event` into `analyze_pending` and
+    checks for cancellation **between every step** (after harvest, after
+    analyze, after patterns), returning early with a `cancelled: True` result
+    instead of pressing on to the next phase.
+
+### Tests
+- Backend **665 → 668**: `analyze_pending` stops with a pre-set cancel event
+  (no games analyzed, all stay pending); `run_full_pipeline` cancelled
+  mid-analyze skips patterns + coach and threads the event into the analyzer;
+  cancel-before-analyze stops after harvest.
+
+---
+
 ## [1.22.3] - 2026-06-05
 
 ### Fixed

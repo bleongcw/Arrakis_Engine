@@ -156,3 +156,49 @@ class TestScoreToCp:
     def test_zero_cp(self):
         score = self._mock_score(cp=0)
         assert score_to_cp(score, True) == 0
+
+
+class TestAnalyzePendingCancel:
+    """v1.22.4: analyze_pending stops between games when cancel_event is set.
+
+    This is what makes "Run All" / Analyze actually cancellable during the
+    (long) analysis phase. We pre-set the event so the loop breaks before the
+    first game — no Stockfish is ever spawned (a dummy binary path satisfies
+    the existence check, but analyze_game is never reached)."""
+
+    def test_preset_cancel_analyzes_nothing(self, tmp_path):
+        import threading
+        from src.analyzer import analyze_pending
+        from src.models import init_db, ensure_player
+
+        db = str(tmp_path / "a.db")
+        conn = init_db(db)
+        pid = ensure_player(conn, "p", display_name="P", age=9, rating=1000)
+        for i in range(3):
+            conn.execute(
+                """INSERT INTO games
+                (player_id, game_url, pgn, player_color, player_rating,
+                 opponent_rating, result, time_control, time_class,
+                 date_played, analysis_status)
+                VALUES (?, ?, '[White "p"]\n\n1. e4 e5 *', 'white', 1000, 1000,
+                        'win', '600', 'rapid', '2026-05-01', 'pending')""",
+                (pid, f"https://chess.com/g/{i}"),
+            )
+        conn.commit()
+        conn.close()
+
+        dummy_sf = tmp_path / "stockfish"      # exists; never executed
+        dummy_sf.write_text("")
+
+        ev = threading.Event()
+        ev.set()
+        n = analyze_pending(str(dummy_sf), db_path=db, cancel_event=ev)
+        assert n == 0
+
+        # All games remain pending (none were analyzed).
+        conn = init_db(db)
+        pending = conn.execute(
+            "SELECT COUNT(*) FROM games WHERE analysis_status = 'pending'"
+        ).fetchone()[0]
+        conn.close()
+        assert pending == 3
