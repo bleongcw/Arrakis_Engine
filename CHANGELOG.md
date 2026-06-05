@@ -4,6 +4,39 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.22.3] - 2026-06-05
+
+### Fixed
+- **Dashboard froze ("socket hang up" / "database is locked") during a running
+  analyze.** While the analyzer wrote per-move rows, the frontend's
+  `/api/pipeline/status` poll hit `database is locked` and the connection was
+  reset. Two compounding causes, both fixed:
+  1. **`pipeline_state.get_state()` ran `init_db()` on every status poll** —
+     re-executing `executescript(SCHEMA)` + `CREATE INDEX` (schema *writes*)
+     ~once per second. Those writes contended with the analyzer's writes and
+     blocked for the full 30s `busy_timeout`. The lock read is now a
+     lightweight read-only `SELECT` (WAL readers never wait on the writer),
+     capped at a 2s timeout, and falls back to the in-memory mirror on any
+     transient `OperationalError` — the status poll never blocks or raises.
+  2. **The dashboard ran on a single-threaded `HTTPServer`**, so one
+     lock-waiting request stalled *every* other request → the frontend's
+     concurrent polls were connection-reset. Switched to
+     `ThreadingHTTPServer` (each request gets its own SQLite connection; the
+     pipeline lock remains the cross-request coordinator).
+- **Time-bomb in the v1.19.0 weakness-alert tests.** `_seed_priority_fork`
+  hardcoded game dates (`2026-05-0N`); once the calendar advanced > 30 days
+  past them, the games fell outside the escalation window, fork dropped below
+  the priority tier, and no alert fired → the tests failed purely due to the
+  passage of time. Dates are now seeded relative to `now`.
+
+### Tests
+- New regression test `test_status_poll_does_not_block_under_write_lock`
+  (`tests/test_pipeline_state.py`): holds a WAL write lock and asserts
+  `get_state()` returns in < 3s with the correct task/status. Backend **665
+  passed**.
+
+---
+
 ## [1.22.2] - 2026-05-30
 
 ### Fixed

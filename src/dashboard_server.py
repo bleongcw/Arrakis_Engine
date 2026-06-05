@@ -2000,7 +2000,13 @@ def run_dashboard(db_path: str, port: int = 8000, config: dict | None = None,
     _scheduler_manager.start()
 
     handler = partial(DashboardHandler, db_path=db_path, config=config)
-    with http.server.HTTPServer(("", port), handler) as httpd:
+    # v1.22.3: ThreadingHTTPServer (was single-threaded HTTPServer) so a slow
+    # or lock-waiting request — e.g. a status poll during a heavy analyze —
+    # can't block every other request and reset the frontend's connections
+    # ("socket hang up"). Each request opens its own SQLite connection, and the
+    # pipeline lock is the cross-request coordinator, so per-thread handling is
+    # safe. ThreadingHTTPServer sets daemon_threads=True, so Ctrl+C still exits.
+    with http.server.ThreadingHTTPServer(("", port), handler) as httpd:
         if api_only_banner:
             sched_config = config.get("schedule", {})
             sched_status = "enabled" if sched_config.get("enabled") else "disabled"

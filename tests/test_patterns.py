@@ -147,11 +147,17 @@ class TestEmitWeaknessAlerts:
     def _seed_priority_fork(self, db_path):
         """Seed a player with 9 distinct games, each carrying a missed-fork
         critical move → priority escalation tier (≥8 distinct games)."""
+        from datetime import datetime, timedelta
         conn = init_db(db_path)
         pid = ensure_player(conn, "forkkid", display_name="ForkKid",
                             age=9, rating=1050)
         for i in range(9):
-            day = f"2026-05-{i + 1:02d}"
+            # Dates RELATIVE to now (game i = i days ago) so all 9 games stay
+            # inside the 30-day escalation window. Previously hardcoded
+            # "2026-05-0N", which rotted out of the window once the calendar
+            # advanced > 30 days past May 2026 → fork dropped below the
+            # priority tier and no alert fired (the test became a time-bomb).
+            day = (datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d")
             conn.execute(
                 """INSERT INTO games
                 (player_id, game_url, pgn, player_color, player_rating,

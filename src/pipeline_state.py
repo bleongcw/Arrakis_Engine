@@ -25,10 +25,11 @@ current_task) are backed by the DB row.
 
 import os
 import socket
+import sqlite3
 import threading
 from datetime import datetime, timedelta
 
-from src.models import get_db_path, init_db
+from src.models import get_db_path, init_db, get_connection
 
 # A lock held longer than this without a heartbeat is considered abandoned and
 # may be reclaimed by another process. Mirrors analyzer.py's stuck-game reset.
@@ -175,14 +176,7 @@ def get_state(db_path: str | None = None) -> dict:
     with _lock:
         snapshot = dict(_state)
 
-    conn = init_db(_resolve_db_path(db_path))
-    try:
-        row = conn.execute(
-            "SELECT task, status, holder, started_at, heartbeat_at "
-            "FROM pipeline_lock WHERE id = 1"
-        ).fetchone()
-    finally:
-        conn.close()
+    row = _read_row(db_path)
 
     if row is not None:
         running = _is_running(row["status"], row["heartbeat_at"])
@@ -214,11 +208,31 @@ def current_task(db_path: str | None = None) -> str | None:
 
 
 def _read_row(db_path: str | None):
-    conn = init_db(_resolve_db_path(db_path))
+    """Read the lock row with a lightweight READ-ONLY connection.
+
+    Critical perf/robustness fix (v1.22.3): the previous implementation called
+    init_db() here — which re-runs executescript(SCHEMA) + CREATE INDEX +
+    commits (schema WRITES) on *every* call. Since /api/pipeline/status polls
+    this ~once/second, those writes contended with a running analyzer's per-move
+    writes and blocked for the full 30s busy_timeout → "database is locked" →
+    a single-threaded server froze (socket hang up). A plain SELECT in WAL mode
+    never waits on the writer. We also cap the wait at 2s and swallow transient
+    OperationalErrors (lock contention OR a not-yet-migrated DB), returning None
+    so callers fall back to the in-memory mirror — the status poll must never
+    block or raise.
+    """
     try:
+        conn = get_connection(_resolve_db_path(db_path))
+    except sqlite3.OperationalError:
+        return None
+    try:
+        conn.execute("PRAGMA busy_timeout=2000")
         return conn.execute(
-            "SELECT task, status, heartbeat_at FROM pipeline_lock WHERE id = 1"
+            "SELECT task, status, holder, started_at, heartbeat_at "
+            "FROM pipeline_lock WHERE id = 1"
         ).fetchone()
+    except sqlite3.OperationalError:
+        return None
     finally:
         conn.close()
 
