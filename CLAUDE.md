@@ -70,8 +70,9 @@ Current release: **v1.18.3** (2026-05-29). See `CHANGELOG.md` for full history.
 ```
 /                           → redirects to /dashboard
 /dashboard                  → all players overview + pipeline control panel
-/<slug>/games               → game list for player
-/<slug>/games/<id>          → game detail (board, eval, coaching panels, motif badges)
+/<slug>/games               → game list for player (+ PGN export: select/filtered bulk)
+/<slug>/games/<id>          → game detail (board, eval, coaching panels, motif badges, Export PGN)
+/<slug>/import              → import a PGN (paste/upload) → analyzed game (v1.24.0)
 /<slug>/games/compare       → side-by-side game comparison
 /<slug>/patterns            → pattern visualizations + Self-Analysis + Tactical Themes
 /<slug>/journal             → chronological coaching diary (reviews + parent notes)
@@ -256,6 +257,8 @@ All `?player=X` params + path slugs resolve by **slug** (v1.16.4). Backend helpe
 - `/api/pipeline/{harvest,analyze,patterns,coach,run-all,cancel}` — pipeline triggers
 - `/api/schedule/{toggle,interval}` — scheduler control
 - `/api/hunt/refresh` — force opponent profile re-fetch (v1.4.1+)
+- `/api/import-pgn` — (v1.24.0) import a raw PGN → analyzed game
+- `/api/games/export` — (v1.24.0) `{ids, annotated}` → PGN file (raw / annotated)
 
 ### PUT / DELETE
 - `PUT /api/players/<id>`, `PUT /api/settings/{analysis,api-keys,coaching}`
@@ -342,4 +345,7 @@ Open `http://localhost:3000`. It calls back to the API on 8000.
 - Keep `data/`, `reports/`, `.claude/`, `.mcp.json` in `.gitignore`
 - Never commit API keys
 - **Reserved for commercial Atreides version** (not public): tournament-game
-  photo-upload + OCR ingest.
+  scoresheet **photo capture + OCR + move correction**. NOTE: generic PGN
+  import/export (`src/pgn_io.py`, v1.24.0) is now an **open** feature — only the
+  OCR capture/correction layer that produces a validated PGN is commercial. OCR
+  layers on top of the open `parse_pgn` / `ingest_game` seam.

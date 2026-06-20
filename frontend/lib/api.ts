@@ -505,3 +505,60 @@ export async function refreshHunterProfile(
   }
   return res.json();
 }
+
+// ── PGN data I/O (v1.24.0) ───────────────────────────────
+
+export interface ImportPgnResult {
+  game_id: number;
+  created: boolean;
+  status: string;
+  result: string;
+  player_color: string;
+  moves: number;
+  analyze: string;
+}
+
+/** Import a raw PGN for a player. `result` (win/loss/draw) is required when
+ *  the PGN's own Result is undecided ("*"). */
+export async function importPgn(input: {
+  player: string;
+  pgn: string;
+  player_color?: "white" | "black";
+  result?: "win" | "loss" | "draw";
+  run_pipeline?: boolean;
+}): Promise<ImportPgnResult> {
+  const res = await fetch(`${BASE}/import-pgn`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `Import failed: ${res.status}`);
+  return data as ImportPgnResult;
+}
+
+/** Export one or more games as a PGN file and trigger a browser download.
+ *  Raw or annotated (engine evals + classification NAGs). */
+export async function exportGamesToFile(
+  ids: number[],
+  annotated: boolean
+): Promise<number> {
+  const res = await fetch(`${BASE}/games/export`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids, annotated }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `Export failed: ${res.status}`);
+
+  const blob = new Blob([data.pgn], { type: "application/x-chess-pgn" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = data.filename || "games.pgn";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  return data.count as number;
+}

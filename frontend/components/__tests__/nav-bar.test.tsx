@@ -2,10 +2,11 @@ import { render, screen } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 
 /** §6: NavBar accepts an `extraItems` prop so out-of-tree code (the
- *  commercial Atreides build's PGN-import page) can add nav entries
- *  without forking the component. We mock usePathname / usePlayerContext
- *  so the base items render and a player-scoped extra item gets the
- *  /<slug> prefix applied through the same mapping. */
+ *  commercial Atreides build's OCR/Scan page) can add nav entries without
+ *  forking the component. We mock usePathname / usePlayerContext so the base
+ *  items render and a player-scoped extra item gets the /<slug> prefix applied
+ *  through the same mapping. (Import is a native nav item as of v1.24.0, so the
+ *  example here uses a commercial-only label to avoid colliding with it.) */
 
 vi.mock("next/navigation", () => ({
   usePathname: () => "/evanleong/games",
@@ -27,10 +28,16 @@ describe("NavBar — §6 extraItems", () => {
 
   it("renders a player-scoped extra item with the /<slug> prefix", () => {
     const extraItems: NavItem[] = [
-      { href: "/import", label: "Import", playerScoped: true },
+      { href: "/scan", label: "Scan", playerScoped: true },
     ];
     render(<NavBar extraItems={extraItems} />);
 
+    const scanLink = screen.getByRole("link", { name: "Scan" });
+    expect(scanLink.getAttribute("href")).toBe("/evanleong/scan");
+  });
+
+  it("renders Import as a native nav item (v1.24.0)", () => {
+    render(<NavBar />);
     const importLink = screen.getByRole("link", { name: "Import" });
     expect(importLink.getAttribute("href")).toBe("/evanleong/import");
   });

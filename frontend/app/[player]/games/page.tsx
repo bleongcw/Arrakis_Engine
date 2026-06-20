@@ -6,7 +6,10 @@ import { usePlayerContext } from "@/app/providers";
 import { fetchGames } from "@/lib/api";
 import { GamesFilters } from "@/components/games-filters";
 import { GamesTable } from "@/components/games-table";
+import { ExportPgnButton } from "@/components/export-pgn-button";
 import type { GameListItem } from "@/lib/types";
+
+type SelectMode = "none" | "compare" | "export";
 
 export default function GamesPage() {
   const { player } = useParams<{ player: string }>();
@@ -21,7 +24,7 @@ export default function GamesPage() {
     month: "all",
     platform: "all",
   });
-  const [compareMode, setCompareMode] = useState(false);
+  const [selectMode, setSelectMode] = useState<SelectMode>("none");
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
 
   useEffect(() => {
@@ -40,10 +43,13 @@ export default function GamesPage() {
     if (filters.coaching !== "all") games = games.filter((g) => g.coaching_status === filters.coaching);
     if (filters.month !== "all") games = games.filter((g) => g.date_played?.startsWith(filters.month));
     if (filters.platform !== "all") games = games.filter((g) => (g.platform || "chess.com") === filters.platform);
-    // Sort by latest date first
     games.sort((a, b) => (b.date_played || "").localeCompare(a.date_played || ""));
     return games;
   }, [allGames, filters]);
+
+  const isFiltered =
+    filters.result !== "all" || filters.timeClass !== "all" || filters.coaching !== "all" ||
+    filters.month !== "all" || filters.platform !== "all";
 
   const handleFilterChange = (key: string, value: string) => {
     setFilters((prev) => ({ ...prev, [key]: value }));
@@ -55,16 +61,20 @@ export default function GamesPage() {
     );
   };
 
+  const setMode = (mode: SelectMode) => {
+    setSelectMode((prev) => (prev === mode ? "none" : mode));
+    setSelectedIds([]);
+  };
+
   const handleCompare = () => {
     if (selectedIds.length === 2 && player) {
       router.push(`/${player}/games/compare?games=${selectedIds[0]},${selectedIds[1]}`);
     }
   };
 
-  const toggleCompareMode = () => {
-    setCompareMode((prev) => !prev);
-    setSelectedIds([]);
-  };
+  // In export mode, default to the full filtered set when nothing is ticked.
+  const exportIds = selectedIds.length > 0 ? selectedIds : filteredGames.map((g) => g.id);
+  const exportLabel = selectedIds.length > 0 ? "Export selected" : "Export all filtered";
 
   if (playerLoading || loading) {
     return <div className="h-96 rounded-lg bg-muted animate-pulse" />;
@@ -77,15 +87,13 @@ export default function GamesPage() {
         filters={filters}
         onFilterChange={handleFilterChange}
       />
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
         <div className="text-sm text-muted-foreground">
           {filteredGames.length} game{filteredGames.length !== 1 ? "s" : ""}
-          {filters.result !== "all" || filters.timeClass !== "all" || filters.coaching !== "all" || filters.month !== "all" || filters.platform !== "all"
-            ? " (filtered)"
-            : ""}
+          {isFiltered ? " (filtered)" : ""}
         </div>
-        <div className="flex items-center gap-2">
-          {compareMode && selectedIds.length === 2 && (
+        <div className="flex items-center gap-2 flex-wrap">
+          {selectMode === "compare" && selectedIds.length === 2 && (
             <button
               onClick={handleCompare}
               className="px-3 py-1.5 rounded-md text-xs font-medium bg-blue-600 text-white hover:bg-blue-700 transition-colors"
@@ -93,26 +101,56 @@ export default function GamesPage() {
               Compare Selected &rarr;
             </button>
           )}
-          {compareMode && selectedIds.length > 0 && selectedIds.length < 2 && (
-            <span className="text-xs text-muted-foreground">
-              Select 1 more game
-            </span>
+          {selectMode === "compare" && selectedIds.length > 0 && selectedIds.length < 2 && (
+            <span className="text-xs text-muted-foreground">Select 1 more game</span>
           )}
+
+          {selectMode === "export" && (
+            <>
+              <button
+                onClick={() => setSelectedIds(filteredGames.map((g) => g.id))}
+                className="px-2 py-1.5 rounded-md text-xs font-medium bg-muted text-muted-foreground hover:bg-muted/80"
+              >
+                Select all
+              </button>
+              {selectedIds.length > 0 && (
+                <button
+                  onClick={() => setSelectedIds([])}
+                  className="px-2 py-1.5 rounded-md text-xs font-medium bg-muted text-muted-foreground hover:bg-muted/80"
+                >
+                  Clear
+                </button>
+              )}
+              <ExportPgnButton gameIds={exportIds} label={exportLabel} />
+            </>
+          )}
+
           <button
-            onClick={toggleCompareMode}
+            onClick={() => setMode("compare")}
             className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-              compareMode
+              selectMode === "compare"
                 ? "bg-muted text-foreground ring-1 ring-border"
                 : "bg-muted text-muted-foreground hover:bg-muted/80"
             }`}
           >
-            {compareMode ? "Cancel Compare" : "Compare"}
+            {selectMode === "compare" ? "Cancel Compare" : "Compare"}
+          </button>
+          <button
+            onClick={() => setMode("export")}
+            className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+              selectMode === "export"
+                ? "bg-muted text-foreground ring-1 ring-border"
+                : "bg-muted text-muted-foreground hover:bg-muted/80"
+            }`}
+          >
+            {selectMode === "export" ? "Cancel Export" : "Export"}
           </button>
         </div>
       </div>
       <GamesTable
         games={filteredGames}
-        compareMode={compareMode}
+        selectable={selectMode !== "none"}
+        maxSelectable={selectMode === "compare" ? 2 : undefined}
         selectedIds={selectedIds}
         onToggleSelect={handleToggleSelect}
       />

@@ -1901,6 +1901,171 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             "message": f"Prepping {len(opponents)} opponents for {name}...",
         })
 
+    def _handle_import_pgn(self, body):
+        """Import a raw PGN as a game, then optionally analyze + coach it.
+
+        v1.24.0: the open PGN data-I/O layer. Body: {player: <slug>, pgn,
+        player_color?, result?, provider?, run_pipeline?: bool (default True)}.
+        `result` (win/loss/draw) is required when the PGN's Result is "*".
+        """
+        from src.pgn_io import parse_pgn, ingest_game, PgnParseError
+
+        slug = (body.get("player") or "").strip()
+        pgn = body.get("pgn") or ""
+        if not slug or not pgn.strip():
+            self._send_json(
+                {"error": "Both 'player' (slug) and 'pgn' are required."}, 400
+            )
+            return
+
+        conn = self._get_conn()
+        try:
+            player_id = _resolve_player_id(conn, slug)
+            if player_id is None:
+                self._send_json({"error": f"No player with slug '{slug}'."}, 404)
+                return
+            prow = conn.execute(
+                "SELECT username, lichess_username FROM players WHERE id = ?",
+                (player_id,),
+            ).fetchone()
+            usernames = [u for u in (prow["username"], prow["lichess_username"]) if u]
+            try:
+                parsed = parse_pgn(
+                    pgn,
+                    player_color=body.get("player_color"),
+                    known_usernames=usernames,
+                    result=body.get("result"),
+                )
+            except PgnParseError as exc:
+                self._send_json({"error": str(exc)}, 422)
+                return
+            result = ingest_game(conn, player_id, parsed)
+            conn.commit()
+        finally:
+            conn.close()
+
+        if result.created and body.get("run_pipeline", True):
+            self._spawn_import_pipeline(body.get("provider"))
+            analyze = "queued"
+        else:
+            analyze = "skipped"
+
+        self._send_json(
+            {
+                "game_id": result.game_id,
+                "created": result.created,
+                "status": "pending" if result.created else "exists",
+                "player": slug,
+                "result": parsed.result,
+                "player_color": parsed.player_color,
+                "moves": parsed.move_count,
+                "analyze": analyze,
+            },
+            201 if result.created else 200,
+        )
+
+    def _spawn_import_pipeline(self, provider):
+        """Background analyze + coach for a freshly imported game. If the
+        pipeline lock is busy, the game just stays pending for a later run."""
+        from src import pipeline_state
+        from src.analyzer import analyze_pending
+        from src.coach import coach_pending
+
+        config = self.config
+        db_path = self.db_path
+        if not pipeline_state.start_task("import", db_path=db_path):
+            return  # busy — leave the game pending, user can analyze later
+
+        sf_config = config.get("stockfish", {})
+        sf_path = sf_config.get("path") or shutil.which("stockfish") or "stockfish"
+
+        def run():
+            try:
+                resolved = sf_path
+                if not Path(resolved).is_file():
+                    found = shutil.which("stockfish")
+                    if not found:
+                        pipeline_state.fail_task("Stockfish not found.")
+                        return
+                    resolved = found
+                analyze_pending(
+                    stockfish_path=resolved,
+                    depth=sf_config.get("depth", 22),
+                    threads=sf_config.get("threads", 6),
+                    hash_mb=sf_config.get("hash_mb", 512),
+                    db_path=db_path,
+                )
+                coach_pending(
+                    provider=provider
+                    or config.get("coaching", {}).get("default_provider", "claude"),
+                    db_path=db_path,
+                    config=config,
+                )
+                pipeline_state.complete_task({"source": "import"})
+            except Exception as e:
+                logger.exception("Import pipeline failed: %s", e)
+                pipeline_state.fail_task(str(e))
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _handle_games_export(self, body):
+        """Export one or more games as PGN — raw or annotated (v1.24.0).
+
+        Body: {ids: [int, ...], annotated?: bool}. Returns
+        {filename, pgn, count}; the client turns it into a download. One
+        endpoint serves single (ids length 1) and bulk/filtered export.
+        """
+        from src.pgn_io import build_pgn, build_bulk_pgn
+
+        ids = body.get("ids") or []
+        annotated = bool(body.get("annotated"))
+        if not isinstance(ids, list) or not ids:
+            self._send_json(
+                {"error": "'ids' must be a non-empty list of game ids."}, 400
+            )
+            return
+
+        seen, ordered = set(), []
+        for i in ids:
+            if i not in seen:
+                seen.add(i)
+                ordered.append(i)
+
+        conn = self._get_conn()
+        try:
+            pgns = []
+            for gid in ordered:
+                g = conn.execute(
+                    "SELECT * FROM games WHERE id = ?", (gid,)
+                ).fetchone()
+                if g is None:
+                    continue
+                moves = None
+                if annotated:
+                    moves = conn.execute(
+                        "SELECT move_number, side, eval_after_cp, classification "
+                        "FROM move_analysis WHERE game_id = ? "
+                        "ORDER BY move_number, "
+                        "CASE side WHEN 'white' THEN 0 ELSE 1 END",
+                        (gid,),
+                    ).fetchall()
+                pgns.append(build_pgn(g, moves, annotated=annotated))
+        finally:
+            conn.close()
+
+        if not pgns:
+            self._send_json({"error": "No games found for the given ids."}, 404)
+            return
+
+        text = build_bulk_pgn(pgns) if len(pgns) > 1 else pgns[0]
+        suffix = "-annotated" if annotated else ""
+        filename = (
+            f"game-{ordered[0]}{suffix}.pgn"
+            if len(pgns) == 1
+            else f"games-{len(pgns)}{suffix}.pgn"
+        )
+        self._send_json({"filename": filename, "pgn": text, "count": len(pgns)})
+
     def log_message(self, format, *args):
         """Suppress default access logs for cleaner output."""
         if "/api/" in str(args[0]) if args else False:
@@ -1952,6 +2117,8 @@ register_route("POST", "/api/tournament/remove-opponent", lambda self, body: sel
 register_route("POST", "/api/tournament/delete", lambda self, body: self._handle_tournament_delete(body))
 register_route("POST", "/api/pipeline/tournament-prep", lambda self, body: self._handle_tournament_prep(body))
 register_route("POST", "/api/journal/note", lambda self, body: self._handle_create_note(body))
+register_route("POST", "/api/import-pgn", lambda self, body: self._handle_import_pgn(body))
+register_route("POST", "/api/games/export", lambda self, body: self._handle_games_export(body))
 
 # PUT
 register_regex_route(

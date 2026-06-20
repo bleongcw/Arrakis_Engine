@@ -15,7 +15,11 @@ import type { GameListItem } from "@/lib/types";
 
 interface GamesTableProps {
   games: GameListItem[];
-  compareMode?: boolean;
+  // v1.24.0: generalized selection. `selectable` shows checkboxes;
+  // `maxSelectable` caps the count (Compare passes 2; Export leaves it unset
+  // = unlimited).
+  selectable?: boolean;
+  maxSelectable?: number;
   selectedIds?: number[];
   onToggleSelect?: (id: number) => void;
 }
@@ -35,7 +39,8 @@ const STATUS_ICONS: Record<string, string> = {
 
 export function GamesTable({
   games,
-  compareMode = false,
+  selectable = false,
+  maxSelectable,
   selectedIds = [],
   onToggleSelect,
 }: GamesTableProps) {
@@ -43,13 +48,13 @@ export function GamesTable({
   const { currentPlayer } = usePlayerContext();
 
   const selectedSet = new Set(selectedIds);
-  const maxSelected = selectedIds.length >= 2;
+  const atMax = maxSelectable != null && selectedIds.length >= maxSelectable;
 
   return (
     <Table>
       <TableHeader>
         <TableRow>
-          {compareMode && (
+          {selectable && (
             <TableHead className="w-[40px] text-center">&nbsp;</TableHead>
           )}
           <TableHead className="w-[40px] hidden sm:table-cell">#</TableHead>
@@ -77,8 +82,8 @@ export function GamesTable({
                 isSelected && "bg-blue-50 dark:bg-blue-950/30"
               )}
               onClick={() => {
-                if (compareMode && onToggleSelect) {
-                  if (isSelected || !maxSelected) {
+                if (selectable && onToggleSelect) {
+                  if (isSelected || !atMax) {
                     onToggleSelect(g.id);
                   }
                 } else {
@@ -86,12 +91,12 @@ export function GamesTable({
                 }
               }}
             >
-              {compareMode && (
+              {selectable && (
                 <TableCell className="text-center">
                   <input
                     type="checkbox"
                     checked={isSelected}
-                    disabled={!isSelected && maxSelected}
+                    disabled={!isSelected && atMax}
                     onChange={() => onToggleSelect?.(g.id)}
                     onClick={(e) => e.stopPropagation()}
                     className="h-4 w-4 rounded border-gray-300 accent-blue-600"

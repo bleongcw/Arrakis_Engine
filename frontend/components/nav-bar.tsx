@@ -17,6 +17,8 @@ export type NavItem = {
 export const NAV_ITEMS: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", playerScoped: false },
   { href: "/games", label: "Games", playerScoped: true },
+  // v1.24.0: Import a PGN (paste/upload) → analyzed game.
+  { href: "/import", label: "Import", playerScoped: true },
   { href: "/patterns", label: "Patterns", playerScoped: true },
   // v1.10.0: Journal — chronological diary of LLM coaching reviews
   // (and v1.12.0+ parent-authored notes). Sits between Patterns (stats

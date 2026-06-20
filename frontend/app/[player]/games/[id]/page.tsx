@@ -11,6 +11,7 @@ import { EvalChart } from "@/components/game-detail/eval-chart";
 import { MoveQualitySummary } from "@/components/game-detail/move-quality-summary";
 import { CoachingPanels } from "@/components/game-detail/coaching-panels";
 import { CoachingButtons } from "@/components/game-detail/coaching-buttons";
+import { ExportPgnButton } from "@/components/export-pgn-button";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { GameDetail } from "@/lib/types";
@@ -72,10 +73,13 @@ function GameDetailView({
             &larr; Back to Games
           </Button>
         </div>
-        <CoachingButtons
-          gameId={game.id}
-          onCoachingComplete={(d) => onUpdate(d)}
-        />
+        <div className="flex items-center gap-3 flex-wrap">
+          <ExportPgnButton gameIds={[game.id]} />
+          <CoachingButtons
+            gameId={game.id}
+            onCoachingComplete={(d) => onUpdate(d)}
+          />
+        </div>
       </div>
 
       {/* Matchup bar */}

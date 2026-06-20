@@ -4,6 +4,30 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.24.0] - 2026-06-05
+
+### Added
+- **PGN data I/O — import and export** (`src/pgn_io.py`), the open, portable
+  data layer. Get a game into the system and back out again; the format
+  plumbing is open, the moat (OCR capture + correction) lives elsewhere.
+  - **Import:** `POST /api/import-pgn` — paste/upload a PGN; it parses, legality-
+    validates, ingests as a `pending` game, and (by default) analyzes + coaches
+    it. New **Import** nav item + `/[player]/import` page. Handles undecided
+    (`*`) results via an explicit `result` (win/loss/draw) — for in-progress or
+    unrecorded OTB scoresheets.
+  - **Export:** `POST /api/games/export` — `{ids, annotated}` → a `.pgn` file.
+    **Raw** (the stored PGN) or **annotated** (Stockfish `{[%eval]}` comments +
+    classification NAGs: $4 blunder / $2 mistake / $6 inaccuracy). Surfaced as
+    an **Export PGN** button on the game-detail page and a select-some/all +
+    **filter-aware bulk export** on the games list (the existing filter +
+    selection infra generalized — `GamesTable` gained `selectable`/
+    `maxSelectable`, replacing the compare-only cap).
+- `tests/test_pgn_io.py` (12) + a native-Import nav test.
+
+### Note
+- Generic PGN import/export is now an **open** feature. Only OCR scoresheet
+  *capture* + move correction remains reserved for the commercial layer.
+
 ## [1.22.5] - 2026-06-05
 
 ### Fixed
