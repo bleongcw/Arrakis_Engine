@@ -20,16 +20,33 @@ import type {
 const BASE = "/api";
 
 async function fetchJSON<T>(url: string): Promise<T> {
-  const res = await fetch(url);
-  if (!res.ok) {
+  // v1.22.5: the backend returns 503 ("Database is busy") while a long
+  // analysis holds the SQLite write lock. That's explicitly retryable, so a
+  // transient blip during a Run All shouldn't crash the whole page with the
+  // Next.js error overlay — retry a couple of times with a short backoff
+  // before surfacing it. Non-503 errors (real 4xx/5xx) still throw at once.
+  let lastDetail = "";
+  let lastStatus = 0;
+  let lastStatusText = "";
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const res = await fetch(url);
+    if (res.ok) return res.json();
+
     let detail = "";
     try {
-      const body = await res.text();
-      detail = ` — ${body.substring(0, 200)}`;
+      detail = ` — ${(await res.text()).substring(0, 200)}`;
     } catch {}
-    throw new Error(`API error: ${res.status} ${res.statusText}${detail}`);
+    lastDetail = detail;
+    lastStatus = res.status;
+    lastStatusText = res.statusText;
+
+    if (res.status === 503 && attempt < 2) {
+      await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
+      continue;
+    }
+    break;
   }
-  return res.json();
+  throw new Error(`API error: ${lastStatus} ${lastStatusText}${lastDetail}`);
 }
 
 export async function fetchPlayers(): Promise<Player[]> {

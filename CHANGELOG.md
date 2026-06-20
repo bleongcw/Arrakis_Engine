@@ -4,6 +4,28 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.22.5] - 2026-06-05
+
+### Fixed
+- **A transient backend hiccup during analysis crashed the whole dashboard
+  page** with the Next.js error overlay ("API error: 500 Internal Server
+  Error"). Two layers:
+  - The 500 itself was the dev proxy's response to a connection reset from the
+    single-threaded-server freeze during a heavy analyze — already fixed in
+    v1.22.3 (ThreadingHTTPServer + read-only status poll). A `serve` restart
+    is required to pick that up on a long-running instance.
+  - **Frontend hardening (defense-in-depth):** `fetchJSON` now retries the
+    backend's explicitly-retryable **503 "Database is busy"** response (up to
+    2 times, 500ms/1000ms backoff) before surfacing an error, so a momentary
+    DB-busy blip while a "Run All" analysis holds the write lock no longer
+    nukes the page. Non-503 errors still throw immediately (no masking of real
+    failures).
+
+### Tests
+- Frontend suite green at **218**; `tsc` + `next build` clean.
+
+---
+
 ## [1.22.4] - 2026-06-05
 
 ### Fixed
