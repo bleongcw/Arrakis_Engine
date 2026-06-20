@@ -176,7 +176,7 @@ Rating-based tiers (Beginner → Elementary → Intermediate → Advanced → Ex
 
 ### `scheduler.py` + `pipeline_state.py` — automation
 - `scheduler.py` runs the full pipeline (harvest → analyze → patterns → coach) on a configurable interval as a daemon thread.
-- `pipeline_state.py` enforces single-task-at-a-time across CLI, scheduler, and dashboard so two pipelines can't fight over the SQLite lock or the Stockfish process.
+- `pipeline_state.py` enforces single-task-at-a-time across CLI, scheduler, and dashboard so two pipelines can't fight over the SQLite lock or the Stockfish process. The lock is **DB-backed** (a `pipeline_lock` row with a heartbeat, reclaimed after a 15-min stale window), so it coordinates across independent *processes* sharing the DB. `get_state()` reads it with a lightweight read-only connection (v1.22.3) so the high-frequency `/api/pipeline/status` poll never re-runs migrations or contends with a running analyzer. The pipeline `cancel_event` is honoured between every step **and between games inside the analyze step** (v1.22.4), so a long Run All is actually cancellable.
 
 ### `dev_runner.py` — `serve` orchestration (v1.5.0)
 Owns the subprocess plumbing for `python main.py serve`. Used only by the
@@ -221,7 +221,7 @@ Key functions:
 Multi-opponent Hunter Mode. A `tournament` is a player-scoped, named roster (`tournaments` + `tournament_opponents` tables) — CRUD mirrors `journal.py` (ValueError → 400/404; no opponent data duplicated, the roster just references usernames). `compute_tournament_prep(tournament_id, min_shared)` aggregates the Hunter Mode profiles across the roster **cache-only** (no network, no Stockfish): **opening targets/cautions** group each opponent's weak/strong openings by `(opening, color)` and surface only those shared by ≥`tournament_min_shared` opponents ("Prep the Italian — 5 of 8 lose to it" / "Avoid the Najdorf"); **field blind spots** sum the v1.20.0 per-opponent Deep-Scan `motif_summary` objects into a field-level summary the existing `<MotifThemes>` card renders, with `scan_coverage` so partial coverage never reads as the whole field; opponents without a cached profile are `pending`. The **Prep Roster** background job (`POST /api/pipeline/tournament-prep`, single-task `pipeline_state` lock) warms every opponent's opening-profile cache (fast, no Stockfish) so the combined view fills in. Surfaced as a new Tournament tab + a Hunt "Add to tournament" bridge. CLI: `python main.py tournament-prep --id N`.
 
 ### `dashboard_server.py` — REST API
-Single-process Python HTTP server. SQLite WAL mode + 30s busy timeout; returns 503 gracefully when the analyzer is holding the lock.
+**Multi-threaded** Python `ThreadingHTTPServer` (v1.22.3 — was single-threaded, which let one lock-waiting request freeze every poll and reset the frontend's connections). Each request opens its own SQLite connection. WAL mode + 30s busy timeout; returns **503** ("database is busy") gracefully when the analyzer is holding the write lock — the frontend `fetchJSON` retries 503 with backoff (v1.22.5) so a transient blip during analysis doesn't crash the page.
 
 | Method | Endpoint | Purpose |
 |---|---|---|
@@ -343,13 +343,13 @@ The `ARRAKIS_` prefix avoids collisions with other tools that use the unprefixed
 
 ## 7. Testing
 
-**~874 tests total** — 658 backend (pytest) + 216 frontend (Vitest). Counts as of v1.21.0; see CHANGELOG for per-release deltas. Backend integration (`-m integration`, Stockfish) and live (`-m live`, LLM key) tiers are excluded by default.
+**~886 tests total** — 668 backend (pytest) + 218 frontend (Vitest). Counts as of v1.22.5; see CHANGELOG for per-release deltas. Backend integration (`-m integration`, Stockfish) and live (`-m live`, LLM key) tiers are excluded by default.
 
 ### Backend (`tests/`)
 
 | Suite | What it covers |
 |---|---|
-| Unit tests | `models`, `analyzer`, `harvester`, `coach`, `patterns`, `loss_openings` (v1.4.0), `trap_matcher` (v1.4.0), `hunter` (v1.4.1+), `report`, `tiers`, `export`, `scheduler`, `pipeline_state`, `dashboard_server`, `dev_runner` (v1.5.0) |
+| Unit tests | `models`, `analyzer`, `harvester`, `coach`, `patterns`, `motifs` (v1.14.0), `journal` (v1.12.0), `loss_openings` (v1.4.0), `trap_matcher` (v1.4.0), `hunter` (v1.4.1+ / Deep Scan v1.20.0), `tournament` (v1.21.0), `report`, `tiers`, `scheduler`, `pipeline_state`, `dashboard_server`, `dev_runner` (v1.5.0) |
 | Integration | Full pipeline E2E (analyze → coach end-to-end on a known PGN) |
 | Stockfish integration | Specific lines (Scholar's Mate, etc.) verified against engine output |
 | Live LLM | Real API calls, marked separately, ~$0.05 / run |

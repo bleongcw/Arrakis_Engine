@@ -151,7 +151,7 @@ ArrakisEngine/
 │   └── screenshots/           # Architecture diagram + UI screenshots
 ├── data/
 │   └── chess_coach.db         # SQLite database (auto-created, gitignored)
-├── tests/                     # Backend pytest suite (658 tests across 3 tiers)
+├── tests/                     # Backend pytest suite (668 tests across 3 tiers)
 └── reports/                   # Generated coach reports (gitignored)
 ```
 
@@ -274,8 +274,8 @@ harvest + report).
 
 ## Testing
 
-**~874 tests total** — 658 backend (pytest, three tiers via `pyproject.toml`
-markers) + 216 frontend (Vitest). Integration (`-m integration`, needs Stockfish)
+**~886 tests total** — 668 backend (pytest, three tiers via `pyproject.toml`
+markers) + 218 frontend (Vitest). Integration (`-m integration`, needs Stockfish)
 and live (`-m live`, needs an LLM key) tiers are excluded by default.
 
 ### Running Tests
@@ -283,7 +283,7 @@ and live (`-m live`, needs an LLM key) tiers are excluded by default.
 pytest                                  # default unit tier (~30s, no deps)
 pytest -m integration                   # Stockfish tests (requires binary)
 pytest -m live                          # LLM API tests (~$0.30)
-cd frontend && npx vitest run           # 216 frontend tests, ~3s
+cd frontend && npx vitest run           # 218 frontend tests, ~3s
 cd frontend && npx next build           # type-check
 ```
 
