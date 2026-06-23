@@ -4,6 +4,14 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.24.1] - 2026-06-05
+
+### Fixed
+- **Nav items off-screen.** v1.24.0 added an 8th nav item (Import), which pushed
+  the last entries (Tournament, Reports) past the right edge of the single-row,
+  hidden-scrollbar nav — they looked missing. The nav now **wraps** (`flex-wrap`)
+  so every item is reachable at any window width.
+
 ## [1.24.0] - 2026-06-05
 
 ### Added

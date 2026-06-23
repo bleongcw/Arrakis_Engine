@@ -36,7 +36,11 @@ export function NavBar({ extraItems = [] }: { extraItems?: NavItem[] }) {
 
   return (
     <nav className="border-b border-border bg-card">
-      <div className="max-w-7xl mx-auto px-2 sm:px-4 flex gap-0 overflow-x-auto [&::-webkit-scrollbar]:hidden">
+      {/* v1.24.1: wrap instead of single-row horizontal scroll. The nav grew
+          to 8 items (Import added v1.24.0); a hidden-scrollbar overflow row was
+          pushing the last items (Tournament, Reports) off-screen with no cue
+          they were there. Wrapping keeps every item reachable at any width. */}
+      <div className="max-w-7xl mx-auto px-2 sm:px-4 flex flex-wrap gap-y-1">
         {[...NAV_ITEMS, ...extraItems].map(({ href, label, playerScoped }) => {
           const fullHref = playerScoped && currentPlayer
             ? `/${currentPlayer}${href}`
