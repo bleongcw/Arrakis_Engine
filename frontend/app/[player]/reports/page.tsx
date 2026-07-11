@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { useParams } from "next/navigation";
 import { usePlayerContext } from "@/app/providers";
 import { fetchReport } from "@/lib/api";
@@ -9,13 +9,47 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { ReportData } from "@/lib/types";
 
-const TIME_CLASSES = [
-  { key: "rapid", label: "Rapid" },
-  { key: "daily", label: "Daily" },
-  { key: "all", label: "All" },
-] as const;
+// v1.24.2: the Reports time-class filter is DATA-DRIVEN — chips are derived
+// from the time classes actually present in the report (report.py already
+// aggregates every `time_class` in the DB), so Blitz/Bullet appear
+// automatically when the player has those games. No hardcoded list to
+// maintain; `report-view.tsx` already filters generically by class.
+const TIME_CLASS_ORDER = ["bullet", "blitz", "rapid", "daily"];
+const CLASS_LABELS: Record<string, string> = {
+  bullet: "Bullet",
+  blitz: "Blitz",
+  rapid: "Rapid",
+  daily: "Daily",
+};
 
-type TimeClassFilter = (typeof TIME_CLASSES)[number]["key"];
+export function buildTimeClassChips(report: ReportData): {
+  chips: { key: string; label: string }[];
+  defaultKey: string;
+} {
+  const present = Array.from(
+    new Set(
+      (report.time_class_stats || [])
+        .map((t) => t.time_class)
+        .filter((tc): tc is string => Boolean(tc)),
+    ),
+  ).sort((a, b) => {
+    // Canonical time-control order; unknown classes sort after, alphabetically.
+    const ra = TIME_CLASS_ORDER.indexOf(a);
+    const rb = TIME_CLASS_ORDER.indexOf(b);
+    return (ra === -1 ? 99 : ra) - (rb === -1 ? 99 : rb) || a.localeCompare(b);
+  });
+
+  const chips = present.map((k) => ({
+    key: k,
+    label: CLASS_LABELS[k] ?? k.charAt(0).toUpperCase() + k.slice(1),
+  }));
+  chips.push({ key: "all", label: "All" });
+
+  // Default to Rapid (product choice); fall back to the first class the player
+  // actually has — or "All" — so the default view is never empty.
+  const defaultKey = present.includes("rapid") ? "rapid" : present[0] ?? "all";
+  return { chips, defaultKey };
+}
 
 export default function ReportsPage() {
   const { player } = useParams<{ player: string }>();
@@ -23,7 +57,7 @@ export default function ReportsPage() {
   const [report, setReport] = useState<ReportData | null>(null);
   const [loading, setLoading] = useState(true);
   const [period, setPeriod] = useState<"weekly" | "monthly">("monthly");
-  const [timeClass, setTimeClass] = useState<TimeClassFilter>("rapid");
+  const [timeClass, setTimeClass] = useState<string>("rapid");
   const reportRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -34,6 +68,23 @@ export default function ReportsPage() {
       .catch(console.error)
       .finally(() => setLoading(false));
   }, [player, period]);
+
+  // Derive the filter chips + a sensible default from the loaded report.
+  // MUST run before the loading / no-report early returns below (hooks can't
+  // be conditional), so it tolerates a null report.
+  const { chips, defaultKey } = useMemo(
+    () =>
+      report ? buildTimeClassChips(report) : { chips: [], defaultKey: "rapid" },
+    [report],
+  );
+
+  // If the current selection isn't available in the loaded report (e.g. a
+  // rapid-less player, or a period switch that dropped the class), fall back
+  // to the default so the view is never empty.
+  useEffect(() => {
+    if (!report) return;
+    if (!chips.some((c) => c.key === timeClass)) setTimeClass(defaultKey);
+  }, [report, chips, defaultKey, timeClass]);
 
   const handleExportPDF = () => {
     window.print();
@@ -79,7 +130,7 @@ export default function ReportsPage() {
           </div>
           {/* Time class selector */}
           <div className="flex gap-1 border-l pl-4">
-            {TIME_CLASSES.map((tc) => (
+            {chips.map((tc) => (
               <Button
                 key={tc.key}
                 variant={timeClass === tc.key ? "default" : "outline"}

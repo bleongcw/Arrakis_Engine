@@ -1,6 +1,6 @@
 # Arrakis Engine Roadmap
 
-*Updated 2026-06-05 — current release v1.22.5*
+*Updated 2026-06-05 — current release v1.24.2*
 
 This is the public-facing roadmap. The full release history is in
 [CHANGELOG.md](CHANGELOG.md); architectural details are in

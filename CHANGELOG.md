@@ -4,6 +4,38 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.24.2] - 2026-06-05
+
+### Added
+- **Blitz (and any other time control) now appears in the Reports filter.** The
+  Reports time-class filter was hardcoded to Rapid / Daily / All, so blitz and
+  bullet games — which the backend has always aggregated — had no chip. The
+  filter is now **data-driven**: chips are derived from the time classes
+  actually present in the loaded report (`report.time_class_stats`), ordered
+  canonically (bullet → blitz → rapid → daily) with **All** last. A class shows
+  up only when the player has in-window games of it, so there are no empty
+  chips, and future time controls need no code change. The default stays
+  **Rapid** (falling back to the first available class — never an empty view —
+  when a player has no rapid games).
+  - Frontend-only: `report.py`, the `/api/report` endpoint, and
+    `report-view.tsx`'s filter were already time-class-agnostic; only the
+    hardcoded chip list in `reports/page.tsx` needed replacing (new exported
+    `buildTimeClassChips` helper).
+
+### Docs
+- Refreshed the test-count references (which had drifted at v1.22.5) to the
+  current **680 backend / 225 frontend** (~905 total); ROADMAP current release
+  → v1.24.2.
+
+### Tests
+- Frontend **219 → 225** (+6): `buildTimeClassChips` — Blitz surfaces when
+  present, canonical ordering + All-last, default Rapid, fallback when no rapid,
+  empty report → only All, and a capitalized label for unknown classes.
+  Verified live: the Reports page renders the data-driven chips with Rapid
+  active by default and no console errors.
+
+---
+
 ## [1.24.1] - 2026-06-05
 
 ### Fixed
