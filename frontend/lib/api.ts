@@ -508,6 +508,16 @@ export async function refreshHunterProfile(
 
 // ── PGN data I/O (v1.24.0) ───────────────────────────────
 
+export interface ImportedGameSummary {
+  game_id: number;
+  created: boolean;
+  result: string;
+  player_color: string;
+  moves: number;
+  opponent: string | null;
+  time_class: string | null;
+}
+
 export interface ImportPgnResult {
   game_id: number;
   created: boolean;
@@ -516,16 +526,25 @@ export interface ImportPgnResult {
   player_color: string;
   moves: number;
   analyze: string;
+  // v1.25.0 batch fields (competition / multi-game imports)
+  games?: ImportedGameSummary[];
+  created_count?: number;
+  existing_count?: number;
+  skipped?: string[];
 }
 
 /** Import a raw PGN for a player. `result` (win/loss/draw) is required when
- *  the PGN's own Result is undecided ("*"). */
+ *  the PGN's own Result is undecided ("*"). For over-the-board competition
+ *  games pass `platform: "competition"` (a multi-game file imports all games)
+ *  and `time_class` (the game type: classical/rapid/blitz). */
 export async function importPgn(input: {
   player: string;
   pgn: string;
   player_color?: "white" | "black";
   result?: "win" | "loss" | "draw";
   run_pipeline?: boolean;
+  platform?: "competition";
+  time_class?: "classical" | "rapid" | "blitz";
 }): Promise<ImportPgnResult> {
   const res = await fetch(`${BASE}/import-pgn`, {
     method: "POST",

@@ -4,6 +4,7 @@ import json
 import threading
 import time
 import urllib.request
+import urllib.error
 
 import pytest
 
@@ -93,6 +94,20 @@ def api_get(base_url, path):
     req = urllib.request.Request(url)
     with urllib.request.urlopen(req) as resp:
         return json.loads(resp.read().decode())
+
+
+def api_post(base_url, path, payload):
+    """Helper: POST JSON to an API endpoint. Returns (status, parsed_json)."""
+    url = base_url + path
+    data = json.dumps(payload).encode()
+    req = urllib.request.Request(
+        url, data=data, headers={"Content-Type": "application/json"}, method="POST"
+    )
+    try:
+        with urllib.request.urlopen(req) as resp:
+            return resp.status, json.loads(resp.read().decode())
+    except urllib.error.HTTPError as exc:
+        return exc.code, json.loads(exc.read().decode())
 
 
 class TestPlayersAPI:
@@ -764,3 +779,91 @@ class TestRouteRegistry:
         finally:
             ds._GET_ROUTES.pop("/api/_test-registry", None)
             ds._POST_ROUTES.pop("/api/_test-registry", None)
+
+
+# Two decided competition games (no TimeControl, no Elo, real names). The fixture
+# player's display_name is "Test", so color auto-detects: white in game 1, black
+# in game 2. run_pipeline=False keeps Stockfish out of the test.
+COMPETITION_PGN = """[Event "Club Championship"]
+[Site "Singapore"]
+[Date "2026.07.12"]
+[White "Test"]
+[Black "Rival A"]
+[Result "1-0"]
+
+1. e4 e5 2. Bc4 Nc6 3. Qh5 Nf6 4. Qxf7# 1-0
+
+[Event "Club Championship"]
+[Site "Singapore"]
+[Date "2026.07.13"]
+[White "Rival B"]
+[Black "Test"]
+[Result "1-0"]
+
+1. e4 e5 2. Bc4 Nc6 3. Qh5 Nf6 4. Qxf7# 1-0
+"""
+
+
+class TestCompetitionImport:
+    def test_import_competition_batch(self, live_server):
+        status, data = api_post(
+            live_server,
+            "/api/import-pgn",
+            {
+                "player": "test",
+                "pgn": COMPETITION_PGN,
+                "platform": "competition",
+                "time_class": "classical",
+                "run_pipeline": False,
+            },
+        )
+        assert status == 201
+        assert data["created_count"] == 2
+        assert data["existing_count"] == 0
+        assert data["skipped"] == []
+
+        by_color = {g["player_color"]: g for g in data["games"]}
+        # display_name "Test" matched White in game 1, Black in game 2.
+        assert by_color["white"]["result"] == "win"
+        assert by_color["black"]["result"] == "loss"
+        assert all(g["time_class"] == "classical" for g in data["games"])
+
+        # Games land in the list tagged platform='competition'.
+        games = api_get(live_server, "/api/games?player=test")
+        comp = [g for g in games if g["platform"] == "competition"]
+        assert len(comp) == 2
+        assert all(g["time_class"] == "classical" for g in comp)
+
+    def test_import_competition_dedups(self, live_server):
+        payload = {
+            "player": "test",
+            "pgn": COMPETITION_PGN,
+            "platform": "competition",
+            "time_class": "classical",
+            "run_pipeline": False,
+        }
+        api_post(live_server, "/api/import-pgn", payload)
+        status, data = api_post(live_server, "/api/import-pgn", payload)
+        assert status == 200
+        assert data["created_count"] == 0
+        assert data["existing_count"] == 2
+
+    def test_import_competition_skips_undecided(self, live_server):
+        pgn = COMPETITION_PGN + (
+            '\n[White "Test"]\n[Black "Rival C"]\n[Result "*"]\n\n1. d4 d5 *\n'
+        )
+        status, data = api_post(
+            live_server,
+            "/api/import-pgn",
+            {
+                "player": "test",
+                "pgn": pgn,
+                "platform": "competition",
+                "time_class": "rapid",
+                "run_pipeline": False,
+            },
+        )
+        assert status == 201
+        assert data["created_count"] == 2
+        assert len(data["skipped"]) == 1
+        assert "no decided result" in data["skipped"][0]

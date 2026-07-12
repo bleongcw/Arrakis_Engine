@@ -940,7 +940,7 @@ Arrakis_Engine/
 
 ## Running Tests
 
-**~905 tests total** — 680 backend (pytest) + 225 frontend (Vitest). Backend tests are organized into three tiers using pytest markers; integration (`-m integration`, Stockfish) and live (`-m live`, LLM key) tiers are excluded by default. Frontend tests run in a few seconds and cover the chess + chart + motif helper libraries, the `use-chess-navigation` hook, and the component suites.
+**~915 tests total** — 687 backend (pytest) + 228 frontend (Vitest). Backend tests are organized into three tiers using pytest markers; integration (`-m integration`, Stockfish) and live (`-m live`, LLM key) tiers are excluded by default. Frontend tests run in a few seconds and cover the chess + chart + motif helper libraries, the `use-chess-navigation` hook, and the component suites.
 
 ### Commands
 
@@ -965,7 +965,7 @@ cd frontend && npx next build      # type-check
 
 ### Test Coverage by Module
 
-**Unit tests** (680 backend tests — all mocked, no external dependencies):
+**Unit tests** (687 backend tests — all mocked, no external dependencies):
 
 | File | Tests | Coverage |
 |------|-------|---------|

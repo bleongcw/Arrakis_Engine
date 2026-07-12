@@ -5,7 +5,7 @@ Local Python app that pulls games from Chess.com and Lichess, runs Stockfish ana
 and uses reasoning LLMs to generate age-appropriate coaching insights with
 pattern tracking over time. Inspired by Eleanor, Evan, and Estella.
 
-Current release: **v1.18.3** (2026-05-29). See `CHANGELOG.md` for full history.
+Current release: **v1.25.0** (2026-07-12). See `CHANGELOG.md` for full history.
 
 ## Architecture
 - Python 3.11+, SQLite (WAL mode), local Stockfish on Apple Silicon
@@ -72,7 +72,8 @@ Current release: **v1.18.3** (2026-05-29). See `CHANGELOG.md` for full history.
 /dashboard                  → all players overview + pipeline control panel
 /<slug>/games               → game list for player (+ PGN export: select/filtered bulk)
 /<slug>/games/<id>          → game detail (board, eval, coaching panels, motif badges, Export PGN)
-/<slug>/import              → import a PGN (paste/upload) → analyzed game (v1.24.0)
+/<slug>/import              → import a PGN (paste/upload) → analyzed game (v1.24.0);
+                              competition mode (v1.25.0) tags OTB tournament games
 /<slug>/games/compare       → side-by-side game comparison
 /<slug>/patterns            → pattern visualizations + Self-Analysis + Tactical Themes
 /<slug>/journal             → chronological coaching diary (reviews + parent notes)
@@ -257,7 +258,8 @@ All `?player=X` params + path slugs resolve by **slug** (v1.16.4). Backend helpe
 - `/api/pipeline/{harvest,analyze,patterns,coach,run-all,cancel}` — pipeline triggers
 - `/api/schedule/{toggle,interval}` — scheduler control
 - `/api/hunt/refresh` — force opponent profile re-fetch (v1.4.1+)
-- `/api/import-pgn` — (v1.24.0) import a raw PGN → analyzed game
+- `/api/import-pgn` — (v1.24.0) import a raw PGN → analyzed game; (v1.25.0)
+  `platform="competition"` + `time_class` imports OTB tournament games (multi-game)
 - `/api/games/export` — (v1.24.0) `{ids, annotated}` → PGN file (raw / annotated)
 
 ### PUT / DELETE
@@ -277,8 +279,8 @@ harvest + report).
 
 ## Testing
 
-**~905 tests total** — 680 backend (pytest, three tiers via `pyproject.toml`
-markers) + 225 frontend (Vitest). Integration (`-m integration`, needs Stockfish)
+**~915 tests total** — 687 backend (pytest, three tiers via `pyproject.toml`
+markers) + 228 frontend (Vitest). Integration (`-m integration`, needs Stockfish)
 and live (`-m live`, needs an LLM key) tiers are excluded by default.
 
 ### Running Tests
@@ -286,7 +288,7 @@ and live (`-m live`, needs an LLM key) tiers are excluded by default.
 pytest                                  # default unit tier (~30s, no deps)
 pytest -m integration                   # Stockfish tests (requires binary)
 pytest -m live                          # LLM API tests (~$0.30)
-cd frontend && npx vitest run           # 225 frontend tests, ~3s
+cd frontend && npx vitest run           # 228 frontend tests, ~3s
 cd frontend && npx next build           # type-check
 ```
 

@@ -1902,13 +1902,19 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
         })
 
     def _handle_import_pgn(self, body):
-        """Import a raw PGN as a game, then optionally analyze + coach it.
+        """Import a raw PGN as a game (or many), then optionally analyze + coach.
 
         v1.24.0: the open PGN data-I/O layer. Body: {player: <slug>, pgn,
         player_color?, result?, provider?, run_pipeline?: bool (default True)}.
         `result` (win/loss/draw) is required when the PGN's Result is "*".
+
+        v1.25.0 (competition): pass platform="competition" to import an
+        over-the-board tournament PGN — possibly a multi-game file. Each game's
+        color is auto-detected from the player's own names, `time_class` is
+        forced to the chosen game type via `time_class`, and undecided games are
+        skipped (reported) rather than failing the batch.
         """
-        from src.pgn_io import parse_pgn, ingest_game, PgnParseError
+        from src.pgn_io import parse_pgn, parse_pgn_multi, ingest_game, PgnParseError
 
         slug = (body.get("player") or "").strip()
         pgn = body.get("pgn") or ""
@@ -1925,43 +1931,101 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                 self._send_json({"error": f"No player with slug '{slug}'."}, 404)
                 return
             prow = conn.execute(
-                "SELECT username, lichess_username FROM players WHERE id = ?",
+                "SELECT username, lichess_username, display_name "
+                "FROM players WHERE id = ?",
                 (player_id,),
             ).fetchone()
-            usernames = [u for u in (prow["username"], prow["lichess_username"]) if u]
-            try:
-                parsed = parse_pgn(
-                    pgn,
-                    player_color=body.get("player_color"),
-                    known_usernames=usernames,
-                    result=body.get("result"),
+            # Include the display name so an over-the-board PGN (which names the
+            # real player, not a chess.com handle) still auto-detects color.
+            usernames = [
+                u
+                for u in (
+                    prow["username"],
+                    prow["lichess_username"],
+                    prow["display_name"],
                 )
+                if u
+            ]
+            platform = (body.get("platform") or "import").strip() or "import"
+            time_class = (body.get("time_class") or "").strip() or None
+            try:
+                if platform == "competition":
+                    # A tournament export may hold many games; parse them all,
+                    # forcing the chosen game type as time_class.
+                    parsed_list, skipped = parse_pgn_multi(
+                        pgn,
+                        known_usernames=usernames,
+                        result=body.get("result"),
+                        time_class_override=time_class,
+                    )
+                    if not parsed_list:
+                        self._send_json(
+                            {"error": "No importable games. " + " ".join(skipped)},
+                            422,
+                        )
+                        return
+                else:
+                    parsed_list = [
+                        parse_pgn(
+                            pgn,
+                            player_color=body.get("player_color"),
+                            known_usernames=usernames,
+                            result=body.get("result"),
+                            time_class_override=time_class,
+                        )
+                    ]
+                    skipped = []
             except PgnParseError as exc:
                 self._send_json({"error": str(exc)}, 422)
                 return
-            result = ingest_game(conn, player_id, parsed)
+            ingested = [
+                (pg, ingest_game(conn, player_id, pg, platform=platform))
+                for pg in parsed_list
+            ]
             conn.commit()
         finally:
             conn.close()
 
-        if result.created and body.get("run_pipeline", True):
+        created_count = sum(1 for _, r in ingested if r.created)
+        existing_count = len(ingested) - created_count
+
+        if created_count and body.get("run_pipeline", True):
             self._spawn_import_pipeline(body.get("provider"))
             analyze = "queued"
         else:
             analyze = "skipped"
 
+        games = [
+            {
+                "game_id": r.game_id,
+                "created": r.created,
+                "result": pg.result,
+                "player_color": pg.player_color,
+                "moves": pg.move_count,
+                "opponent": pg.opponent_username,
+                "time_class": pg.time_class,
+            }
+            for pg, r in ingested
+        ]
+        # Legacy top-level keys mirror the first created game (else the first),
+        # so the single-import UI keeps working unchanged.
+        lead = next((g for g in games if g["created"]), games[0])
         self._send_json(
             {
-                "game_id": result.game_id,
-                "created": result.created,
-                "status": "pending" if result.created else "exists",
+                "game_id": lead["game_id"],
+                "created": lead["created"],
+                "status": "pending" if created_count else "exists",
                 "player": slug,
-                "result": parsed.result,
-                "player_color": parsed.player_color,
-                "moves": parsed.move_count,
+                "result": lead["result"],
+                "player_color": lead["player_color"],
+                "moves": lead["moves"],
                 "analyze": analyze,
+                "games": games,
+                "created_count": created_count,
+                "existing_count": existing_count,
+                "skipped": skipped,
             },
-            201 if result.created else 200,
+            201 if created_count else 200,
         )
 
     def _spawn_import_pipeline(self, provider):

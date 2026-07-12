@@ -42,7 +42,7 @@ export interface GameListItem {
   date_played: string | null;
   analysis_status: "pending" | "analyzing" | "complete" | "error";
   coaching_status: "pending" | "complete" | "error";
-  platform: "chess.com" | "lichess";
+  platform: "chess.com" | "lichess" | "competition";
   username: string;
   display_name: string | null;
   tier: string;

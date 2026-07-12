@@ -80,6 +80,7 @@ export function GamesFilters({ games, filters, onFilterChange }: GamesFiltersPro
           <SelectItem value="all">All Platforms</SelectItem>
           <SelectItem value="chess.com">{"\u265C"} Chess.com</SelectItem>
           <SelectItem value="lichess">{"\u265E"} Lichess</SelectItem>
+          <SelectItem value="competition">{"\uD83C\uDFC6"} Competition</SelectItem>
         </SelectContent>
       </Select>
     </div>

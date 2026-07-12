@@ -11,6 +11,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
+import { platformMeta } from "@/lib/platforms";
 import type { GameListItem } from "@/lib/types";
 
 interface GamesTableProps {
@@ -107,8 +108,8 @@ export function GamesTable({
                 {idx + 1}
               </TableCell>
               <TableCell className="text-sm">{g.date_played || "\u2014"}</TableCell>
-              <TableCell className="text-center hidden md:table-cell" title={g.platform === "lichess" ? "Lichess" : "Chess.com"}>
-                {g.platform === "lichess" ? "\u265E" : "\u265C"}
+              <TableCell className="text-center hidden md:table-cell" title={platformMeta(g.platform).label}>
+                {platformMeta(g.platform).icon}
               </TableCell>
               <TableCell className="text-center hidden sm:table-cell">
                 {g.player_color === "white" ? "\u2654" : "\u265A"}

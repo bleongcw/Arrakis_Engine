@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { fetchGameDetail } from "@/lib/api";
+import { platformMeta } from "@/lib/platforms";
 import { useChessNavigation } from "@/hooks/use-chess-navigation";
 import { ChessBoard } from "@/components/game-detail/chess-board";
 import { MoveControls } from "@/components/game-detail/move-controls";
@@ -102,7 +103,9 @@ function GameDetailView({
           </div>
           <div className="text-center text-xs text-muted-foreground mt-1">
             {game.time_class || "?"} &middot; {game.date_played || "?"}
-            {game.platform && <> &middot; {game.platform === "lichess" ? "\u265E Lichess" : "\u265C Chess.com"}</>}
+            {game.platform && (
+              <> &middot; {platformMeta(game.platform).icon} {platformMeta(game.platform).label}</>
+            )}
           </div>
         </CardContent>
       </Card>

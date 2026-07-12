@@ -4,6 +4,49 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.25.0] - 2026-07-12
+
+### Added
+- **Competition games — import over-the-board tournament PGNs.** Games played
+  in person (e.g. *Checkmate365 Classical*, ARC 380) exist only as a PGN, never
+  on chess.com / lichess. The Import page now has an **"Over-the-board /
+  competition game"** mode:
+  - **Tagged as a distinct source.** Competition games get `platform="competition"`
+    and show a 🏆 badge in the games list and game detail, and a **Competition**
+    option in the Games platform filter (was a hardcoded chess.com/lichess binary
+    that mislabeled everything else as chess.com).
+  - **Game type sets the time control.** An OTB PGN carries no machine
+    `TimeControl`, so you pick the type — **Classical / Rapid / Blitz** — which
+    sets `time_class` (default Classical). The game then appears under its
+    time-class chip in Games and Reports (the v1.24.2 data-driven filter).
+  - **Color mapped to the in-system player.** The PGN names the real player
+    ("Evan Leong"), not a chess.com handle, so color is auto-detected by matching
+    the White/Black header against the player's own display name — no manual
+    "played as" needed, even across a batch.
+  - **File upload + multi-game.** Upload a `.pgn` file (or paste). A multi-game
+    tournament file imports **every game at once**; an undecided game (`Result
+    "*"`) is reported as skipped rather than failing the batch. Each game runs
+    through the same Stockfish → coaching pipeline as an online game.
+  - Backend: new `parse_pgn_multi` + `time_class_override` in `src/pgn_io.py`;
+    `/api/import-pgn` accepts `platform` + `time_class` and returns a batch
+    summary (`created_count` / `existing_count` / `skipped`) while keeping its
+    single-game keys. **No schema change** — reuses existing `platform`,
+    `time_class`, `opponent_username`, `date_played` columns. New frontend
+    `lib/platforms.ts` centralizes the per-source icon/label.
+
+### Docs
+- Refreshed the test-count references to **687 backend / 228 frontend** (~915
+  total); current release → v1.25.0.
+
+### Tests
+- Backend **680 → 687** (+7): `parse_pgn_multi` split + skip-undecided,
+  `time_class_override`, the real OTB PGN (color-by-name → loss, classical), and
+  competition-import API tests (platform stored, display-name color detect, batch
+  counts, dedup, skipped).
+- Frontend **225 → 228** (+3): `platformMeta` — Competition icon/label + fallback.
+
+---
+
 ## [1.24.2] - 2026-06-05
 
 ### Added

@@ -122,6 +122,7 @@ def parse_pgn(
     player_color: str | None = None,
     known_usernames: list[str] | None = None,
     result: str | None = None,
+    time_class_override: str | None = None,
 ) -> ParsedGame:
     """Parse and legally validate a single-game PGN.
 
@@ -130,14 +131,18 @@ def parse_pgn(
         player_color: 'white'/'black' if the caller knows which side the
             player had. If None, inferred by matching `known_usernames`
             against the White/Black headers, defaulting to 'white'.
-        known_usernames: the player's chess.com / lichess handles, used to
-            infer color when not given explicitly.
+        known_usernames: the player's chess.com / lichess handles (and, for
+            over-the-board games, display name), used to infer color when not
+            given explicitly.
         result: explicit player-perspective result ('win'/'loss'/'draw'),
             REQUIRED when the PGN's own Result header is undecided ("*") —
             e.g. an in-progress or unrecorded OTB scoresheet. The `games`
             schema only allows win/loss/draw, so an undecided game can't be
             stored without the caller naming the outcome. When the header IS
             decided, an override here takes precedence.
+        time_class_override: force the stored `time_class` (e.g. 'classical'
+            for a competition game whose PGN carries no machine TimeControl).
+            When set it wins over the derived class.
 
     Raises PgnParseError on empty input, unparseable PGN, no moves, an illegal
     move, or an undecided result with no `result` override.
@@ -149,6 +154,30 @@ def parse_pgn(
     if game is None:
         raise PgnParseError("Could not parse PGN — no game found.")
 
+    return _parsed_from_game(
+        game,
+        pgn_text,
+        player_color=player_color,
+        known_usernames=known_usernames,
+        result=result,
+        time_class_override=time_class_override,
+    )
+
+
+def _parsed_from_game(
+    game: chess.pgn.Game,
+    pgn_text: str,
+    player_color: str | None = None,
+    known_usernames: list[str] | None = None,
+    result: str | None = None,
+    time_class_override: str | None = None,
+) -> ParsedGame:
+    """Build a ParsedGame from an already-read game node.
+
+    Shared by parse_pgn (single game) and parse_pgn_multi (each game in a
+    tournament file). `pgn_text` is the single-game PGN this node came from —
+    stored verbatim and hashed for the dedup `game_url`.
+    """
     # python-chess does NOT raise on an illegal/malformed move — it logs the
     # move, drops it from the mainline, and records it in game.errors. Treat
     # any such error as a hard parse failure so we never ingest a truncated game.
@@ -222,6 +251,8 @@ def parse_pgn(
     if time_control in {"-", "?"}:
         time_control = None
 
+    time_class = time_class_override or _classify_time_control(time_control)
+
     return ParsedGame(
         pgn=pgn_text.strip(),
         game_url=_synthesize_url(pgn_text, headers),
@@ -231,12 +262,72 @@ def parse_pgn(
         opponent_rating=opponent_rating,
         opponent_username=opponent_username,
         time_control=time_control,
-        time_class=_classify_time_control(time_control),
+        time_class=time_class,
         date_played=_normalize_date(headers),
         move_count=move_count,
         white=white,
         black=black,
     )
+
+
+def _game_label(game: chess.pgn.Game, index: int) -> str:
+    """Human label for a game in a batch, for skip/error reporting."""
+    white = game.headers.get("White", "?")
+    black = game.headers.get("Black", "?")
+    return f"Game {index} ({white} vs {black})"
+
+
+def parse_pgn_multi(
+    pgn_text: str,
+    known_usernames: list[str] | None = None,
+    result: str | None = None,
+    time_class_override: str | None = None,
+) -> tuple[list[ParsedGame], list[str]]:
+    """Parse a PGN that may hold MANY games (a tournament export).
+
+    Reads each game from one stream and re-emits it as its own single-game PGN
+    (so every stored `pgn` and dedup `game_url` hash is that game's own), then
+    parses it via the shared builder. Player color is auto-detected per game
+    from `known_usernames` (which for OTB should include the player's display
+    name). A game that can't be parsed — e.g. an undecided Result "*" with no
+    override — is recorded in `skipped` rather than failing the whole batch.
+
+    Returns (parsed_games, skipped_reasons). Raises only when the input is
+    empty or contains no games at all.
+    """
+    if not pgn_text or not pgn_text.strip():
+        raise PgnParseError("Empty PGN.")
+
+    stream = io.StringIO(pgn_text)
+    parsed: list[ParsedGame] = []
+    skipped: list[str] = []
+    index = 0
+    while True:
+        game = chess.pgn.read_game(stream)
+        if game is None:
+            break
+        index += 1
+        # Re-emit this single game as standalone PGN for storage + hashing.
+        single_pgn = game.accept(
+            chess.pgn.StringExporter(headers=True, variations=True, comments=True)
+        )
+        try:
+            parsed.append(
+                _parsed_from_game(
+                    game,
+                    single_pgn,
+                    player_color=None,
+                    known_usernames=known_usernames,
+                    result=result,
+                    time_class_override=time_class_override,
+                )
+            )
+        except PgnParseError as exc:
+            skipped.append(f"{_game_label(game, index)}: {exc}")
+
+    if not parsed and not skipped:
+        raise PgnParseError("Could not parse PGN — no games found.")
+    return parsed, skipped
 
 
 def ingest_game(
