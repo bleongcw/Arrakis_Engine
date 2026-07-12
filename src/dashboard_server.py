@@ -1438,6 +1438,96 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             }
         )
 
+    _VALID_PLATFORMS = {"chess.com", "lichess", "competition", "import"}
+    _VALID_TIME_CLASSES = {"bullet", "blitz", "rapid", "classical", "daily"}
+
+    def _handle_update_game_classification(self, body, game_id):
+        """v1.26.2: reclassify a game — set its `platform` (category) and/or
+        `time_class` (game type). Body: {platform?, time_class?}.
+
+        Setting `platform='competition'` also strips the private Event/Site
+        headers (competition name + venue) from the stored PGN, so a game
+        imported through the generic path and later marked as a competition
+        gets the same privacy treatment as a native competition import.
+        """
+        import io as _io
+        import sqlite3
+        import chess.pgn
+        from src.pgn_io import strip_private_headers, _synthesize_url
+
+        fields = {}
+        if "platform" in body:
+            pf = (body.get("platform") or "").strip()
+            if pf not in self._VALID_PLATFORMS:
+                self._send_json({"error": f"Invalid platform '{pf}'."}, 400)
+                return
+            fields["platform"] = pf
+        if "time_class" in body:
+            tc = body.get("time_class")
+            if tc in (None, ""):
+                fields["time_class"] = None
+            else:
+                tc = str(tc).strip().lower()
+                if tc not in self._VALID_TIME_CLASSES:
+                    self._send_json({"error": f"Invalid time_class '{tc}'."}, 400)
+                    return
+                fields["time_class"] = tc
+
+        if not fields:
+            self._send_json({"error": "No classification fields to update."}, 400)
+            return
+
+        conn = self._get_conn()
+        try:
+            row = conn.execute(
+                "SELECT pgn FROM games WHERE id = ?", (game_id,)
+            ).fetchone()
+            if row is None:
+                self._send_json({"error": "Game not found"}, 404)
+                return
+
+            # Becoming a competition game → strip name/venue from the stored PGN
+            # (and re-hash game_url) so it matches a native competition import.
+            if fields.get("platform") == "competition" and row["pgn"]:
+                game = chess.pgn.read_game(_io.StringIO(row["pgn"]))
+                if game is not None:
+                    strip_private_headers(game)
+                    single = game.accept(
+                        chess.pgn.StringExporter(
+                            headers=True, variations=True, comments=True
+                        )
+                    )
+                    headers = {k: v for k, v in game.headers.items()}
+                    fields["pgn"] = single.strip()
+                    fields["game_url"] = _synthesize_url(single, headers)
+
+            set_clause = ", ".join(f"{k} = ?" for k in fields)
+            try:
+                conn.execute(
+                    f"UPDATE games SET {set_clause} WHERE id = ?",
+                    (*fields.values(), game_id),
+                )
+                conn.commit()
+            except sqlite3.IntegrityError:
+                self._send_json(
+                    {"error": "That game already exists after stripping headers."},
+                    409,
+                )
+                return
+            updated = conn.execute(
+                "SELECT platform, time_class FROM games WHERE id = ?", (game_id,)
+            ).fetchone()
+        finally:
+            conn.close()
+
+        self._send_json(
+            {
+                "game_id": game_id,
+                "platform": updated["platform"],
+                "time_class": updated["time_class"],
+            }
+        )
+
     def _api_patterns(self, params):
         conn = self._get_conn()
         try:
@@ -2217,6 +2307,10 @@ register_regex_route(
 register_regex_route(
     "PUT", r"^/api/games/(\d+)/ratings$",
     lambda self, body, gid: self._handle_update_game_ratings(body, int(gid)),
+)
+register_regex_route(
+    "PUT", r"^/api/games/(\d+)/classification$",
+    lambda self, body, gid: self._handle_update_game_classification(body, int(gid)),
 )
 register_route("GET", "/api/patterns", lambda self, params: self._api_patterns(params))
 register_route("GET", "/api/report", lambda self, params: self._api_report(params))

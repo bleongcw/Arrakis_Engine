@@ -83,6 +83,22 @@ export async function updateGameRatings(
   return data;
 }
 
+/** Reclassify a game's category/type (v1.26.2). Setting platform="competition"
+ *  also strips the competition name/venue from the stored PGN (privacy). */
+export async function updateGameClassification(
+  gameId: number,
+  input: { platform?: string; time_class?: string | null }
+): Promise<{ game_id: number; platform: string; time_class: string | null }> {
+  const res = await fetch(`${BASE}/games/${gameId}/classification`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `Update failed: ${res.status}`);
+  return data;
+}
+
 export async function fetchPatterns(player: string): Promise<{
   stats: PatternStats;
   trend_summary?: string;

@@ -974,3 +974,55 @@ class TestPlayerFideRatings:
         assert p["fide_rating_classical"] == 1500
         assert p["fide_rating_rapid"] == 1480
         assert p["fide_rating_blitz"] == 1470
+
+
+class TestGameClassification:
+    """v1.26.2: reclassify a game's platform/time_class; competition strips
+    the private Event/Site headers from the stored PGN."""
+
+    OTB = (
+        '[Event "Secret Open"]\n[Site "Secret Venue"]\n[Date "2026.07.12"]\n'
+        '[White "Evan Leong"]\n[Black "Rival"]\n[Result "0-1"]\n\n'
+        '1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 0-1\n'
+    )
+
+    def _import_generic(self, live_server):
+        # Generic import (platform defaults to "import"), no time_class.
+        api_post(
+            live_server, "/api/import-pgn",
+            {"player": "test", "pgn": self.OTB, "player_color": "white",
+             "run_pipeline": False},
+        )
+        return api_get(live_server, "/api/games?player=test")[0]["id"]
+
+    def test_reclassify_to_competition_sets_fields_and_strips(self, live_server):
+        gid = self._import_generic(live_server)
+        status, data = api_put(
+            live_server, f"/api/games/{gid}/classification",
+            {"platform": "competition", "time_class": "classical"},
+        )
+        assert status == 200
+        assert data["platform"] == "competition"
+        assert data["time_class"] == "classical"
+        # The stored PGN must no longer carry the competition name / venue.
+        detail = api_get(live_server, f"/api/games/{gid}")
+        pgn = detail["game"]["pgn"]
+        assert "Secret Open" not in pgn and "Secret Venue" not in pgn
+        assert "Event" not in pgn and "Site" not in pgn
+        assert "e4" in pgn  # moves kept
+
+    def test_rejects_bad_platform_and_time_class(self, live_server):
+        gid = self._import_generic(live_server)
+        s1, _ = api_put(live_server, f"/api/games/{gid}/classification",
+                        {"platform": "bogus"})
+        assert s1 == 400
+        s2, _ = api_put(live_server, f"/api/games/{gid}/classification",
+                        {"time_class": "hyperbullet"})
+        assert s2 == 400
+
+    def test_missing_game_is_404(self, live_server):
+        status, _ = api_put(
+            live_server, "/api/games/999999/classification",
+            {"platform": "competition"},
+        )
+        assert status == 404

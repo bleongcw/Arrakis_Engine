@@ -4,6 +4,28 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.26.2] - 2026-07-12
+
+### Added
+- **Reclassify a game's category & type from the game detail page.** A new
+  **Edit type** control (next to Edit ratings) lets you set a game's **Category**
+  (Chess.com / Lichess / **Competition**) and **game type** (Classical / Rapid /
+  Blitz / Bullet / Daily). This is for OTB games imported through the generic
+  Import path (which land as a plain import with no time class) — mark them as a
+  Competition + Classical without re-uploading.
+- **Reclassifying to Competition also applies the privacy strip.** Setting a
+  game's category to Competition removes the `Event`/`Site` (name + venue)
+  headers from the stored PGN and re-hashes it — the same treatment a native
+  competition import gets (v1.26.1). Backed by `PUT /api/games/{id}/classification`
+  (validates platform + time_class, 404 for a missing game).
+
+### Tests
+- Backend **695 → 698** (+3): reclassify-to-competition sets platform/time_class
+  and strips the name/venue from the stored PGN; invalid platform/time_class are
+  rejected; missing game is 404.
+
+---
+
 ## [1.26.1] - 2026-07-12
 
 ### Changed (privacy)

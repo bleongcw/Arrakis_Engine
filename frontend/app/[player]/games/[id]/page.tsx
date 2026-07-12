@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { fetchGameDetail, updateGameRatings } from "@/lib/api";
+import { fetchGameDetail, updateGameRatings, updateGameClassification } from "@/lib/api";
 import { platformMeta } from "@/lib/platforms";
 import { useChessNavigation } from "@/hooks/use-chess-navigation";
 import { ChessBoard } from "@/components/game-detail/chess-board";
@@ -108,6 +108,47 @@ function GameDetailView({
     }
   }
 
+  // Inline classification editor (v1.26.2): reclassify a game's category
+  // (platform) and game type (time_class) — e.g. an OTB game imported through
+  // the generic path can be marked as a Competition (which also strips the
+  // competition name/venue from the stored PGN).
+  const [editingType, setEditingType] = useState(false);
+  const [platformInput, setPlatformInput] = useState("");
+  const [timeClassInput, setTimeClassInput] = useState("");
+  const [savingType, setSavingType] = useState(false);
+  const [typeError, setTypeError] = useState<string | null>(null);
+
+  function openTypeEditor() {
+    setPlatformInput(game.platform || "chess.com");
+    setTimeClassInput(game.time_class ?? "");
+    setTypeError(null);
+    setEditingType(true);
+  }
+
+  async function saveType() {
+    setSavingType(true);
+    setTypeError(null);
+    try {
+      const data = await updateGameClassification(game.id, {
+        platform: platformInput,
+        time_class: timeClassInput || null,
+      });
+      onUpdate({
+        ...detail,
+        game: {
+          ...game,
+          platform: data.platform as typeof game.platform,
+          time_class: data.time_class,
+        },
+      });
+      setEditingType(false);
+    } catch (e) {
+      setTypeError(e instanceof Error ? e.message : "Save failed.");
+    } finally {
+      setSavingType(false);
+    }
+  }
+
   return (
     <div>
       {/* Header */}
@@ -172,6 +213,48 @@ function GameDetailView({
               <> &middot; {platformMeta(game.platform).icon} {platformMeta(game.platform).label}</>
             )}
           </div>
+          {editingType && (
+            <div className="flex flex-wrap items-center justify-center gap-2 mt-2">
+              <label className="text-xs flex items-center gap-1">
+                Category:
+                <select
+                  value={platformInput}
+                  onChange={(e) => setPlatformInput(e.target.value)}
+                  className="px-2 py-1 rounded border text-xs bg-background"
+                >
+                  <option value="chess.com">Chess.com</option>
+                  <option value="lichess">Lichess</option>
+                  <option value="competition">Competition</option>
+                </select>
+              </label>
+              <label className="text-xs flex items-center gap-1">
+                Type:
+                <select
+                  value={timeClassInput}
+                  onChange={(e) => setTimeClassInput(e.target.value)}
+                  className="px-2 py-1 rounded border text-xs bg-background"
+                >
+                  <option value="">unset</option>
+                  <option value="classical">Classical</option>
+                  <option value="rapid">Rapid</option>
+                  <option value="blitz">Blitz</option>
+                  <option value="bullet">Bullet</option>
+                  <option value="daily">Daily</option>
+                </select>
+              </label>
+              <Button size="sm" variant="outline" onClick={saveType} disabled={savingType}>
+                {savingType ? "Saving\u2026" : "Save"}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setEditingType(false)}
+                disabled={savingType}
+              >
+                Cancel
+              </Button>
+            </div>
+          )}
           <div className="flex items-center justify-center gap-2 mt-2">
             {editingRatings ? (
               <>
@@ -187,19 +270,32 @@ function GameDetailView({
                   Cancel
                 </Button>
               </>
-            ) : (
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-6 text-xs text-muted-foreground"
-                onClick={openRatingsEditor}
-              >
-                Edit ratings
-              </Button>
-            )}
+            ) : !editingType ? (
+              <>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-6 text-xs text-muted-foreground"
+                  onClick={openRatingsEditor}
+                >
+                  Edit ratings
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-6 text-xs text-muted-foreground"
+                  onClick={openTypeEditor}
+                >
+                  Edit type
+                </Button>
+              </>
+            ) : null}
           </div>
           {ratingsError && (
             <div className="text-center text-xs text-red-500 mt-1">{ratingsError}</div>
+          )}
+          {typeError && (
+            <div className="text-center text-xs text-red-500 mt-1">{typeError}</div>
           )}
         </CardContent>
       </Card>
