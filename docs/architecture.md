@@ -343,7 +343,7 @@ The `ARRAKIS_` prefix avoids collisions with other tools that use the unprefixed
 
 ## 7. Testing
 
-**~915 tests total** — 687 backend (pytest) + 228 frontend (Vitest). Counts as of v1.25.0; see CHANGELOG for per-release deltas. Backend integration (`-m integration`, Stockfish) and live (`-m live`, LLM key) tiers are excluded by default.
+**~919 tests total** — 691 backend (pytest) + 228 frontend (Vitest). Counts as of v1.25.1; see CHANGELOG for per-release deltas. Backend integration (`-m integration`, Stockfish) and live (`-m live`, LLM key) tiers are excluded by default.
 
 ### Backend (`tests/`)
 

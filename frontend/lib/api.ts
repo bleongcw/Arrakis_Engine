@@ -62,6 +62,27 @@ export async function fetchGameDetail(id: number): Promise<GameDetail> {
   return fetchJSON<GameDetail>(`${BASE}/games/${id}`);
 }
 
+/** Set a game's player / opponent rating (v1.25.1). Over-the-board PGNs carry
+ *  no Elo, so ratings are entered by hand. A number sets, `null` clears
+ *  (unrated), an omitted field is left unchanged. */
+export async function updateGameRatings(
+  gameId: number,
+  ratings: { player_rating?: number | null; opponent_rating?: number | null }
+): Promise<{
+  game_id: number;
+  player_rating: number | null;
+  opponent_rating: number | null;
+}> {
+  const res = await fetch(`${BASE}/games/${gameId}/ratings`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(ratings),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `Update failed: ${res.status}`);
+  return data;
+}
+
 export async function fetchPatterns(player: string): Promise<{
   stats: PatternStats;
   trend_summary?: string;

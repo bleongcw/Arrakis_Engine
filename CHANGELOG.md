@@ -4,6 +4,23 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.25.1] - 2026-07-12
+
+### Added
+- **Editable ratings on the game detail page.** Over-the-board competition PGNs
+  carry no `WhiteElo`/`BlackElo`, so imported games showed both players as `(?)`.
+  The matchup bar now has an **Edit ratings** control: click it to reveal inline
+  inputs for each player, enter the FIDE (or any) ratings, and Save. Leaving a
+  field blank stores it as *unrated* (NULL). Backed by a new
+  `PUT /api/games/{id}/ratings` endpoint (validates 0–4000 or null, partial
+  updates leave the other field untouched).
+
+### Tests
+- Backend **687 → 691** (+4): set/clear ratings, partial update, out-of-range
+  rejection, and 404 for a missing game.
+
+---
+
 ## [1.25.0] - 2026-07-12
 
 ### Added

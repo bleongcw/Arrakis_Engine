@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { fetchGameDetail } from "@/lib/api";
+import { fetchGameDetail, updateGameRatings } from "@/lib/api";
 import { platformMeta } from "@/lib/platforms";
 import { useChessNavigation } from "@/hooks/use-chess-navigation";
 import { ChessBoard } from "@/components/game-detail/chess-board";
@@ -65,6 +65,49 @@ function GameDetailView({
   const whiteRating = isWhite ? game.player_rating : game.opponent_rating;
   const blackRating = isWhite ? game.opponent_rating : game.player_rating;
 
+  // Inline ratings editor (v1.25.1): OTB PGNs carry no Elo, so ratings are
+  // entered by hand. Inputs are positional (white/black); mapped back to
+  // player/opponent by color on save.
+  const [editingRatings, setEditingRatings] = useState(false);
+  const [whiteInput, setWhiteInput] = useState("");
+  const [blackInput, setBlackInput] = useState("");
+  const [savingRatings, setSavingRatings] = useState(false);
+  const [ratingsError, setRatingsError] = useState<string | null>(null);
+
+  function openRatingsEditor() {
+    setWhiteInput(whiteRating != null ? String(whiteRating) : "");
+    setBlackInput(blackRating != null ? String(blackRating) : "");
+    setRatingsError(null);
+    setEditingRatings(true);
+  }
+
+  async function saveRatings() {
+    setSavingRatings(true);
+    setRatingsError(null);
+    try {
+      const toNum = (s: string) => (s.trim() === "" ? null : Number(s));
+      const w = toNum(whiteInput);
+      const b = toNum(blackInput);
+      const data = await updateGameRatings(game.id, {
+        player_rating: isWhite ? w : b,
+        opponent_rating: isWhite ? b : w,
+      });
+      onUpdate({
+        ...detail,
+        game: {
+          ...game,
+          player_rating: data.player_rating,
+          opponent_rating: data.opponent_rating,
+        },
+      });
+      setEditingRatings(false);
+    } catch (e) {
+      setRatingsError(e instanceof Error ? e.message : "Save failed.");
+    } finally {
+      setSavingRatings(false);
+    }
+  }
+
   return (
     <div>
       {/* Header */}
@@ -90,7 +133,18 @@ function GameDetailView({
             <div className="flex items-center gap-2">
               <span className="text-lg">{"\u2654"}</span>
               <span className="font-semibold">{whiteName}</span>
-              <span className="text-muted-foreground">({whiteRating || "?"})</span>
+              {editingRatings ? (
+                <input
+                  type="number"
+                  value={whiteInput}
+                  onChange={(e) => setWhiteInput(e.target.value)}
+                  placeholder="unrated"
+                  aria-label={`${whiteName} rating`}
+                  className="w-24 px-1.5 py-0.5 rounded border text-sm bg-background"
+                />
+              ) : (
+                <span className="text-muted-foreground">({whiteRating || "?"})</span>
+              )}
             </div>
             <span className={`text-xl font-bold ${resultColors[game.result]}`}>
               {score}
@@ -98,7 +152,18 @@ function GameDetailView({
             <div className="flex items-center gap-2">
               <span className="text-lg">{"\u265A"}</span>
               <span className="font-semibold">{blackName}</span>
-              <span className="text-muted-foreground">({blackRating || "?"})</span>
+              {editingRatings ? (
+                <input
+                  type="number"
+                  value={blackInput}
+                  onChange={(e) => setBlackInput(e.target.value)}
+                  placeholder="unrated"
+                  aria-label={`${blackName} rating`}
+                  className="w-24 px-1.5 py-0.5 rounded border text-sm bg-background"
+                />
+              ) : (
+                <span className="text-muted-foreground">({blackRating || "?"})</span>
+              )}
             </div>
           </div>
           <div className="text-center text-xs text-muted-foreground mt-1">
@@ -107,6 +172,35 @@ function GameDetailView({
               <> &middot; {platformMeta(game.platform).icon} {platformMeta(game.platform).label}</>
             )}
           </div>
+          <div className="flex items-center justify-center gap-2 mt-2">
+            {editingRatings ? (
+              <>
+                <Button size="sm" variant="outline" onClick={saveRatings} disabled={savingRatings}>
+                  {savingRatings ? "Saving\u2026" : "Save ratings"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setEditingRatings(false)}
+                  disabled={savingRatings}
+                >
+                  Cancel
+                </Button>
+              </>
+            ) : (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-6 text-xs text-muted-foreground"
+                onClick={openRatingsEditor}
+              >
+                Edit ratings
+              </Button>
+            )}
+          </div>
+          {ratingsError && (
+            <div className="text-center text-xs text-red-500 mt-1">{ratingsError}</div>
+          )}
         </CardContent>
       </Card>
 

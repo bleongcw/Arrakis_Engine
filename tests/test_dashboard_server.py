@@ -867,3 +867,61 @@ class TestCompetitionImport:
         assert data["created_count"] == 2
         assert len(data["skipped"]) == 1
         assert "no decided result" in data["skipped"][0]
+
+
+def api_put(base_url, path, payload):
+    """Helper: PUT JSON to an API endpoint. Returns (status, parsed_json)."""
+    url = base_url + path
+    data = json.dumps(payload).encode()
+    req = urllib.request.Request(
+        url, data=data, headers={"Content-Type": "application/json"}, method="PUT"
+    )
+    try:
+        with urllib.request.urlopen(req) as resp:
+            return resp.status, json.loads(resp.read().decode())
+    except urllib.error.HTTPError as exc:
+        return exc.code, json.loads(exc.read().decode())
+
+
+class TestGameRatings:
+    def _a_game_id(self, live_server):
+        return api_get(live_server, "/api/games?player=test")[0]["id"]
+
+    def test_set_and_clear_ratings(self, live_server):
+        gid = self._a_game_id(live_server)
+        # Set opponent's FIDE rating; clear the player's (unrated).
+        status, data = api_put(
+            live_server,
+            f"/api/games/{gid}/ratings",
+            {"opponent_rating": 1516, "player_rating": None},
+        )
+        assert status == 200
+        assert data["opponent_rating"] == 1516
+        assert data["player_rating"] is None
+
+        detail = api_get(live_server, f"/api/games/{gid}")
+        assert detail["game"]["opponent_rating"] == 1516
+        assert detail["game"]["player_rating"] is None
+
+    def test_partial_update_leaves_other_field(self, live_server):
+        gid = self._a_game_id(live_server)
+        api_put(live_server, f"/api/games/{gid}/ratings", {"player_rating": 1200})
+        # Only opponent now; player_rating must be untouched.
+        api_put(live_server, f"/api/games/{gid}/ratings", {"opponent_rating": 1516})
+        detail = api_get(live_server, f"/api/games/{gid}")
+        assert detail["game"]["player_rating"] == 1200
+        assert detail["game"]["opponent_rating"] == 1516
+
+    def test_rejects_out_of_range(self, live_server):
+        gid = self._a_game_id(live_server)
+        status, data = api_put(
+            live_server, f"/api/games/{gid}/ratings", {"opponent_rating": 99999}
+        )
+        assert status == 400
+        assert "range" in data["error"]
+
+    def test_missing_game_is_404(self, live_server):
+        status, _ = api_put(
+            live_server, "/api/games/999999/ratings", {"opponent_rating": 1500}
+        )
+        assert status == 404

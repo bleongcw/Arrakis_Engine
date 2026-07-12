@@ -1373,6 +1373,65 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
         finally:
             conn.close()
 
+    def _handle_update_game_ratings(self, body, game_id):
+        """v1.25.1: set a game's player / opponent rating.
+
+        Over-the-board competition PGNs arrive with no WhiteElo/BlackElo, so
+        ratings are entered by hand. Body: {player_rating?, opponent_rating?}
+        — an int sets a rating, null (or "") clears it (unrated), and an
+        omitted field is left unchanged. Returns the stored values.
+        """
+        fields = {}
+        for key in ("player_rating", "opponent_rating"):
+            if key not in body:
+                continue
+            val = body[key]
+            if val is None or val == "":
+                fields[key] = None
+                continue
+            try:
+                iv = int(val)
+            except (TypeError, ValueError):
+                self._send_json({"error": f"{key} must be an integer or null."}, 400)
+                return
+            if not 0 <= iv <= 4000:
+                self._send_json({"error": f"{key} out of range (0-4000)."}, 400)
+                return
+            fields[key] = iv
+
+        if not fields:
+            self._send_json({"error": "No rating fields to update."}, 400)
+            return
+
+        conn = self._get_conn()
+        try:
+            if conn.execute(
+                "SELECT id FROM games WHERE id = ?", (game_id,)
+            ).fetchone() is None:
+                self._send_json({"error": "Game not found"}, 404)
+                return
+            # Column names come from a fixed allowlist above — safe to inline.
+            set_clause = ", ".join(f"{k} = ?" for k in fields)
+            conn.execute(
+                f"UPDATE games SET {set_clause} WHERE id = ?",
+                (*fields.values(), game_id),
+            )
+            conn.commit()
+            row = conn.execute(
+                "SELECT player_rating, opponent_rating FROM games WHERE id = ?",
+                (game_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+
+        self._send_json(
+            {
+                "game_id": game_id,
+                "player_rating": row["player_rating"],
+                "opponent_rating": row["opponent_rating"],
+            }
+        )
+
     def _api_patterns(self, params):
         conn = self._get_conn()
         try:
@@ -2146,6 +2205,10 @@ register_route("GET", "/api/games", lambda self, params: self._api_games_list(pa
 register_regex_route(
     "GET", r"^/api/games/(\d+)$",
     lambda self, params, gid: self._api_game_detail(int(gid)),
+)
+register_regex_route(
+    "PUT", r"^/api/games/(\d+)/ratings$",
+    lambda self, body, gid: self._handle_update_game_ratings(body, int(gid)),
 )
 register_route("GET", "/api/patterns", lambda self, params: self._api_patterns(params))
 register_route("GET", "/api/report", lambda self, params: self._api_report(params))
