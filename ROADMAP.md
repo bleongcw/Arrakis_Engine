@@ -73,6 +73,53 @@ provider.
 - **CI gate** — `.github/workflows/ci.yml` runs `pnpm test:run` between
   install and build in the frontend job so regressions fail fast.
 
+### Coaching depth & the Journal (v1.7.0–v1.13.3, 2026-05-18 → 05-27)
+- **v1.7.x** — flagship cloud model defaults bumped; **ACPL capping at ±1000cp**
+  + the mate-transition fix (a checkmating `Qxf7#` no longer scores as a ~2000cp
+  loss), with the per-move loss formula centralized in one helper.
+- **v1.8.0** — **trajectory-aware coaching**: the player's measured 30-day trend
+  is injected into each game's prompt so advice reflects where they're heading.
+- **v1.9.0** — **Recent Form Review**: an LLM narrative across the last N coached
+  games.
+- **v1.10.0–v1.12.0** — the **Journal**: a chronological coaching diary as its
+  own tab, a threaded social-feed timeline, plus manual **Parent Notes**.
+- **v1.13.0–v1.13.3** — coaching "Feedback to the Player" reads phase-by-phase;
+  the dashboard consolidated to **API-only** (the static `export_json` +
+  single-file HTML dashboard were removed).
+
+### Tactical motifs & the slug system (v1.14.0–v1.17.0, 2026-05-28 → 05-29)
+- **v1.14.0 + v1.17.0** — **tactical-motif detection**: 12 pure-Python detectors
+  tag each critical move with the themes it executes or misses (fork, pin,
+  skewer, discovered check, mate threat, removing the defender, hanging &
+  trapped piece, back-rank mate, deflection, overloaded defender, zugzwang).
+  Backfillable via `rescan-motifs` (no Stockfish).
+- **v1.15.0–v1.16.0** — cross-game **motif aggregation** with a per-phase
+  (opening/middlegame/endgame) breakdown → the **Tactical Themes** patterns card.
+- **v1.16.1–v1.16.4** — the **slug system**: `username` (chess.com API only) /
+  `slug` (URLs, API, CLI) / `display_name` (labels) decoupled; lookups became
+  slug-only.
+
+### Library, mobile & pattern depth (v1.18.0–v1.19.0, 2026-05-29)
+- **v1.18.0** — expanded the Lichess trap/gambit/attack library **102 → 1,475
+  entries**.
+- **v1.18.2** — mobile-responsive (viewport meta tag).
+- **v1.18.3** — Rating Progression chart on a proper **time-scale axis** with
+  brush zoom.
+- **v1.19.0** — **recurring weakness escalation**: distinct-game spread + recency
+  streak classify each missed motif into watch/focus/priority tiers, leading the
+  coaching prompt and filing a one-time "Priority Weakness" Journal alert.
+
+### Opponent & tournament prep (v1.20.0–v1.21.0, 2026-05-29 → 05-30)
+- **v1.20.0** — **Hunter Mode Deep Scan**: opt-in Stockfish + 12-motif analysis
+  of an opponent's recent games surfaces the tactical themes they *miss*.
+- **v1.21.0** — **Tournament Prep**: saved, named opponent rosters with a
+  combined cross-opponent analysis + a field-wide blind-spots panel.
+
+### Stability (v1.22.0–v1.22.5, 2026-05-30 → 06-05)
+- **v1.22.0** — extensible nav bar. **v1.22.1–v1.22.5** — bug-fix batch: a
+  status-poll server freeze, Run-All cancellation *between games*, the blitz
+  report filter, and DB-lock hardening.
+
 ### PGN import & over-the-board games (v1.24.0–v1.26.3)
 - **PGN import / export (v1.24.0)** — paste or upload a PGN; it joins the
   player's games and runs the normal analyze → coach pipeline. Export one or
