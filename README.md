@@ -121,6 +121,8 @@ You don't need to understand Stockfish, centipawns, or LLMs to use Arrakis Engin
 
 Add your child's Chess.com or Lichess username to the config file. Arrakis fetches every game from the last 6 months automatically — rapid, blitz, bullet, and daily. It deduplicates, so you can run it as often as you like without worrying about double-counting.
 
+Games that aren't online — **over-the-board tournament games** played in person — can be brought in too: paste or upload their PGN on the Import page (a whole multi-game tournament file works). Turn on **"Over-the-board / competition game"**, pick the game type (Classical / Rapid / Blitz), and each game is analyzed and coached exactly like an online one, tagged with a 🏆 Competition badge. Ratings, the date/time, and the category are all editable per game afterwards — and the competition's name and venue are never stored, for privacy.
+
 ### 2. See What Happened
 
 Every game gets deep engine analysis: each move is evaluated, blunders and mistakes are highlighted, and a win-probability chart shows exactly where the game turned. You'll see which moves were excellent, which were inaccurate, and which were outright blunders — color-coded and interactive on the dashboard (see [Games List screenshot](#games-list) above).
@@ -928,7 +930,7 @@ Arrakis_Engine/
 
 | Table | Purpose |
 |---|---|
-| `players` | Player profiles (username = chess.com handle, **slug** = URL/API/CLI id (v1.16.1), display name, age, rating, FIDE ID/rating) |
+| `players` | Player profiles (username = chess.com handle, **slug** = URL/API/CLI id (v1.16.1), display name, age, rating, FIDE ID + three FIDE ratings Classical/Rapid/Blitz (v1.26.0)) |
 | `games` | Game records with PGN, ratings, result, platform, ACPL, analysis/coaching status |
 | `move_analysis` | Per-move Stockfish evaluation (capped centipawn, win prob, classification, clock_seconds, **motifs_json** v1.14.0) |
 | `game_coaching` | LLM-generated coaching output per game (narrative, feedback, opening analysis, coaching_meta) |

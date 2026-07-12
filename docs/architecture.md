@@ -171,6 +171,12 @@ Helpers over the `journal_entries` table. Three entry kinds: `'review'` (LLM-gen
 ### `report.py` — markdown reports
 Weekly / monthly markdown reports for coaches: game-by-game summaries, ACPL trend, pattern highlights, annotated critical positions. Saved to `reports/`.
 
+### `pgn_io.py` — PGN import / export (v1.24.0+)
+The open, portable data layer: get a PGN into the system and back out. `parse_pgn` / `parse_pgn_multi` legality-validate a game (or a whole multi-game tournament file), map `Result` → win/loss/draw from the player's perspective, derive color (matching the player's chess.com/lichess handles **and display name** for OTB games), and synthesize a dedup `game_url` (`imported:<sha1>`). `ingest_game` writes a row with `analysis_status='pending'`, so an imported game flows through the exact same analyze → coach pipeline as a harvested one. `build_pgn` / `build_bulk_pgn` handle export (raw or annotated with `[%eval]` + classification NAGs).
+- **Competition games (v1.25.0):** `platform="competition"` + a chosen game type (Classical/Rapid/Blitz → `time_class`, since OTB PGNs carry no machine `TimeControl`). Auto-detected color per game; undecided (`Result "*"`) games are skipped, not fatal.
+- **Privacy (v1.26.1):** `strip_private_headers` removes the `Event` (competition name) and `Site` (venue) headers before a competition game is stored — so they never reach the DB, API, or PGN export. The single seam reused by the import path, the reclassify-to-competition endpoint (v1.26.2), and one-off backfills.
+- The OCR capture/correction layer that produces a validated PGN is the commercial (Atreides) extension; it layers on top of this open `parse_pgn` / `ingest_game` seam.
+
 ### `tiers.py` — adaptive tier system
 Rating-based tiers (Beginner → Elementary → Intermediate → Advanced → Expert) drive analysis depth, blunder thresholds, coaching language, and pattern priorities. A 1000-rated player's "blunder" should not be calibrated the same way as a 2000-rated player's.
 
@@ -260,7 +266,7 @@ Single-file SQLite. Schema migrations run via `init_db()` at startup — column 
 
 | Table | Key fields |
 |---|---|
-| `players` | username (chess.com handle), **slug** (v1.16.1 — URL/API/CLI id, partial UNIQUE index), display_name, age, rating, fide_id, fide_rating, lichess_username, is_active |
+| `players` | username (chess.com handle), **slug** (v1.16.1 — URL/API/CLI id, partial UNIQUE index), display_name, age, rating, fide_id, fide_rating (+ fide_rating_classical/rapid/blitz v1.26.0), lichess_username, is_active |
 | `games` | player_id, game_url, pgn, player_color, ratings, result, time_class, platform, analysis_status, coaching_status, date_played |
 | `move_analysis` | game_id, move_number, side, move_played, best_move, eval_cp, swing_cp, win_prob, classification, pv_line, **clock_seconds**, **motifs_json** (v1.14.0 — `{played, best, missed}`, NULL on non-critical moves) |
 | `game_coaching` | game_id, provider, narrative, key_lesson, practical_focus, coach_notes, player_feedback, critical_moments_json, opening_analysis_json, **coaching_meta_json** (v1.7.0; trajectory_* v1.8.0; motif_top_missed / motif_top_missed_phase v1.15.0/v1.16.0) |

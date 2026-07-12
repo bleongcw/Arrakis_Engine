@@ -37,6 +37,13 @@ Current release: **v1.26.3** (2026-07-12). See `CHANGELOG.md` for full history.
     "evanleong"). v1.16.4 made lookups slug-only; v1.18.1 extended that to
     rescan-motifs + harvest/report CLI.
   - **`display_name`** — what every visible label shows.
+- **FIDE ratings (v1.26.0):** three separate ratings —
+  `fide_rating_classical` / `fide_rating_rapid` / `fide_rating_blitz` (FIDE
+  publishes one per time control) — plus `fide_id`. Edited per player on the
+  Settings form. **FIDE ratings are FIDE-specific: they do NOT override the
+  chess.com / lichess rating** (the primary rating stays the latest game /
+  platform rating). The legacy single `fide_rating` column is kept and was
+  backfilled into Classical.
 
 ## Key Configuration
 - Stockfish: depth 22, 6 threads, 512MB hash, path configured in `config.yaml`
@@ -71,9 +78,13 @@ Current release: **v1.26.3** (2026-07-12). See `CHANGELOG.md` for full history.
 /                           → redirects to /dashboard
 /dashboard                  → all players overview + pipeline control panel
 /<slug>/games               → game list for player (+ PGN export: select/filtered bulk)
-/<slug>/games/<id>          → game detail (board, eval, coaching panels, motif badges, Export PGN)
+/<slug>/games/<id>          → game detail (board, eval, coaching panels, motif badges,
+                              Export PGN; inline editors: Edit ratings (v1.25.1),
+                              Edit details = category/type/date (v1.26.2–v1.26.3))
 /<slug>/import              → import a PGN (paste/upload) → analyzed game (v1.24.0);
                               competition mode (v1.25.0) tags OTB tournament games
+                              (multi-game file; game type sets time_class; Event/Site
+                              name+venue stripped for privacy, v1.26.1)
 /<slug>/games/compare       → side-by-side game comparison
 /<slug>/patterns            → pattern visualizations + Self-Analysis + Tactical Themes
 /<slug>/journal             → chronological coaching diary (reviews + parent notes)
@@ -161,7 +172,7 @@ ArrakisEngine/
 
 | Table | Purpose |
 |---|---|
-| `players` | Player profiles (+ `slug` v1.16.1, `is_active` soft-delete) |
+| `players` | Player profiles (+ `slug` v1.16.1, `is_active` soft-delete, `fide_id` + three FIDE ratings `fide_rating_{classical,rapid,blitz}` v1.26.0) |
 | `games` | Stored games with PGN |
 | `move_analysis` | Per-move Stockfish results (+ `clock_seconds`, `motifs_json` v1.14.0) |
 | `game_coaching` | LLM coaching output (+ `player_feedback`, `coaching_meta_json`) |
@@ -259,11 +270,18 @@ All `?player=X` params + path slugs resolve by **slug** (v1.16.4). Backend helpe
 - `/api/schedule/{toggle,interval}` — scheduler control
 - `/api/hunt/refresh` — force opponent profile re-fetch (v1.4.1+)
 - `/api/import-pgn` — (v1.24.0) import a raw PGN → analyzed game; (v1.25.0)
-  `platform="competition"` + `time_class` imports OTB tournament games (multi-game)
+  `platform="competition"` + `time_class` imports OTB tournament games (multi-game;
+  v1.26.1 strips the Event/Site name+venue from stored competition PGNs)
 - `/api/games/export` — (v1.24.0) `{ids, annotated}` → PGN file (raw / annotated)
 
 ### PUT / DELETE
-- `PUT /api/players/<id>`, `PUT /api/settings/{analysis,api-keys,coaching}`
+- `PUT /api/players/<id>` (incl. the three FIDE ratings v1.26.0),
+  `PUT /api/settings/{analysis,api-keys,coaching}`
+- `PUT /api/games/<id>/ratings` — (v1.25.1) set player/opponent rating
+  (int or null=unrated); OTB PGNs carry no Elo
+- `PUT /api/games/<id>/classification` — (v1.26.2) set `platform` (category) +
+  `time_class` (game type) + (v1.26.3) `date_played` (timing). Marking a game
+  `competition` also strips the private Event/Site headers from its stored PGN.
 - `PUT /api/journal/note/<id>`, `DELETE /api/journal/note/<id>` (v1.12.0)
 - `DELETE /api/players/<id>` (soft-delete via `is_active`)
 
@@ -321,6 +339,12 @@ module — `@patch("src.coach.coach_pending")` — not at the consuming module.
 - **Single-task pipeline lock** — across CLI + scheduler + dashboard
 - **`ARRAKIS_` prefix on env keys** — avoids collisions with other tools
 - **Lichess deep link format** — `/analysis/standard/{FEN}`, not `?pgn=` (v1.4.5 lesson)
+- **Competition games never store the tournament name/venue** (v1.26.1) — the PGN
+  `Event`/`Site` headers are stripped on import (and on reclassify-to-competition)
+  so they can't leak via the API or PGN export. `strip_private_headers` in
+  `src/pgn_io.py` is the single seam (import, reclassification, backfill all reuse it).
+- **FIDE ratings are FIDE-only** (v1.26.0) — three ratings (Classical/Rapid/Blitz),
+  shown as FIDE info; they never override the chess.com/lichess platform rating.
 - **Shared chess + motif helpers in `frontend/lib/`** — single source of truth to
   avoid the duplication that hid the v1.4.5 regressions.
 

@@ -73,6 +73,25 @@ provider.
 - **CI gate** — `.github/workflows/ci.yml` runs `pnpm test:run` between
   install and build in the frontend job so regressions fail fast.
 
+### PGN import & over-the-board games (v1.24.0–v1.26.3)
+- **PGN import / export (v1.24.0)** — paste or upload a PGN; it joins the
+  player's games and runs the normal analyze → coach pipeline. Export one or
+  many games as raw or engine-annotated PGN.
+- **Competition category (v1.25.0)** — an "Over-the-board / competition" import
+  mode for games that exist only as a PGN (never on chess.com / lichess).
+  Multi-game tournament files import at once; the game type you pick
+  (Classical / Rapid / Blitz) sets the time class; color auto-detects from the
+  player's name; games are tagged with a 🏆 Competition badge and filter.
+- **Editable game metadata** — inline editors on the game detail page: player /
+  opponent ratings (v1.25.1, OTB PGNs carry no Elo), and category + type + date
+  (v1.26.2–v1.26.3, fixing the midnight-placeholder timing).
+- **Privacy (v1.26.1)** — competition games never store the tournament name or
+  venue: the PGN `Event`/`Site` headers are stripped on import (and on
+  reclassify-to-competition), so they can't leak via the API or PGN export.
+- **Three FIDE ratings (v1.26.0)** — Classical / Rapid / Blitz per player,
+  editable on the Settings form. FIDE ratings are FIDE-specific and no longer
+  override the chess.com / lichess rating.
+
 ### Polish & bug fixes
 - v1.0.1, v1.0.2 — UI fixes (opening explorer, dialog hydration)
 - v1.3.1 — silenced client-disconnect log noise
