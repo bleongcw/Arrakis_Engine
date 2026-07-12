@@ -90,14 +90,16 @@ def test_invalid_result_override():
 
 # ---------- competition / over-the-board (v1.25.0) ----------
 
-# The user's real OTB game: no TimeControl, no Elo, real names, decided result.
-OTB_COMPETITION = """[Event "Checkmate365 Classical"]
-[Site "ARC 380, Level 14-06, Singapore"]
+# A competition / over-the-board game: no TimeControl, no Elo, decided result.
+# Event/Site are generic placeholders — a real competition name + venue are never
+# committed here, and are stripped from stored games (see the privacy tests).
+OTB_COMPETITION = """[Event "Club Classical"]
+[Site "Local Venue"]
 [Date "2026.07.12"]
 [Round "1"]
 [Board "6"]
 [White "Evan Leong"]
-[Black "Connery Tan"]
+[Black "Opponent"]
 [Result "0-1"]
 
 1. e4 c5 2. Nf3 d6 3. g3 Nc6 4. Bg2 Nf6 5. d3 g6 6. O-O Bg7
@@ -130,9 +132,32 @@ def test_parse_multi_otb_color_by_display_name():
     g = games[0]
     assert g.player_color == "white"          # matched "Evan Leong" (White)
     assert g.result == "loss"                 # 0-1 as White
-    assert g.opponent_username == "Connery Tan"
+    assert g.opponent_username == "Opponent"
     assert g.time_class == "classical"        # forced; PGN has no TimeControl
     assert g.game_url.startswith("imported:")
+
+
+def test_competition_import_strips_name_and_venue():
+    # Privacy (v1.26.1): a competition import must NOT persist the tournament
+    # name (Event) or location (Site) — neither in the stored PGN nor its hash.
+    games, _ = parse_pgn_multi(
+        OTB_COMPETITION,
+        known_usernames=["Evan Leong"],
+        time_class_override="classical",
+        strip_private=True,
+    )
+    stored = games[0].pgn
+    assert "Event" not in stored and "Site" not in stored
+    assert "Club Classical" not in stored and "Local Venue" not in stored
+    # Player names, result and moves are kept.
+    assert "Evan Leong" in stored
+    assert "1. e4" in stored
+
+
+def test_headers_retained_without_strip_flag():
+    # Default (non-competition) parsing leaves headers untouched.
+    games, _ = parse_pgn_multi(OTB_COMPETITION, known_usernames=["Evan Leong"])
+    assert "Event" in games[0].pgn
 
 
 def test_parse_multi_splits_and_skips_undecided():

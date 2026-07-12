@@ -4,6 +4,24 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.26.1] - 2026-07-12
+
+### Changed (privacy)
+- **Competition imports no longer store the tournament name or location.** The
+  PGN `Event` (competition name) and `Site` (venue) headers are stripped on
+  import for `platform="competition"` games — neither the stored PGN nor its
+  dedup hash carries them, so they can't leak via the game detail, the API, or
+  PGN export. Player names, date, result, round/board, and the moves are kept.
+  Existing competition games in the local DB were scrubbed in place.
+
+### Tests
+- Backend **693 → 695** (+2): a competition import strips `Event`/`Site` (name +
+  venue) while keeping players/result/moves; non-competition parsing leaves
+  headers untouched. Test fixtures no longer carry any real competition name,
+  venue, or opponent name.
+
+---
+
 ## [1.26.0] - 2026-07-12
 
 ### Added
@@ -55,9 +73,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 - **Competition games — import over-the-board tournament PGNs.** Games played
-  in person (e.g. *Checkmate365 Classical*, ARC 380) exist only as a PGN, never
-  on chess.com / lichess. The Import page now has an **"Over-the-board /
-  competition game"** mode:
+  in person exist only as a PGN, never on chess.com / lichess. The Import page
+  now has an **"Over-the-board / competition game"** mode:
   - **Tagged as a distinct source.** Competition games get `platform="competition"`
     and show a 🏆 badge in the games list and game detail, and a **Competition**
     option in the Games platform filter (was a hardcoded chess.com/lichess binary

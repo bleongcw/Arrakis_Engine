@@ -69,6 +69,20 @@ _RESULT_MAP = {
 # export. Only the imperfect moves are glyphed; good/excellent stay clean.
 _CLASS_NAG = {"blunder": 4, "mistake": 2, "inaccuracy": 6}  # ?? / ? / ?!
 
+# v1.26.1: PGN headers that identify an over-the-board competition by name and
+# location. Stripped from stored competition games for privacy — the tournament
+# and venue are never persisted or exported. Player names, date, result, and the
+# moves are kept.
+_PRIVATE_HEADERS = ("Event", "Site")
+
+
+def strip_private_headers(game: chess.pgn.Game) -> None:
+    """Remove competition-identifying headers (Event/Site) from a game node,
+    in place. Used before a competition game is stored so its name and location
+    are never persisted."""
+    for header in _PRIVATE_HEADERS:
+        game.headers.pop(header, None)
+
 
 def _classify_time_control(tc: str | None) -> str | None:
     """Map a PGN TimeControl ("600+5", "180", "-") to a chess.com-style class."""
@@ -282,6 +296,7 @@ def parse_pgn_multi(
     known_usernames: list[str] | None = None,
     result: str | None = None,
     time_class_override: str | None = None,
+    strip_private: bool = False,
 ) -> tuple[list[ParsedGame], list[str]]:
     """Parse a PGN that may hold MANY games (a tournament export).
 
@@ -307,6 +322,11 @@ def parse_pgn_multi(
         if game is None:
             break
         index += 1
+        # v1.26.1: for competition games, drop the tournament name + venue
+        # BEFORE re-emitting, so neither the stored PGN nor its dedup hash ever
+        # carries them.
+        if strip_private:
+            strip_private_headers(game)
         # Re-emit this single game as standalone PGN for storage + hashing.
         single_pgn = game.accept(
             chess.pgn.StringExporter(headers=True, variations=True, comments=True)

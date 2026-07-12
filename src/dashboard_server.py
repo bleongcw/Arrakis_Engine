@@ -2022,6 +2022,8 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                         known_usernames=usernames,
                         result=body.get("result"),
                         time_class_override=time_class,
+                        # Privacy: never persist the competition name/location.
+                        strip_private=True,
                     )
                     if not parsed_list:
                         self._send_json(
