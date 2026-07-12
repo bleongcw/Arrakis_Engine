@@ -4,7 +4,19 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [1.26.2] - 2026-07-12
+## [1.26.3] - 2026-07-12
+
+### Added
+- **Edit a game's date/time (timing) from the game detail page.** OTB PGNs carry
+  a date but no time, so imported games showed a midnight placeholder
+  (`… 00:00:00`). The **Edit details** editor (formerly "Edit type") now has a
+  **Date** field (a date+time picker) alongside Category and Type — set the real
+  date and time the game was played. `PUT /api/games/{id}/classification` accepts
+  `date_played` (a date or datetime; normalized to `YYYY-MM-DD HH:MM:SS`).
+
+### Tests
+- Backend **698 → 701** (+3): set date+time, a date-only value normalizes to
+  midnight, and an unparseable date is rejected.
 
 ### Added
 - **Reclassify a game's category & type from the game detail page.** A new

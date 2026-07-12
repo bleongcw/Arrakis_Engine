@@ -1026,3 +1026,38 @@ class TestGameClassification:
             {"platform": "competition"},
         )
         assert status == 404
+
+
+class TestGameDateEdit:
+    """v1.26.3: edit a game's date_played (the 'timing') via the
+    classification endpoint."""
+
+    def _a_game_id(self, live_server):
+        return api_get(live_server, "/api/games?player=test")[0]["id"]
+
+    def test_set_date_and_time(self, live_server):
+        gid = self._a_game_id(live_server)
+        status, data = api_put(
+            live_server, f"/api/games/{gid}/classification",
+            {"date_played": "2026-07-12T14:30"},
+        )
+        assert status == 200
+        assert data["date_played"] == "2026-07-12 14:30:00"
+        detail = api_get(live_server, f"/api/games/{gid}")
+        assert detail["game"]["date_played"] == "2026-07-12 14:30:00"
+
+    def test_date_only_normalizes_to_midnight(self, live_server):
+        gid = self._a_game_id(live_server)
+        _, data = api_put(
+            live_server, f"/api/games/{gid}/classification",
+            {"date_played": "2026-03-01"},
+        )
+        assert data["date_played"] == "2026-03-01 00:00:00"
+
+    def test_rejects_bad_date(self, live_server):
+        gid = self._a_game_id(live_server)
+        status, _ = api_put(
+            live_server, f"/api/games/{gid}/classification",
+            {"date_played": "not-a-date"},
+        )
+        assert status == 400

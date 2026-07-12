@@ -87,8 +87,13 @@ export async function updateGameRatings(
  *  also strips the competition name/venue from the stored PGN (privacy). */
 export async function updateGameClassification(
   gameId: number,
-  input: { platform?: string; time_class?: string | null }
-): Promise<{ game_id: number; platform: string; time_class: string | null }> {
+  input: { platform?: string; time_class?: string | null; date_played?: string | null }
+): Promise<{
+  game_id: number;
+  platform: string;
+  time_class: string | null;
+  date_played: string | null;
+}> {
   const res = await fetch(`${BASE}/games/${gameId}/classification`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },

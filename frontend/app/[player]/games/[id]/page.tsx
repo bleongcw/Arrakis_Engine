@@ -115,12 +115,18 @@ function GameDetailView({
   const [editingType, setEditingType] = useState(false);
   const [platformInput, setPlatformInput] = useState("");
   const [timeClassInput, setTimeClassInput] = useState("");
+  const [dateInput, setDateInput] = useState("");
   const [savingType, setSavingType] = useState(false);
   const [typeError, setTypeError] = useState<string | null>(null);
 
   function openTypeEditor() {
     setPlatformInput(game.platform || "chess.com");
     setTimeClassInput(game.time_class ?? "");
+    // date_played is stored as "YYYY-MM-DD HH:MM:SS"; the datetime-local input
+    // wants "YYYY-MM-DDTHH:MM".
+    setDateInput(
+      game.date_played ? game.date_played.replace(" ", "T").slice(0, 16) : ""
+    );
     setTypeError(null);
     setEditingType(true);
   }
@@ -132,6 +138,7 @@ function GameDetailView({
       const data = await updateGameClassification(game.id, {
         platform: platformInput,
         time_class: timeClassInput || null,
+        date_played: dateInput || null,
       });
       onUpdate({
         ...detail,
@@ -139,6 +146,7 @@ function GameDetailView({
           ...game,
           platform: data.platform as typeof game.platform,
           time_class: data.time_class,
+          date_played: data.date_played,
         },
       });
       setEditingType(false);
@@ -242,6 +250,15 @@ function GameDetailView({
                   <option value="daily">Daily</option>
                 </select>
               </label>
+              <label className="text-xs flex items-center gap-1">
+                Date:
+                <input
+                  type="datetime-local"
+                  value={dateInput}
+                  onChange={(e) => setDateInput(e.target.value)}
+                  className="px-2 py-1 rounded border text-xs bg-background"
+                />
+              </label>
               <Button size="sm" variant="outline" onClick={saveType} disabled={savingType}>
                 {savingType ? "Saving\u2026" : "Save"}
               </Button>
@@ -286,7 +303,7 @@ function GameDetailView({
                   className="h-6 text-xs text-muted-foreground"
                   onClick={openTypeEditor}
                 >
-                  Edit type
+                  Edit details
                 </Button>
               </>
             ) : null}

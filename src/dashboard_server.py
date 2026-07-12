@@ -1442,8 +1442,9 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
     _VALID_TIME_CLASSES = {"bullet", "blitz", "rapid", "classical", "daily"}
 
     def _handle_update_game_classification(self, body, game_id):
-        """v1.26.2: reclassify a game — set its `platform` (category) and/or
-        `time_class` (game type). Body: {platform?, time_class?}.
+        """v1.26.2: reclassify a game — set its `platform` (category),
+        `time_class` (game type), and/or `date_played` (v1.26.3: the timing).
+        Body: {platform?, time_class?, date_played?}.
 
         Setting `platform='competition'` also strips the private Event/Site
         headers (competition name + venue) from the stored PGN, so a game
@@ -1452,6 +1453,7 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
         """
         import io as _io
         import sqlite3
+        import datetime as _dt
         import chess.pgn
         from src.pgn_io import strip_private_headers, _synthesize_url
 
@@ -1472,6 +1474,29 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                     self._send_json({"error": f"Invalid time_class '{tc}'."}, 400)
                     return
                 fields["time_class"] = tc
+        if "date_played" in body:
+            dp = body.get("date_played")
+            if dp in (None, ""):
+                fields["date_played"] = None
+            else:
+                # Accept a date or datetime (the browser sends "YYYY-MM-DDTHH:MM");
+                # normalize to the stored "YYYY-MM-DD HH:MM:SS" shape.
+                raw = str(dp).strip().replace("T", " ")
+                parsed = None
+                for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+                    try:
+                        parsed = _dt.datetime.strptime(raw, fmt)
+                        break
+                    except ValueError:
+                        continue
+                if parsed is None:
+                    self._send_json(
+                        {"error": f"Invalid date '{dp}' — use YYYY-MM-DD or "
+                                  "YYYY-MM-DD HH:MM."},
+                        400,
+                    )
+                    return
+                fields["date_played"] = parsed.strftime("%Y-%m-%d %H:%M:%S")
 
         if not fields:
             self._send_json({"error": "No classification fields to update."}, 400)
@@ -1515,7 +1540,8 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                 )
                 return
             updated = conn.execute(
-                "SELECT platform, time_class FROM games WHERE id = ?", (game_id,)
+                "SELECT platform, time_class, date_played FROM games WHERE id = ?",
+                (game_id,),
             ).fetchone()
         finally:
             conn.close()
@@ -1525,6 +1551,7 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                 "game_id": game_id,
                 "platform": updated["platform"],
                 "time_class": updated["time_class"],
+                "date_played": updated["date_played"],
             }
         )
 
