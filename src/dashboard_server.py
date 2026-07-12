@@ -476,7 +476,9 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                     age=body.get("age"),
                     rating=body.get("rating"),
                     fide_id=body.get("fide_id"),
-                    fide_rating=body.get("fide_rating"),
+                    fide_rating_classical=body.get("fide_rating_classical"),
+                    fide_rating_rapid=body.get("fide_rating_rapid"),
+                    fide_rating_blitz=body.get("fide_rating_blitz"),
                     lichess_username=body.get("lichess_username"),
                 )
                 conn.commit()
@@ -489,7 +491,9 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                 age=body.get("age"),
                 rating=body.get("rating"),
                 fide_id=body.get("fide_id"),
-                fide_rating=body.get("fide_rating"),
+                fide_rating_classical=body.get("fide_rating_classical"),
+                fide_rating_rapid=body.get("fide_rating_rapid"),
+                fide_rating_blitz=body.get("fide_rating_blitz"),
                 lichess_username=body.get("lichess_username"),
             )
             self._send_json({"status": "created", "id": player_id}, 201)
@@ -513,7 +517,9 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                 age=body.get("age"),
                 rating=body.get("rating"),
                 fide_id=body.get("fide_id"),
-                fide_rating=body.get("fide_rating"),
+                fide_rating_classical=body.get("fide_rating_classical"),
+                fide_rating_rapid=body.get("fide_rating_rapid"),
+                fide_rating_blitz=body.get("fide_rating_blitz"),
                 lichess_username=body.get("lichess_username"),
             )
             self._send_json({"status": "updated", "id": player_id})
@@ -1206,17 +1212,17 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             players = []
             for r in rows:
                 p = dict_from_row(r)
-                fide_rating = r["fide_rating"] if "fide_rating" in r.keys() else None
-                if fide_rating:
-                    rating = fide_rating
-                else:
-                    latest = conn.execute(
-                        """SELECT player_rating FROM games
-                        WHERE player_id = ? AND player_rating IS NOT NULL
-                        ORDER BY date_played DESC LIMIT 1""",
-                        (r["id"],),
-                    ).fetchone()
-                    rating = latest["player_rating"] if latest else r["rating"]
+                # v1.26.0: FIDE ratings (Classical/Rapid/Blitz) are FIDE-specific
+                # and never override the platform rating — chess.com / lichess use
+                # their own. Primary rating = the latest game's player_rating,
+                # else the stored rating.
+                latest = conn.execute(
+                    """SELECT player_rating FROM games
+                    WHERE player_id = ? AND player_rating IS NOT NULL
+                    ORDER BY date_played DESC LIMIT 1""",
+                    (r["id"],),
+                ).fetchone()
+                rating = latest["player_rating"] if latest else r["rating"]
                 tier = get_tier(rating)
                 p["tier"] = tier.name
                 p["tier_label"] = tier.label

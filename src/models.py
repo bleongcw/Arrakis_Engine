@@ -246,6 +246,22 @@ def _migrate(conn: sqlite3.Connection):
     if "fide_rating" not in player_cols:
         conn.execute("ALTER TABLE players ADD COLUMN fide_rating INTEGER")
         conn.commit()
+    # v1.26.0: FIDE publishes three separate ratings (Classical/Rapid/Blitz).
+    # The original single fide_rating was effectively the Classical rating —
+    # backfill it so no data is lost.
+    if "fide_rating_classical" not in player_cols:
+        conn.execute("ALTER TABLE players ADD COLUMN fide_rating_classical INTEGER")
+        conn.execute(
+            "UPDATE players SET fide_rating_classical = fide_rating "
+            "WHERE fide_rating IS NOT NULL"
+        )
+        conn.commit()
+    if "fide_rating_rapid" not in player_cols:
+        conn.execute("ALTER TABLE players ADD COLUMN fide_rating_rapid INTEGER")
+        conn.commit()
+    if "fide_rating_blitz" not in player_cols:
+        conn.execute("ALTER TABLE players ADD COLUMN fide_rating_blitz INTEGER")
+        conn.commit()
     if "lichess_username" not in player_cols:
         conn.execute("ALTER TABLE players ADD COLUMN lichess_username TEXT")
         conn.commit()
@@ -580,7 +596,10 @@ def ensure_player(conn: sqlite3.Connection, username: str,
                   rating: int | None = None, fide_id: str | None = None,
                   fide_rating: int | None = None,
                   lichess_username: str | None = None,
-                  slug: str | None = None) -> int:
+                  slug: str | None = None,
+                  fide_rating_classical: int | None = None,
+                  fide_rating_rapid: int | None = None,
+                  fide_rating_blitz: int | None = None) -> int:
     """Insert or update a player, returning the player id.
 
     v1.16.1: accepts optional `slug` — the URL/CLI/API identifier
@@ -602,7 +621,8 @@ def ensure_player(conn: sqlite3.Connection, username: str,
                 conn, slug, excluding_player_id=row["id"],
             )
         if (display_name or age or rating or fide_id or fide_rating
-                or lichess_username or resolved_slug):
+                or fide_rating_classical or fide_rating_rapid
+                or fide_rating_blitz or lichess_username or resolved_slug):
             conn.execute(
                 """UPDATE players SET
                     display_name = COALESCE(?, display_name),
@@ -610,10 +630,14 @@ def ensure_player(conn: sqlite3.Connection, username: str,
                     rating = COALESCE(?, rating),
                     fide_id = COALESCE(?, fide_id),
                     fide_rating = COALESCE(?, fide_rating),
+                    fide_rating_classical = COALESCE(?, fide_rating_classical),
+                    fide_rating_rapid = COALESCE(?, fide_rating_rapid),
+                    fide_rating_blitz = COALESCE(?, fide_rating_blitz),
                     lichess_username = COALESCE(?, lichess_username),
                     slug = COALESCE(?, slug)
                 WHERE username = ?""",
                 (display_name, age, rating, fide_id, fide_rating,
+                 fide_rating_classical, fide_rating_rapid, fide_rating_blitz,
                  lichess_username, resolved_slug, username),
             )
             conn.commit()
@@ -624,9 +648,11 @@ def ensure_player(conn: sqlite3.Connection, username: str,
     conn.execute(
         """INSERT INTO players
         (username, display_name, age, rating, fide_id, fide_rating,
+         fide_rating_classical, fide_rating_rapid, fide_rating_blitz,
          lichess_username, slug)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (username, display_name, age, rating, fide_id, fide_rating,
+         fide_rating_classical, fide_rating_rapid, fide_rating_blitz,
          lichess_username, resolved_slug),
     )
     conn.commit()
@@ -641,7 +667,9 @@ def update_player(conn: sqlite3.Connection, player_id: int, **fields) -> bool:
     Only updates columns that are passed as keyword arguments.
     Returns True if a row was updated.
     """
-    allowed = {"display_name", "age", "rating", "fide_id", "fide_rating", "lichess_username"}
+    allowed = {"display_name", "age", "rating", "fide_id", "fide_rating",
+               "fide_rating_classical", "fide_rating_rapid", "fide_rating_blitz",
+               "lichess_username"}
     updates = {k: v for k, v in fields.items() if k in allowed}
     if not updates:
         return False

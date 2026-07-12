@@ -4,6 +4,36 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.26.0] - 2026-07-12
+
+### Added
+- **Three FIDE ratings per player — Classical, Rapid, Blitz.** FIDE publishes a
+  separate rating for each time control, so the single "FIDE Rating" field is now
+  three. The Settings player form (Add + Edit, all players) has a **FIDE Ratings**
+  row with Classical / Rapid / Blitz inputs; each is optional (blank = unrated).
+  The player list and player card show the three compactly (e.g. `FIDE: C 1516 ·
+  R 1480 · B 1470`), Classical as the card headline.
+
+### Changed
+- **FIDE ratings no longer override the chess.com / lichess rating.** Previously a
+  player's single FIDE rating replaced their platform rating everywhere (player
+  cards, coaching). Now FIDE ratings are FIDE-specific: chess.com and lichess use
+  their own ratings, and the three FIDE ratings are shown as separate FIDE info.
+  The player's primary rating reverts to the latest game's rating (or the stored
+  platform rating).
+
+### Migration
+- Adds `fide_rating_classical` / `fide_rating_rapid` / `fide_rating_blitz` to
+  `players`; the existing single `fide_rating` is **backfilled into Classical** so
+  no data is lost (runs automatically on next start; the legacy column is kept).
+
+### Tests
+- Backend **691 → 693** (+2, plus new migration-column assertions): create/update
+  a player with the three FIDE ratings, and a guard that FIDE does not override
+  the platform rating. Settings form verified live (three FIDE inputs render).
+
+---
+
 ## [1.25.1] - 2026-07-12
 
 ### Added

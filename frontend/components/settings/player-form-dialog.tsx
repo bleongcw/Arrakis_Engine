@@ -28,7 +28,9 @@ export interface PlayerFormData {
   age: number | null;
   lichess_username: string;
   fide_id: string;
-  fide_rating: number | null;
+  fide_rating_classical: number | null;
+  fide_rating_rapid: number | null;
+  fide_rating_blitz: number | null;
 }
 
 export function PlayerFormDialog({
@@ -44,7 +46,9 @@ export function PlayerFormDialog({
     age: null,
     lichess_username: "",
     fide_id: "",
-    fide_rating: null,
+    fide_rating_classical: null,
+    fide_rating_rapid: null,
+    fide_rating_blitz: null,
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -58,7 +62,9 @@ export function PlayerFormDialog({
           age: player.age,
           lichess_username: player.lichess_username || "",
           fide_id: player.fide_id ? String(player.fide_id) : "",
-          fide_rating: player.fide_rating,
+          fide_rating_classical: player.fide_rating_classical,
+          fide_rating_rapid: player.fide_rating_rapid,
+          fide_rating_blitz: player.fide_rating_blitz,
         });
       } else {
         setForm({
@@ -67,7 +73,9 @@ export function PlayerFormDialog({
           age: null,
           lichess_username: "",
           fide_id: "",
-          fide_rating: null,
+          fide_rating_classical: null,
+          fide_rating_rapid: null,
+          fide_rating_blitz: null,
         });
       }
       setError(null);
@@ -156,31 +164,76 @@ export function PlayerFormDialog({
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="fide_id">FIDE ID</Label>
-              <Input
-                id="fide_id"
-                value={form.fide_id}
-                onChange={(e) => setForm({ ...form, fide_id: e.target.value })}
-                placeholder="e.g. 12345678"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="fide_rating">FIDE Rating</Label>
-              <Input
-                id="fide_rating"
-                type="number"
-                min={0}
-                max={3000}
-                value={form.fide_rating ?? ""}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    fide_rating: e.target.value ? Number(e.target.value) : null,
-                  })
-                }
-              />
+          <div className="space-y-2">
+            <Label htmlFor="fide_id">FIDE ID</Label>
+            <Input
+              id="fide_id"
+              value={form.fide_id}
+              onChange={(e) => setForm({ ...form, fide_id: e.target.value })}
+              placeholder="e.g. 12345678"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label>FIDE Ratings</Label>
+            <div className="grid grid-cols-3 gap-4">
+              <div className="space-y-1">
+                <Label htmlFor="fide_classical" className="text-xs text-muted-foreground font-normal">
+                  Classical
+                </Label>
+                <Input
+                  id="fide_classical"
+                  type="number"
+                  min={0}
+                  max={3500}
+                  placeholder="unrated"
+                  value={form.fide_rating_classical ?? ""}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      fide_rating_classical: e.target.value ? Number(e.target.value) : null,
+                    })
+                  }
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="fide_rapid" className="text-xs text-muted-foreground font-normal">
+                  Rapid
+                </Label>
+                <Input
+                  id="fide_rapid"
+                  type="number"
+                  min={0}
+                  max={3500}
+                  placeholder="unrated"
+                  value={form.fide_rating_rapid ?? ""}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      fide_rating_rapid: e.target.value ? Number(e.target.value) : null,
+                    })
+                  }
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="fide_blitz" className="text-xs text-muted-foreground font-normal">
+                  Blitz
+                </Label>
+                <Input
+                  id="fide_blitz"
+                  type="number"
+                  min={0}
+                  max={3500}
+                  placeholder="unrated"
+                  value={form.fide_rating_blitz ?? ""}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      fide_rating_blitz: e.target.value ? Number(e.target.value) : null,
+                    })
+                  }
+                />
+              </div>
             </div>
           </div>
 

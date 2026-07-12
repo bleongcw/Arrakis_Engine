@@ -167,6 +167,10 @@ class TestMigrations:
         player_cols = {r[1] for r in conn.execute("PRAGMA table_info(players)").fetchall()}
         assert "fide_id" in player_cols
         assert "fide_rating" in player_cols
+        # v1.26.0: three separate FIDE ratings.
+        assert "fide_rating_classical" in player_cols
+        assert "fide_rating_rapid" in player_cols
+        assert "fide_rating_blitz" in player_cols
         assert "lichess_username" in player_cols
         conn.close()
 

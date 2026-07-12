@@ -15,6 +15,11 @@ export interface Player {
   rating: number | null;
   fide_id: number | null;
   fide_rating: number | null;
+  // v1.26.0: three separate FIDE ratings (fide_rating is the legacy single value,
+  // kept for back-compat; Classical is its successor).
+  fide_rating_classical: number | null;
+  fide_rating_rapid: number | null;
+  fide_rating_blitz: number | null;
   lichess_username: string | null;
   tier: string;
   tier_label: string;

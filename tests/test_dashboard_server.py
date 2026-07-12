@@ -925,3 +925,52 @@ class TestGameRatings:
             live_server, "/api/games/999999/ratings", {"opponent_rating": 1500}
         )
         assert status == 404
+
+
+class TestPlayerFideRatings:
+    """v1.26.0: three separate FIDE ratings (Classical/Rapid/Blitz), and FIDE
+    no longer overrides the platform (chess.com/lichess) rating."""
+
+    def _create(self, live_server, **extra):
+        return api_post(
+            live_server,
+            "/api/players",
+            {"username": "otbtester", "display_name": "OTB Tester",
+             "rating": 1234, **extra},
+        )
+
+    def test_create_with_three_fide_ratings(self, live_server):
+        status, _ = self._create(
+            live_server,
+            fide_rating_classical=1516,
+            fide_rating_rapid=1450,
+            fide_rating_blitz=1400,
+        )
+        assert status == 201
+        p = [x for x in api_get(live_server, "/api/players")
+             if x["username"] == "otbtester"][0]
+        assert p["fide_rating_classical"] == 1516
+        assert p["fide_rating_rapid"] == 1450
+        assert p["fide_rating_blitz"] == 1400
+        # FIDE must NOT override the platform rating (v1.26.0 behavior change).
+        assert p["latest_rating"] == 1234
+
+    def test_update_fide_ratings(self, live_server):
+        _, data = self._create(live_server, fide_rating_classical=1500)
+        pid = data["id"]
+        # The Settings form submits the full set of fields on save.
+        status, _ = api_put(
+            live_server,
+            f"/api/players/{pid}",
+            {
+                "display_name": "OTB Tester",
+                "fide_rating_classical": 1500,
+                "fide_rating_rapid": 1480,
+                "fide_rating_blitz": 1470,
+            },
+        )
+        assert status == 200
+        p = [x for x in api_get(live_server, "/api/players") if x["id"] == pid][0]
+        assert p["fide_rating_classical"] == 1500
+        assert p["fide_rating_rapid"] == 1480
+        assert p["fide_rating_blitz"] == 1470

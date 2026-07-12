@@ -38,7 +38,9 @@ export function PlayersSection() {
         age: data.age,
         lichess_username: data.lichess_username || null,
         fide_id: data.fide_id || null,
-        fide_rating: data.fide_rating,
+        fide_rating_classical: data.fide_rating_classical,
+        fide_rating_rapid: data.fide_rating_rapid,
+        fide_rating_blitz: data.fide_rating_blitz,
       });
     } else {
       await createPlayer({
@@ -47,7 +49,9 @@ export function PlayersSection() {
         age: data.age ?? undefined,
         lichess_username: data.lichess_username || undefined,
         fide_id: data.fide_id || undefined,
-        fide_rating: data.fide_rating ?? undefined,
+        fide_rating_classical: data.fide_rating_classical ?? undefined,
+        fide_rating_rapid: data.fide_rating_rapid ?? undefined,
+        fide_rating_blitz: data.fide_rating_blitz ?? undefined,
       });
     }
     await refreshPlayers();
@@ -95,8 +99,22 @@ export function PlayersSection() {
                     <span>Lichess: {player.lichess_username}</span>
                   )}
                   {player.age && <span>Age: {player.age}</span>}
-                  {player.fide_rating && (
-                    <span>FIDE: {player.fide_rating}</span>
+                  {(player.fide_rating_classical ||
+                    player.fide_rating_rapid ||
+                    player.fide_rating_blitz) && (
+                    <span>
+                      FIDE:{" "}
+                      {[
+                        player.fide_rating_classical &&
+                          `C ${player.fide_rating_classical}`,
+                        player.fide_rating_rapid &&
+                          `R ${player.fide_rating_rapid}`,
+                        player.fide_rating_blitz &&
+                          `B ${player.fide_rating_blitz}`,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </span>
                   )}
                 </div>
               </div>

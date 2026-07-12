@@ -42,8 +42,16 @@ export function PlayerCard({ player }: PlayerCardProps) {
           <PlatformLinkCard
             platform="fide"
             url={player.fide_url}
-            rating={player.fide_rating}
-            subtitle={player.fide_id ? `ID: ${player.fide_id}` : undefined}
+            rating={player.fide_rating_classical}
+            subtitle={
+              [
+                player.fide_rating_rapid && `R ${player.fide_rating_rapid}`,
+                player.fide_rating_blitz && `B ${player.fide_rating_blitz}`,
+                player.fide_id && `ID: ${player.fide_id}`,
+              ]
+                .filter(Boolean)
+                .join(" · ") || undefined
+            }
           />
         </div>
       </CardContent>
