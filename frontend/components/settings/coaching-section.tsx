@@ -29,6 +29,7 @@ interface CoachingForm {
   qwen_model: string;
   ollama_model: string;
   ollama_base_url: string;
+  reasoning_effort: "low" | "medium" | "high" | "xhigh" | "max";
   tone: "encouraging" | "balanced" | "technical";
   detail_level: "concise" | "standard" | "detailed";
   focus_areas: string[];
@@ -46,15 +47,16 @@ const ALL_FOCUS_AREAS = [
 
 const DEFAULTS: CoachingForm = {
   default_provider: "claude",
-  anthropic_model: "claude-opus-4-7",
-  openai_model: "gpt-5.5-pro-2026-04-23",
-  gemini_model: "gemini-2.5-pro",
-  grok_model: "grok-3",
+  anthropic_model: "claude-opus-4-8",
+  openai_model: "gpt-5.6-sol",
+  gemini_model: "gemini-3.5-flash",
+  grok_model: "grok-4.5",
   mistral_model: "mistral-medium-latest",
-  deepseek_model: "deepseek-reasoner",
-  qwen_model: "qwen3-235b-a22b",
+  deepseek_model: "deepseek-v4-pro",
+  qwen_model: "qwen3.7-max",
   ollama_model: "deepseek-r1:8b",
   ollama_base_url: "http://localhost:11434",
+  reasoning_effort: "xhigh",
   tone: "balanced",
   detail_level: "standard",
   focus_areas: ["openings", "tactics", "endgames", "time_management", "positional_play"],
@@ -63,13 +65,13 @@ const DEFAULTS: CoachingForm = {
 };
 
 const MODEL_FIELDS: { key: keyof CoachingForm; label: string; placeholder: string }[] = [
-  { key: "anthropic_model", label: "Claude Model", placeholder: "claude-opus-4-7" },
-  { key: "openai_model", label: "ChatGPT Model", placeholder: "gpt-5.5-pro-2026-04-23" },
-  { key: "gemini_model", label: "Gemini Model", placeholder: "gemini-2.5-pro" },
-  { key: "grok_model", label: "Grok Model", placeholder: "grok-3" },
+  { key: "anthropic_model", label: "Claude Model", placeholder: "claude-opus-4-8" },
+  { key: "openai_model", label: "ChatGPT Model", placeholder: "gpt-5.6-sol" },
+  { key: "gemini_model", label: "Gemini Model", placeholder: "gemini-3.5-flash" },
+  { key: "grok_model", label: "Grok Model", placeholder: "grok-4.5" },
   { key: "mistral_model", label: "Mistral Model", placeholder: "mistral-medium-latest" },
-  { key: "deepseek_model", label: "DeepSeek Model", placeholder: "deepseek-reasoner" },
-  { key: "qwen_model", label: "Qwen Model", placeholder: "qwen3-235b-a22b" },
+  { key: "deepseek_model", label: "DeepSeek Model", placeholder: "deepseek-v4-pro" },
+  { key: "qwen_model", label: "Qwen Model", placeholder: "qwen3.7-max" },
   { key: "ollama_model", label: "Ollama Model", placeholder: "deepseek-r1:8b" },
 ];
 
@@ -93,6 +95,7 @@ export function CoachingSection() {
             qwen_model: s.coaching.qwen_model || DEFAULTS.qwen_model,
             ollama_model: s.coaching.ollama_model || DEFAULTS.ollama_model,
             ollama_base_url: s.coaching.ollama_base_url || DEFAULTS.ollama_base_url,
+            reasoning_effort: s.coaching.reasoning_effort || DEFAULTS.reasoning_effort,
             tone: s.coaching.tone || DEFAULTS.tone,
             detail_level: s.coaching.detail_level || DEFAULTS.detail_level,
             focus_areas: s.coaching.focus_areas || DEFAULTS.focus_areas,
@@ -318,6 +321,35 @@ export function CoachingSection() {
               </div>
             ))}
           </div>
+        </div>
+
+        {/* Reasoning Effort */}
+        <div className="space-y-2">
+          <Label htmlFor="reasoning_effort">Reasoning Effort</Label>
+          <Select
+            value={form.reasoning_effort}
+            onValueChange={(v) => {
+              setForm((prev) => ({ ...prev, reasoning_effort: v as CoachingForm["reasoning_effort"] }));
+              setStatus(null);
+            }}
+          >
+            <SelectTrigger id="reasoning_effort" className="max-w-md">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="low">Low</SelectItem>
+              <SelectItem value="medium">Medium</SelectItem>
+              <SelectItem value="high">High</SelectItem>
+              <SelectItem value="xhigh">Extra High (xhigh)</SelectItem>
+              <SelectItem value="max">Max</SelectItem>
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            How deeply the reasoning model thinks. Applies to providers with a
+            granular effort scale — Claude, ChatGPT, and Mistral (clamped to each
+            provider&apos;s ceiling). Gemini, Grok, DeepSeek, Qwen, and Ollama
+            reason by default and ignore this.
+          </p>
         </div>
 
         {/* Ollama Base URL */}

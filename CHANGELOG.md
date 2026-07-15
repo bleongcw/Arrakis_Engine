@@ -4,6 +4,40 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.27.0] - 2026-07-15
+
+### Changed
+- **Upgraded every coaching provider to its current flagship reasoning model.**
+  Claude → **Opus 4.8** (`claude-opus-4-8`), ChatGPT → **GPT-5.6 "Sol"**
+  (`gpt-5.6-sol`), Gemini → `gemini-3.5-flash`, Grok → `grok-4.5`, DeepSeek →
+  `deepseek-v4-pro` (the old `deepseek-reasoner` alias retires 2026-07-24),
+  Qwen → `qwen3.7-max`; Mistral stays on the latest-tracking `mistral-medium-latest`
+  and Ollama on the local `deepseek-r1:8b`. Both the registry defaults and the
+  live `config.yaml` overrides were updated (the config override wins).
+
+### Added
+- **Configurable reasoning effort** — new `coaching.reasoning_effort` setting
+  (default **`xhigh`** = "extra high") + a **Reasoning Effort** dropdown in
+  Settings → Coaching (low / medium / high / xhigh / max). Applied where the
+  provider exposes a granular scale — Claude (`output_config.effort`), ChatGPT
+  (`reasoning.effort`), Mistral (`reasoning_effort`) — and clamped down to each
+  provider's ceiling by `_effort_for` (e.g. `max`→`xhigh` for ChatGPT,
+  `xhigh`/`max`→`high` for Mistral). Gemini/Grok/DeepSeek/Qwen reason by default
+  and ignore it; Ollama is local.
+
+### Docs
+- Corrected the long-standing CLAUDE.md claim that a "reasoning-models-required"
+  contract is *code-enforced in `llm_providers.py`* — there is no allowlist; it's
+  a convention held by the defaults + the adaptive-thinking / Responses-API paths.
+
+### Tests
+- Backend **701 → 724** (+23): `_effort_for` clamp matrix; mock-based checks that
+  `output_config.effort` (Claude) and `reasoning.effort` (ChatGPT) reach the SDK
+  call and default to `xhigh`; coaching-settings GET defaults + `reasoning_effort`
+  persist/reject round-trip; all hardcoded model IDs refreshed.
+
+---
+
 ## [1.26.3] - 2026-07-12
 
 ### Added

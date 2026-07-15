@@ -13,6 +13,9 @@ from src.llm_providers import (
     PROVIDER_REGISTRY,
     VALID_PROVIDERS,
     _strip_thinking_tags,
+    _effort_for,
+    _call_anthropic,
+    _call_openai_responses,
     resolve_model,
     call_provider,
     get_available_providers,
@@ -56,7 +59,7 @@ class TestProviderRegistry:
         assert PROVIDER_REGISTRY[slug]["default_timeout"] > 0
 
     def test_openai_timeout_at_least_600s(self):
-        # v1.8.1 regression lock: gpt-5.5-pro is a deep-reasoning model and the
+        # v1.8.1 regression lock: gpt-5.6-sol is a deep-reasoning model and the
         # ~6200-token coaching prompt (history + trajectory injection) regularly
         # takes 2-5 minutes end-to-end. Live verification on Bernard's DB clocked
         # 5min02s on Evan's game 954. The 300s floor matches Claude/DeepSeek/Gemini
@@ -111,11 +114,11 @@ class TestResolveModel:
 
     def test_default_model_used_when_no_config(self):
         result = resolve_model("claude", None, None)
-        assert result == "claude-opus-4-7"
+        assert result == "claude-opus-4-8"
 
     def test_default_model_used_when_config_key_missing(self):
-        result = resolve_model("claude", None, {"openai_model": "gpt-5.5-pro-2026-04-23"})
-        assert result == "claude-opus-4-7"
+        result = resolve_model("claude", None, {"openai_model": "gpt-5.6-sol"})
+        assert result == "claude-opus-4-8"
 
     def test_unknown_provider_raises(self):
         with pytest.raises(ValueError, match="Unknown provider"):
@@ -226,3 +229,76 @@ class TestGetAvailableProviders:
         providers = get_available_providers()
         ollama = next(p for p in providers if p["slug"] == "ollama")
         assert ollama["configured"] is True
+
+
+# ── Reasoning effort (v1.27.0) ───────────────────────────
+
+
+class TestReasoningEffort:
+    """Configurable reasoning effort: clamp per provider + reaches the SDK call."""
+
+    @pytest.mark.parametrize("provider,effort,expected", [
+        ("claude", "xhigh", "xhigh"),
+        ("claude", "max", "max"),
+        ("claude", "low", "low"),
+        ("openai", "xhigh", "xhigh"),
+        ("openai", "max", "xhigh"),        # OpenAI scale tops out at xhigh
+        ("mistral", "xhigh", "high"),      # Mistral caps at high
+        ("mistral", "max", "high"),
+        ("mistral", "medium", "medium"),
+        ("grok", "xhigh", None),           # no compatible knob
+        ("gemini", "xhigh", None),
+        ("deepseek", "xhigh", None),
+        ("qwen", "xhigh", None),
+        ("ollama", "xhigh", None),
+        ("claude", None, None),
+        ("claude", "", None),
+    ])
+    def test_effort_for_clamps(self, provider, effort, expected):
+        assert _effort_for(provider, effort) == expected
+
+    def _fake_anthropic(self):
+        client = MagicMock()
+        block = MagicMock()
+        block.type = "text"
+        block.text = "ok"
+        client.messages.create.return_value.content = [block]
+        return client
+
+    def test_anthropic_passes_output_config_effort(self):
+        client = self._fake_anthropic()
+        with patch("anthropic.Anthropic", return_value=client):
+            _call_anthropic("prompt", "claude-opus-4-8", "key", effort="xhigh")
+        kwargs = client.messages.create.call_args.kwargs
+        assert kwargs["output_config"] == {"effort": "xhigh"}
+        assert kwargs["thinking"] == {"type": "adaptive"}  # kept
+
+    def test_anthropic_omits_output_config_when_no_effort(self):
+        client = self._fake_anthropic()
+        with patch("anthropic.Anthropic", return_value=client):
+            _call_anthropic("prompt", "claude-opus-4-8", "key", effort=None)
+        assert "output_config" not in client.messages.create.call_args.kwargs
+
+    def test_openai_responses_passes_reasoning_effort(self):
+        client = MagicMock()
+        client.responses.create.return_value.output_text = "ok"
+        with patch("openai.OpenAI", return_value=client):
+            _call_openai_responses("prompt", "gpt-5.6-sol", "key", effort="xhigh")
+        assert client.responses.create.call_args.kwargs["reasoning"] == {"effort": "xhigh"}
+
+    def test_call_provider_claude_applies_config_effort(self):
+        """End-to-end dispatch: coaching_config.reasoning_effort reaches the call."""
+        client = self._fake_anthropic()
+        with patch("anthropic.Anthropic", return_value=client), \
+             patch.dict(os.environ, {"ARRAKIS_ANTHROPIC_API_KEY": "k"}):
+            call_provider("claude", "prompt",
+                          coaching_config={"reasoning_effort": "max"})
+        assert client.messages.create.call_args.kwargs["output_config"] == {"effort": "max"}
+
+    def test_call_provider_default_effort_is_xhigh(self):
+        """No reasoning_effort in config → defaults to xhigh."""
+        client = self._fake_anthropic()
+        with patch("anthropic.Anthropic", return_value=client), \
+             patch.dict(os.environ, {"ARRAKIS_ANTHROPIC_API_KEY": "k"}):
+            call_provider("claude", "prompt", coaching_config={})
+        assert client.messages.create.call_args.kwargs["output_config"] == {"effort": "xhigh"}

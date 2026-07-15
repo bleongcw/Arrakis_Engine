@@ -5,7 +5,7 @@ Local Python app that pulls games from Chess.com and Lichess, runs Stockfish ana
 and uses reasoning LLMs to generate age-appropriate coaching insights with
 pattern tracking over time. Inspired by Eleanor, Evan, and Estella.
 
-Current release: **v1.26.3** (2026-07-12). See `CHANGELOG.md` for full history.
+Current release: **v1.27.0** (2026-07-15). See `CHANGELOG.md` for full history.
 
 ## Architecture
 - Python 3.11+, SQLite (WAL mode), local Stockfish on Apple Silicon
@@ -48,11 +48,15 @@ Current release: **v1.26.3** (2026-07-12). See `CHANGELOG.md` for full history.
 ## Key Configuration
 - Stockfish: depth 22, 6 threads, 512MB hash, path configured in `config.yaml`
 - LLM: unified provider abstraction (`src/llm_providers.py`) supporting 8 providers:
-  - **Cloud:** Claude (`claude-opus-4-7`), ChatGPT (`gpt-5.5-pro-2026-04-23`), Gemini (`gemini-2.5-pro`),
-    Grok (`grok-3`), Mistral (`mistral-medium-latest`), DeepSeek (`deepseek-reasoner`),
-    Qwen (`qwen3-235b-a22b`)
+  - **Cloud (v1.27.0 flagships):** Claude (`claude-opus-4-8`), ChatGPT (`gpt-5.6-sol`),
+    Gemini (`gemini-3.5-flash`), Grok (`grok-4.5`), Mistral (`mistral-medium-latest`),
+    DeepSeek (`deepseek-v4-pro`), Qwen (`qwen3.7-max`)
   - **Local:** Ollama (`deepseek-r1:8b`) — no API key required
-- Reasoning models are required (hard requirement, not preference)
+- Reasoning models are required (convention, not code-enforced — see below)
+- Reasoning effort (v1.27.0): `coaching.reasoning_effort` (default `xhigh`) —
+  applied where the provider has a granular scale: Claude (`output_config.effort`),
+  ChatGPT (`reasoning.effort`), Mistral (`reasoning_effort`, capped at high);
+  clamped per provider by `_effort_for` in `src/llm_providers.py`
 - Coaching history depth (v1.3.0+): default 5 recent games, configurable 1-20
 - Hunter Mode (v1.4.4+): sliding window default 6 months, optional max games cap
 - Config via `config.yaml`, secrets via `.env`:
@@ -297,7 +301,7 @@ harvest + report).
 
 ## Testing
 
-**~929 tests total** — 701 backend (pytest, three tiers via `pyproject.toml`
+**~952 tests total** — 724 backend (pytest, three tiers via `pyproject.toml`
 markers) + 228 frontend (Vitest). Integration (`-m integration`, needs Stockfish)
 and live (`-m live`, needs an LLM key) tiers are excluded by default.
 
@@ -330,7 +334,11 @@ module — `@patch("src.coach.coach_pending")` — not at the consuming module.
   (v1.16.x). Slug-only lookups; one explicit `WHERE username = ?` exception
   (player-creation existence check), enforced by a static guard test.
 - **Soft-delete via `is_active`** — preserves game history
-- **Reasoning models required** — hard contract enforced in `llm_providers.py`
+- **Reasoning models required** — a convention, NOT a code gate. `resolve_model`
+  / `call_provider` accept any model string; the contract holds because every
+  registry default is a reasoning model, the Anthropic path sends
+  `thinking={"type":"adaptive"}`, and OpenAI uses the Responses (reasoning) API.
+  There is no allowlist to update when adding a model.
 - **LLM output is plain text, never JSON** — `TREND_PROMPT` /
   `RECENT_FORM_REVIEW_PROMPT` emphatically forbid JSON (v1.15.4); the frontend
   `parseTrendSummary` is JSON-array tolerant as belt-and-braces (v1.14.1).

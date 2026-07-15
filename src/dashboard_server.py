@@ -599,15 +599,16 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             },
             "coaching": {
                 "default_provider": coaching.get("default_provider", "claude"),
-                "anthropic_model": coaching.get("anthropic_model", "claude-opus-4-6"),
-                "openai_model": coaching.get("openai_model", "gpt-5.4"),
-                "gemini_model": coaching.get("gemini_model", "gemini-2.5-pro"),
-                "grok_model": coaching.get("grok_model", "grok-3"),
+                "anthropic_model": coaching.get("anthropic_model", "claude-opus-4-8"),
+                "openai_model": coaching.get("openai_model", "gpt-5.6-sol"),
+                "gemini_model": coaching.get("gemini_model", "gemini-3.5-flash"),
+                "grok_model": coaching.get("grok_model", "grok-4.5"),
                 "mistral_model": coaching.get("mistral_model", "mistral-medium-latest"),
-                "deepseek_model": coaching.get("deepseek_model", "deepseek-reasoner"),
-                "qwen_model": coaching.get("qwen_model", "qwen3-235b-a22b"),
+                "deepseek_model": coaching.get("deepseek_model", "deepseek-v4-pro"),
+                "qwen_model": coaching.get("qwen_model", "qwen3.7-max"),
                 "ollama_model": coaching.get("ollama_model", "deepseek-r1:8b"),
                 "ollama_base_url": coaching.get("ollama_base_url", "http://localhost:11434"),
+                "reasoning_effort": coaching.get("reasoning_effort", "xhigh"),
                 "tone": coaching.get("tone", "balanced"),
                 "detail_level": coaching.get("detail_level", "standard"),
                 "focus_areas": coaching.get("focus_areas", [
@@ -752,6 +753,14 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                         "ollama_base_url"):
                 if key in body:
                     coaching[key] = str(body[key]).strip()
+
+            if "reasoning_effort" in body:
+                val = str(body["reasoning_effort"]).lower()
+                VALID_EFFORT = {"low", "medium", "high", "xhigh", "max"}
+                if val not in VALID_EFFORT:
+                    self._send_json({"error": f"Invalid reasoning effort: {val}"}, 400)
+                    return
+                coaching["reasoning_effort"] = val
 
             if "tone" in body:
                 val = str(body["tone"]).lower()

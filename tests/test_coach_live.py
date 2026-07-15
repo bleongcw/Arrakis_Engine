@@ -174,7 +174,7 @@ class TestStructuredFeedbackCompliance:
         """Claude opus-4-7 should produce all 5 sections reliably."""
         if not os.getenv("ARRAKIS_ANTHROPIC_API_KEY"):
             pytest.skip("ARRAKIS_ANTHROPIC_API_KEY not set")
-        model = "claude-opus-4-7"
+        model = "claude-opus-4-8"
         result = coach_game(
             analyzed_game, provider="claude", model=model, db_path=db_path,
         )
@@ -188,7 +188,7 @@ class TestStructuredFeedbackCompliance:
         any future regression to a non-compliant model would fail loudly."""
         if not os.getenv("ARRAKIS_OPENAI_API_KEY"):
             pytest.skip("ARRAKIS_OPENAI_API_KEY not set")
-        model = "gpt-5.5-pro-2026-04-23"
+        model = "gpt-5.6-sol"
         result = coach_game(
             analyzed_game, provider="openai", model=model, db_path=db_path,
         )
@@ -454,7 +454,7 @@ class TestTrendSummaryCompliance:
         from src.patterns import generate_trend_summary
 
         pid, db_path = trend_stats_borderline_db
-        model = "gpt-5.5-pro-2026-04-23"
+        model = "gpt-5.6-sol"
         summary = generate_trend_summary(
             pid, db_path=db_path, provider="openai", model=model,
         )
@@ -492,7 +492,7 @@ class TestTrendSummaryCompliance:
         from src.patterns import generate_trend_summary
 
         pid, db_path = trend_stats_db
-        model = "gpt-5.5-pro-2026-04-23"
+        model = "gpt-5.6-sol"
         summary = generate_trend_summary(
             pid, db_path=db_path, provider="openai", model=model,
         )
@@ -507,7 +507,7 @@ class TestTrendSummaryCompliance:
         synthetic stats blob exercises BOTH motif-citation (v1.15.0)
         AND phase-citation (v1.16.0).
 
-        Cost: ~$0.05 (one extra gpt-5.5-pro reasoning call per
+        Cost: ~$0.05 (one extra gpt-5.6-sol reasoning call per
         full live-test pass).
         """
         if not os.getenv("ARRAKIS_OPENAI_API_KEY"):
@@ -515,7 +515,7 @@ class TestTrendSummaryCompliance:
         from src.patterns import generate_trend_summary
 
         pid, db_path = trend_stats_db
-        model = "gpt-5.5-pro-2026-04-23"
+        model = "gpt-5.6-sol"
         summary = generate_trend_summary(
             pid, db_path=db_path, provider="openai", model=model,
         )
@@ -592,7 +592,7 @@ class TestTrendSummaryCompliance:
 
         summary = generate_trend_summary(
             pid, db_path=db_path,
-            provider="openai", model="gpt-5.5-pro-2026-04-23",
+            provider="openai", model="gpt-5.6-sol",
         )
         assert summary
         assert len(summary) > 400, (

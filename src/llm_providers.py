@@ -27,7 +27,7 @@ PROVIDER_REGISTRY = {
     "claude": {
         "display_name": "Claude",
         "sdk_type": "anthropic",
-        "default_model": "claude-opus-4-7",
+        "default_model": "claude-opus-4-8",
         "env_var": "ARRAKIS_ANTHROPIC_API_KEY",
         "base_url": None,
         "default_timeout": 300.0,  # Opus with extended thinking needs more time
@@ -38,10 +38,10 @@ PROVIDER_REGISTRY = {
     "openai": {
         "display_name": "ChatGPT",
         "sdk_type": "openai_responses",
-        "default_model": "gpt-5.5-pro-2026-04-23",
+        "default_model": "gpt-5.6-sol",
         "env_var": "ARRAKIS_OPENAI_API_KEY",
         "base_url": None,
-        "default_timeout": 600.0,  # Reasoning model (gpt-5.5-pro); ~6200-token coaching prompt with trajectory injection regularly runs 2-5 minutes
+        "default_timeout": 600.0,  # Reasoning model (gpt-5.6 Sol) at xhigh effort; a ~6200-token coaching prompt with trajectory injection regularly runs 2-5 minutes
         "config_model_key": "openai_model",
         "group": "cloud",
         "color": "#059669",
@@ -49,7 +49,7 @@ PROVIDER_REGISTRY = {
     "gemini": {
         "display_name": "Gemini",
         "sdk_type": "google_genai",
-        "default_model": "gemini-2.5-pro",
+        "default_model": "gemini-3.5-flash",
         "env_var": "ARRAKIS_GOOGLE_API_KEY",
         "base_url": None,
         "default_timeout": 300.0,  # Reasoning model, needs more time
@@ -60,7 +60,7 @@ PROVIDER_REGISTRY = {
     "grok": {
         "display_name": "Grok",
         "sdk_type": "openai_chat",
-        "default_model": "grok-3",
+        "default_model": "grok-4.5",
         "env_var": "ARRAKIS_XAI_API_KEY",
         "base_url": "https://api.x.ai/v1",
         "default_timeout": 120.0,
@@ -82,7 +82,7 @@ PROVIDER_REGISTRY = {
     "deepseek": {
         "display_name": "DeepSeek",
         "sdk_type": "openai_chat",
-        "default_model": "deepseek-reasoner",
+        "default_model": "deepseek-v4-pro",
         "env_var": "ARRAKIS_DEEPSEEK_API_KEY",
         "base_url": "https://api.deepseek.com",
         "default_timeout": 300.0,  # Reasoning model, needs more time
@@ -93,7 +93,7 @@ PROVIDER_REGISTRY = {
     "qwen": {
         "display_name": "Qwen",
         "sdk_type": "openai_chat",
-        "default_model": "qwen3-235b-a22b",
+        "default_model": "qwen3.7-max",
         "env_var": "ARRAKIS_QWEN_API_KEY",
         "base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
         "default_timeout": 120.0,
@@ -131,24 +131,73 @@ def _strip_thinking_tags(text: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Reasoning effort (v1.27.0)
+# ---------------------------------------------------------------------------
+# A single configured effort (default "xhigh") maps to each provider's native
+# reasoning control. Providers not listed reason by default and take no effort
+# argument (Gemini/Grok/DeepSeek/Qwen thinking is on by default; Ollama local).
+
+DEFAULT_REASONING_EFFORT = "xhigh"
+
+# Global ordering used to clamp a requested effort down to a provider's ceiling.
+_EFFORT_ORDER = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+
+# Per-provider supported effort scales (ascending).
+_PROVIDER_EFFORTS = {
+    "claude": ["low", "medium", "high", "xhigh", "max"],
+    "openai": ["none", "minimal", "low", "medium", "high", "xhigh"],
+    "mistral": ["low", "medium", "high"],
+}
+
+
+def _effort_for(provider_slug: str, effort: str | None) -> str | None:
+    """Clamp a requested reasoning effort to a provider's supported scale.
+
+    Returns None when the provider exposes no compatible knob (so no argument is
+    sent) or `effort` is empty. If the exact level isn't supported, clamps DOWN
+    to the highest supported level at or below it (e.g. "max" -> "xhigh" for
+    OpenAI, "xhigh"/"max" -> "high" for Mistral) so a request never 400s.
+    """
+    if not effort:
+        return None
+    allowed = _PROVIDER_EFFORTS.get(provider_slug)
+    if not allowed:
+        return None
+    if effort in allowed:
+        return effort
+    want = _EFFORT_ORDER.index(effort) if effort in _EFFORT_ORDER else len(_EFFORT_ORDER)
+    for level in reversed(allowed):  # highest supported first
+        if _EFFORT_ORDER.index(level) <= want:
+            return level
+    return allowed[0]
+
+
+# ---------------------------------------------------------------------------
 # SDK Call Implementations
 # ---------------------------------------------------------------------------
 
 def _call_anthropic(prompt: str, model: str, api_key: str,
-                    timeout: float = 120.0) -> str:
-    """Call Anthropic Claude API with extended thinking."""
+                    timeout: float = 120.0, effort: str | None = None) -> str:
+    """Call Anthropic Claude API with adaptive thinking.
+
+    `effort` (e.g. "xhigh") sets `output_config.effort` — combined with adaptive
+    thinking, this is how Opus 4.8 dials reasoning depth. `budget_tokens` is
+    removed on Opus 4.7/4.8, so effort is the control.
+    """
     import anthropic
 
     client = anthropic.Anthropic(api_key=api_key, timeout=timeout)
 
-    response = client.messages.create(
-        model=model,
-        max_tokens=16000,
-        thinking={
-            "type": "adaptive",
-        },
-        messages=[{"role": "user", "content": prompt}],
-    )
+    kwargs = {
+        "model": model,
+        "max_tokens": 16000,
+        "thinking": {"type": "adaptive"},
+        "messages": [{"role": "user", "content": prompt}],
+    }
+    if effort:
+        kwargs["output_config"] = {"effort": effort}
+
+    response = client.messages.create(**kwargs)
 
     # Extract text from response (skip thinking blocks)
     for block in response.content:
@@ -159,17 +208,25 @@ def _call_anthropic(prompt: str, model: str, api_key: str,
 
 
 def _call_openai_responses(prompt: str, model: str, api_key: str,
-                           timeout: float = 120.0) -> str:
-    """Call OpenAI Responses API (for ChatGPT reasoning models)."""
+                           timeout: float = 120.0, effort: str | None = None) -> str:
+    """Call OpenAI Responses API (for ChatGPT reasoning models).
+
+    `effort` (e.g. "xhigh") sets `reasoning.effort` — GPT-5.6 Sol's reasoning
+    depth control.
+    """
     from openai import OpenAI
 
     client = OpenAI(api_key=api_key, timeout=timeout)
 
-    response = client.responses.create(
-        model=model,
-        instructions="You are an expert chess coach. Respond only with valid JSON.",
-        input=prompt,
-    )
+    kwargs = {
+        "model": model,
+        "instructions": "You are an expert chess coach. Respond only with valid JSON.",
+        "input": prompt,
+    }
+    if effort:
+        kwargs["reasoning"] = {"effort": effort}
+
+    response = client.responses.create(**kwargs)
 
     return response.output_text
 
@@ -221,20 +278,28 @@ def _call_google_genai(prompt: str, model: str, api_key: str,
 
 
 def _call_mistral(prompt: str, model: str, api_key: str,
-                  timeout: float = 120.0) -> str:
-    """Call Mistral AI API."""
+                  timeout: float = 120.0, effort: str | None = None) -> str:
+    """Call Mistral AI API.
+
+    `effort` maps to Mistral's `reasoning_effort` (reasoning models cap at
+    "high"); omitted when unset.
+    """
     from mistralai import Mistral
 
     client = Mistral(api_key=api_key, timeout_ms=int(timeout * 1000))
 
-    response = client.chat.complete(
-        model=model,
-        messages=[
+    kwargs = {
+        "model": model,
+        "messages": [
             {"role": "system",
              "content": "You are an expert chess coach. Respond only with valid JSON."},
             {"role": "user", "content": prompt},
         ],
-    )
+    }
+    if effort:
+        kwargs["reasoning_effort"] = effort
+
+    response = client.chat.complete(**kwargs)
 
     return response.choices[0].message.content or ""
 
@@ -295,6 +360,13 @@ def call_provider(provider_slug: str, prompt: str,
     used_model = resolve_model(provider_slug, model, coaching_config)
     used_timeout = timeout or reg["default_timeout"]
 
+    # Reasoning effort (v1.27.0): a single configured level, clamped to this
+    # provider's supported scale (None if the provider takes no effort arg).
+    cfg_effort = (coaching_config or {}).get(
+        "reasoning_effort", DEFAULT_REASONING_EFFORT
+    )
+    effort = _effort_for(provider_slug, cfg_effort)
+
     # Validate API key (skip for Ollama)
     api_key = None
     if reg["env_var"]:
@@ -309,10 +381,12 @@ def call_provider(provider_slug: str, prompt: str,
 
     try:
         if sdk_type == "anthropic":
-            return _call_anthropic(prompt, used_model, api_key, used_timeout)
+            return _call_anthropic(prompt, used_model, api_key, used_timeout,
+                                   effort=effort)
 
         elif sdk_type == "openai_responses":
-            return _call_openai_responses(prompt, used_model, api_key, used_timeout)
+            return _call_openai_responses(prompt, used_model, api_key, used_timeout,
+                                          effort=effort)
 
         elif sdk_type == "openai_chat":
             base_url = reg["base_url"]
@@ -327,7 +401,8 @@ def call_provider(provider_slug: str, prompt: str,
             return _call_google_genai(prompt, used_model, api_key, used_timeout)
 
         elif sdk_type == "mistral":
-            return _call_mistral(prompt, used_model, api_key, used_timeout)
+            return _call_mistral(prompt, used_model, api_key, used_timeout,
+                                 effort=effort)
 
         else:
             raise ValueError(f"Unknown SDK type: {sdk_type}")

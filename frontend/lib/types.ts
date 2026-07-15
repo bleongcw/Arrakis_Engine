@@ -633,6 +633,7 @@ export interface CoachingSettings {
   qwen_model: string;
   ollama_model: string;
   ollama_base_url: string;
+  reasoning_effort: "low" | "medium" | "high" | "xhigh" | "max";
   tone: "encouraging" | "balanced" | "technical";
   detail_level: "concise" | "standard" | "detailed";
   focus_areas: string[];

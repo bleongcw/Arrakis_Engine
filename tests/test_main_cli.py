@@ -95,11 +95,11 @@ class TestCmdTrend:
 
         args = _args(
             player=["evan"], provider="openai",
-            model="gpt-5.5-pro-2026-04-23",
+            model="gpt-5.6-sol",
         )
         main_module.cmd_trend(args, _config(db_path))
 
-        assert captured.get("model") == "gpt-5.5-pro-2026-04-23"
+        assert captured.get("model") == "gpt-5.6-sol"
 
     def test_skips_missing_player_with_warn(
         self, db_path, monkeypatch, capsys,

@@ -48,21 +48,28 @@ coaching:
   default_provider: claude                # claude | openai | gemini | grok | mistral | deepseek | qwen | ollama
 
   # Cloud providers — set API keys in .env.
-  # v1.7.0 standardized on the newer reasoning models below. Older models
-  # (gpt-5.4, claude-opus-4-6) are not reliable at following structured
-  # output formats like the v1.13.0 phase-by-phase player feedback —
-  # always prefer the values below for best coaching output quality.
-  anthropic_model: claude-opus-4-7              # Anthropic Claude (ARRAKIS_ANTHROPIC_API_KEY)
-  openai_model: gpt-5.5-pro-2026-04-23          # OpenAI ChatGPT (ARRAKIS_OPENAI_API_KEY)
-  gemini_model: gemini-2.5-pro                  # Google Gemini (ARRAKIS_GOOGLE_API_KEY)
-  grok_model: grok-3                      # xAI Grok (ARRAKIS_XAI_API_KEY)
-  mistral_model: mistral-medium-latest    # Mistral AI (ARRAKIS_MISTRAL_API_KEY)
-  deepseek_model: deepseek-reasoner       # DeepSeek Cloud (ARRAKIS_DEEPSEEK_API_KEY)
-  qwen_model: qwen3-235b-a22b            # Alibaba Qwen (ARRAKIS_QWEN_API_KEY)
+  # Reasoning models are required. v1.27.0 bumped every provider to its current
+  # flagship reasoning model; always prefer the values below for best coaching
+  # output quality (older models follow the structured phase-by-phase feedback
+  # format less reliably).
+  anthropic_model: claude-opus-4-8              # Anthropic Claude Opus 4.8 (ARRAKIS_ANTHROPIC_API_KEY)
+  openai_model: gpt-5.6-sol                     # OpenAI GPT-5.6 "Sol" (ARRAKIS_OPENAI_API_KEY)
+  gemini_model: gemini-3.5-flash                # Google Gemini 3.5 Flash (ARRAKIS_GOOGLE_API_KEY)
+  grok_model: grok-4.5                    # xAI Grok 4.5 (ARRAKIS_XAI_API_KEY)
+  mistral_model: mistral-medium-latest    # Mistral AI (latest, reasoning-enabled) (ARRAKIS_MISTRAL_API_KEY)
+  deepseek_model: deepseek-v4-pro         # DeepSeek V4 Pro (ARRAKIS_DEEPSEEK_API_KEY)
+  qwen_model: qwen3.7-max                # Alibaba Qwen 3.7 Max (ARRAKIS_QWEN_API_KEY)
 
   # Local provider — no API key needed, requires `ollama serve` running
   ollama_model: deepseek-r1:8b            # Ollama local model
   ollama_base_url: http://localhost:11434  # Ollama server URL
+
+  # Reasoning effort (v1.27.0): low | medium | high | xhigh | max.
+  # Applied where the provider exposes a granular scale — Claude
+  # (output_config.effort), ChatGPT (reasoning.effort), Mistral (reasoning_effort,
+  # capped at high). Clamped down to each provider's ceiling; ignored by
+  # providers whose reasoning is on by default (Gemini/Grok/DeepSeek/Qwen/Ollama).
+  reasoning_effort: xhigh
 
   tone: balanced                     # encouraging | balanced | technical
   detail_level: standard             # concise | standard | detailed

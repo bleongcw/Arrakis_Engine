@@ -329,7 +329,7 @@ class TestJournalAPI:
             """INSERT INTO journal_entries
             (player_id, kind, platform, body, refs_json, provider, created_at)
             VALUES (?, 'review', 'chess.com', 'A review.', '[1,2]',
-                    'openai:gpt-5.5-pro', datetime('now'))""",
+                    'openai:gpt-5.6-sol', datetime('now'))""",
             (pid,),
         )
         conn.commit()
@@ -342,7 +342,7 @@ class TestJournalAPI:
         assert e["platform"] == "chess.com"
         assert e["body"] == "A review."
         assert e["refs"] == [1, 2]  # decoded from JSON
-        assert e["provider"] == "openai:gpt-5.5-pro"
+        assert e["provider"] == "openai:gpt-5.6-sol"
         assert data["platform_counts"] == {"chess.com": 1}
 
     def test_platform_filter_scopes_results(self, live_server, db_with_data):
@@ -1061,3 +1061,35 @@ class TestGameDateEdit:
             {"date_played": "not-a-date"},
         )
         assert status == 400
+
+
+class TestCoachingSettingsAPI:
+    """v1.27.0: coaching settings expose the new model defaults + reasoning_effort."""
+
+    def test_get_returns_new_model_defaults(self, live_server):
+        c = api_get(live_server, "/api/settings")["coaching"]
+        assert c["anthropic_model"] == "claude-opus-4-8"
+        assert c["openai_model"] == "gpt-5.6-sol"
+        assert c["reasoning_effort"] == "xhigh"
+
+    def test_put_persists_reasoning_effort(self, live_server, tmp_path, monkeypatch):
+        # Isolate the config.yaml write to a temp CWD (the handler resolves
+        # Path("config.yaml") relative to the process CWD).
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "config.yaml").write_text("coaching:\n  tone: balanced\n")
+        status, _ = api_put(
+            live_server, "/api/settings/coaching", {"reasoning_effort": "high"}
+        )
+        assert status == 200
+        import yaml
+        cfg = yaml.safe_load((tmp_path / "config.yaml").read_text())
+        assert cfg["coaching"]["reasoning_effort"] == "high"
+
+    def test_put_rejects_invalid_reasoning_effort(self, live_server, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "config.yaml").write_text("coaching: {}\n")
+        status, data = api_put(
+            live_server, "/api/settings/coaching", {"reasoning_effort": "ultra"}
+        )
+        assert status == 400
+        assert "reasoning effort" in data["error"].lower()

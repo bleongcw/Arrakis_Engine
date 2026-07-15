@@ -1158,7 +1158,7 @@ class TestTrendPromptWiring:
         assert "motif_summary_text=" in src
 
     def test_v15_4_trend_prompt_has_emphatic_no_json_block(self):
-        """v1.15.4 regression — the gpt-5.5-pro JSON-array shape that
+        """v1.15.4 regression — the gpt-5.6-sol JSON-array shape that
         surfaced during v1.15.3 live testing prompted us to make the
         'no JSON' rule emphatic AND repeated. Two regression locks:
         1) the dedicated output-format section header is present, 2)
@@ -1364,7 +1364,7 @@ class TestGenerateTrendSummaryPlumbing:
         with patch("src.llm_providers.call_provider", return_value="ok") as mock:
             generate_trend_summary(
                 pid, db_path=db_path,
-                provider="openai", model="gpt-5.5-pro-2026-04-23",
+                provider="openai", model="gpt-5.6-sol",
             )
 
         assert mock.call_count == 1
@@ -1376,7 +1376,7 @@ class TestGenerateTrendSummaryPlumbing:
         passed_model = kwargs.get("model") if "model" in kwargs else (
             args[2] if len(args) > 2 else None
         )
-        assert passed_model == "gpt-5.5-pro-2026-04-23"
+        assert passed_model == "gpt-5.6-sol"
 
     def test_below_threshold_skips_headline(self, db_path):
         """When top_missed_count < 5, the motif section must NOT
@@ -2340,7 +2340,7 @@ class TestComputeRecentFormReview:
                 (game_id, provider, narrative, key_lesson, practical_focus,
                  player_feedback, coach_notes)
                 VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (gid, "openai:gpt-5.5-pro-2026-04-23",
+                (gid, "openai:gpt-5.6-sol",
                  f"Narrative for game {i}",
                  f"Lesson {i}: outpost theme",
                  f"Practice {i}: outpost drill",
@@ -2378,7 +2378,7 @@ class TestComputeRecentFormReview:
         with patch("src.llm_providers.call_provider", return_value=mock_review):
             result = compute_recent_form_review(
                 pid, db_path=db_path, provider="openai",
-                model="gpt-5.5-pro-2026-04-23",
+                model="gpt-5.6-sol",
             )
 
         assert result == mock_review
@@ -2576,7 +2576,7 @@ class TestJournalEntryCreation:
                 (game_id, provider, narrative, key_lesson, practical_focus,
                  player_feedback)
                 VALUES (?, ?, ?, ?, ?, ?)""",
-                (gid, "openai:gpt-5.5-pro-2026-04-23",
+                (gid, "openai:gpt-5.6-sol",
                  f"Narrative {i}", f"Lesson {i}", f"Focus {i}",
                  f"Feedback {i}"),
             )
@@ -2602,7 +2602,7 @@ class TestJournalEntryCreation:
         assert rows[0]["kind"] == "review"
         assert rows[0]["platform"] == "chess.com"
         assert rows[0]["body"] == "Review body."
-        assert rows[0]["provider"] == "openai:gpt-5.5-pro-2026-04-23"
+        assert rows[0]["provider"] == "openai:gpt-5.6-sol"
 
     def test_second_review_accumulates(self, db_path):
         """Calling compute_recent_form_review twice produces TWO journal rows,
