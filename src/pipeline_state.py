@@ -189,7 +189,14 @@ def get_state(db_path: str | None = None) -> dict:
             # No live lock anywhere — trust the DB's terminal status only if our
             # mirror has nothing more specific (complete/error with result/error).
             if snapshot["status"] == "idle":
-                snapshot["status"] = row["status"] or "idle"
+                db_status = row["status"] or "idle"
+                # v1.27.1: NEVER propagate a stale 'running'. We just determined
+                # above that this lock is NOT running (dead holder / stale
+                # heartbeat). Copying the row's raw 'running' string here made
+                # /api/pipeline/status report {task: null, status: "running"}
+                # forever after a crash or restart mid-run, so the dashboard
+                # spun "Working…" on a task nobody was executing.
+                snapshot["status"] = "idle" if db_status == "running" else db_status
     return snapshot
 
 

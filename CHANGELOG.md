@@ -4,6 +4,27 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.27.1] - 2026-07-18
+
+### Fixed
+- **Dashboard stuck on "Working…" after a crash or restart mid-pipeline.** If the
+  process holding the pipeline lock died without releasing it (e.g. restarting
+  the backend during a `run_all`), `pipeline_lock` was left at
+  `status='running'` with a frozen heartbeat. `get_state()` correctly judged the
+  lock **stale**, then copied the row's *raw* `'running'` string into the
+  snapshot anyway — so `/api/pipeline/status` returned the contradictory
+  `{task: null, status: "running"}` indefinitely and the Data Update panel spun
+  on a task nobody was executing. A stale `running` now reports `idle`.
+  The lock itself was always reclaimable (`is_busy()` returned False), so this
+  was a false "stuck" indicator, not a real block — new runs could still start.
+
+### Tests
+- Backend **724 → 725**: regression lock asserting a stale `running` row is never
+  reported as running by `get_state()` / `is_busy()` / `current_task()`, and that
+  the lock stays reclaimable.
+
+---
+
 ## [1.27.0] - 2026-07-15
 
 ### Changed

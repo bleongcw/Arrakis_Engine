@@ -113,3 +113,47 @@ def test_status_poll_does_not_block_under_write_lock(db_path):
     finally:
         writer.rollback()
         writer.close()
+
+
+def test_stale_running_lock_not_reported_as_running(db_path):
+    """v1.27.1 regression: a dead holder's stale 'running' row must NOT make
+    get_state() report status='running'.
+
+    Symptom this locks out: the backend was restarted mid `run_all`, leaving
+    pipeline_lock at status='running' with a frozen heartbeat. get_state()
+    correctly judged the lock stale, then copied the row's RAW 'running' string
+    into the snapshot anyway — so /api/pipeline/status returned
+    {task: None, status: "running"} forever and the dashboard spun "Working…"
+    on a task nobody was running.
+    """
+    pipeline_state.start_task("run_all", db_path=db_path)
+
+    # Simulate the holder dying: freeze the heartbeat well past the stale window
+    # and clear this process's mirror (as a restart would).
+    stale = (datetime.now() - timedelta(minutes=pipeline_state.STALE_LOCK_MINUTES + 5)).isoformat()
+    conn = models.get_connection(db_path)
+    conn.execute("UPDATE pipeline_lock SET heartbeat_at = ? WHERE id = 1", (stale,))
+    conn.commit()
+    conn.close()
+    with pipeline_state._lock:
+        pipeline_state._state.update(
+            {"task": None, "status": "idle", "started_at": None, "result": None, "error": None}
+        )
+
+    # The row still literally says status='running'...
+    row_status = models.get_connection(db_path).execute(
+        "SELECT status FROM pipeline_lock WHERE id = 1"
+    ).fetchone()[0]
+    assert row_status == "running"
+
+    # ...but the lock is stale, so nothing may report it as running.
+    assert pipeline_state.is_busy(db_path=db_path) is False
+    assert pipeline_state.current_task(db_path=db_path) is None
+    state = pipeline_state.get_state(db_path=db_path)
+    assert state["status"] != "running", (
+        "stale 'running' leaked into get_state() — dashboard would spin forever"
+    )
+    assert state["status"] == "idle"
+
+    # And a new task can still claim the reclaimable lock.
+    assert pipeline_state.start_task("analyze", db_path=db_path) is True

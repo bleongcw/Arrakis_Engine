@@ -5,7 +5,7 @@ Local Python app that pulls games from Chess.com and Lichess, runs Stockfish ana
 and uses reasoning LLMs to generate age-appropriate coaching insights with
 pattern tracking over time. Inspired by Eleanor, Evan, and Estella.
 
-Current release: **v1.27.0** (2026-07-15). See `CHANGELOG.md` for full history.
+Current release: **v1.27.1** (2026-07-18). See `CHANGELOG.md` for full history.
 
 ## Architecture
 - Python 3.11+, SQLite (WAL mode), local Stockfish on Apple Silicon
@@ -301,7 +301,7 @@ harvest + report).
 
 ## Testing
 
-**~952 tests total** — 724 backend (pytest, three tiers via `pyproject.toml`
+**~953 tests total** — 725 backend (pytest, three tiers via `pyproject.toml`
 markers) + 228 frontend (Vitest). Integration (`-m integration`, needs Stockfish)
 and live (`-m live`, needs an LLM key) tiers are excluded by default.
 
