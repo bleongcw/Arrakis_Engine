@@ -41,7 +41,7 @@ PROVIDER_REGISTRY = {
         "default_model": "gpt-5.6-sol",
         "env_var": "ARRAKIS_OPENAI_API_KEY",
         "base_url": None,
-        "default_timeout": 600.0,  # Reasoning model (gpt-5.6 Sol) at xhigh effort; a ~6200-token coaching prompt with trajectory injection regularly runs 2-5 minutes
+        "default_timeout": 600.0,  # Reasoning model (gpt-5.6 Sol); a ~6200-token coaching prompt with trajectory injection runs 2-5 minutes, and longer at high/xhigh effort — keep generous headroom
         "config_model_key": "openai_model",
         "group": "cloud",
         "color": "#059669",
@@ -133,11 +133,16 @@ def _strip_thinking_tags(text: str) -> str:
 # ---------------------------------------------------------------------------
 # Reasoning effort (v1.27.0)
 # ---------------------------------------------------------------------------
-# A single configured effort (default "xhigh") maps to each provider's native
+# A single configured effort (default "medium") maps to each provider's native
 # reasoning control. Providers not listed reason by default and take no effort
 # argument (Gemini/Grok/DeepSeek/Qwen thinking is on by default; Ollama local).
-
-DEFAULT_REASONING_EFFORT = "xhigh"
+#
+# v1.27.2: the default dropped xhigh -> medium. At xhigh a single coaching call
+# on a frontier reasoning model ran ~4-5 minutes and billed deep-reasoning
+# tokens per game, which is heavy for a routine full-library run. medium keeps
+# coaching quality solid at a fraction of the time/cost; raise it per-install in
+# Settings -> Coaching when you want maximum depth.
+DEFAULT_REASONING_EFFORT = "medium"
 
 # Global ordering used to clamp a requested effort down to a provider's ceiling.
 _EFFORT_ORDER = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]

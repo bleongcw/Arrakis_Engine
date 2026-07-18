@@ -69,7 +69,10 @@ coaching:
   # (output_config.effort), ChatGPT (reasoning.effort), Mistral (reasoning_effort,
   # capped at high). Clamped down to each provider's ceiling; ignored by
   # providers whose reasoning is on by default (Gemini/Grok/DeepSeek/Qwen/Ollama).
-  reasoning_effort: xhigh
+  # Default is `medium` (v1.27.2) — a good quality/cost balance for routine runs.
+  # `high`/`xhigh` give deeper coaching but cost noticeably more time and tokens
+  # per game (xhigh ran ~4-5 min/game on a frontier model).
+  reasoning_effort: medium
 
   tone: balanced                     # encouraging | balanced | technical
   detail_level: standard             # concise | standard | detailed

@@ -4,6 +4,21 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.27.2] - 2026-07-18
+
+### Changed
+- **Default reasoning effort is now `medium` (was `xhigh`).** At `xhigh` a single
+  coaching call on a frontier reasoning model ran ~4–5 minutes and billed
+  deep-reasoning tokens *per game* — heavy for a routine full-library run.
+  `medium` keeps coaching quality solid at a fraction of the time and cost.
+  Changed in the registry default (`DEFAULT_REASONING_EFFORT`), the
+  `/api/settings` fallback, `config.yaml.example`, and the Settings form default.
+  `high` / `xhigh` / `max` remain fully available — raise it per-install in
+  **Settings → Coaching → Reasoning Effort**. Stockfish analysis is unaffected;
+  this only changes LLM coaching depth.
+
+---
+
 ## [1.27.1] - 2026-07-18
 
 ### Fixed

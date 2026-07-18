@@ -608,7 +608,7 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                 "qwen_model": coaching.get("qwen_model", "qwen3.7-max"),
                 "ollama_model": coaching.get("ollama_model", "deepseek-r1:8b"),
                 "ollama_base_url": coaching.get("ollama_base_url", "http://localhost:11434"),
-                "reasoning_effort": coaching.get("reasoning_effort", "xhigh"),
+                "reasoning_effort": coaching.get("reasoning_effort", "medium"),
                 "tone": coaching.get("tone", "balanced"),
                 "detail_level": coaching.get("detail_level", "standard"),
                 "focus_areas": coaching.get("focus_areas", [

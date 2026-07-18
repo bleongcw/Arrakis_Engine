@@ -5,7 +5,7 @@ Local Python app that pulls games from Chess.com and Lichess, runs Stockfish ana
 and uses reasoning LLMs to generate age-appropriate coaching insights with
 pattern tracking over time. Inspired by Eleanor, Evan, and Estella.
 
-Current release: **v1.27.1** (2026-07-18). See `CHANGELOG.md` for full history.
+Current release: **v1.27.2** (2026-07-18). See `CHANGELOG.md` for full history.
 
 ## Architecture
 - Python 3.11+, SQLite (WAL mode), local Stockfish on Apple Silicon
@@ -53,7 +53,8 @@ Current release: **v1.27.1** (2026-07-18). See `CHANGELOG.md` for full history.
     DeepSeek (`deepseek-v4-pro`), Qwen (`qwen3.7-max`)
   - **Local:** Ollama (`deepseek-r1:8b`) — no API key required
 - Reasoning models are required (convention, not code-enforced — see below)
-- Reasoning effort (v1.27.0): `coaching.reasoning_effort` (default `xhigh`) —
+- Reasoning effort (v1.27.0): `coaching.reasoning_effort` (default `medium` since
+  v1.27.2; `xhigh` cost ~4-5 min + deep-reasoning tokens per game) —
   applied where the provider has a granular scale: Claude (`output_config.effort`),
   ChatGPT (`reasoning.effort`), Mistral (`reasoning_effort`, capped at high);
   clamped per provider by `_effort_for` in `src/llm_providers.py`

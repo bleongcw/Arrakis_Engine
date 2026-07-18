@@ -56,7 +56,7 @@ const DEFAULTS: CoachingForm = {
   qwen_model: "qwen3.7-max",
   ollama_model: "deepseek-r1:8b",
   ollama_base_url: "http://localhost:11434",
-  reasoning_effort: "xhigh",
+  reasoning_effort: "medium",
   tone: "balanced",
   detail_level: "standard",
   focus_areas: ["openings", "tactics", "endgames", "time_management", "positional_play"],

@@ -1070,7 +1070,7 @@ class TestCoachingSettingsAPI:
         c = api_get(live_server, "/api/settings")["coaching"]
         assert c["anthropic_model"] == "claude-opus-4-8"
         assert c["openai_model"] == "gpt-5.6-sol"
-        assert c["reasoning_effort"] == "xhigh"
+        assert c["reasoning_effort"] == "medium"
 
     def test_put_persists_reasoning_effort(self, live_server, tmp_path, monkeypatch):
         # Isolate the config.yaml write to a temp CWD (the handler resolves

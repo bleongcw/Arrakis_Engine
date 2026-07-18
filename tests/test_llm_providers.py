@@ -295,10 +295,10 @@ class TestReasoningEffort:
                           coaching_config={"reasoning_effort": "max"})
         assert client.messages.create.call_args.kwargs["output_config"] == {"effort": "max"}
 
-    def test_call_provider_default_effort_is_xhigh(self):
-        """No reasoning_effort in config → defaults to xhigh."""
+    def test_call_provider_default_effort_is_medium(self):
+        """No reasoning_effort in config → defaults to medium (v1.27.2)."""
         client = self._fake_anthropic()
         with patch("anthropic.Anthropic", return_value=client), \
              patch.dict(os.environ, {"ARRAKIS_ANTHROPIC_API_KEY": "k"}):
             call_provider("claude", "prompt", coaching_config={})
-        assert client.messages.create.call_args.kwargs["output_config"] == {"effort": "xhigh"}
+        assert client.messages.create.call_args.kwargs["output_config"] == {"effort": "medium"}
