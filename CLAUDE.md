@@ -114,7 +114,7 @@ ArrakisEngine/
 ├── config.yaml.example
 ├── requirements.txt
 ├── requirements-dev.txt
-├── main.py                    # CLI entry point (15 subcommands)
+├── main.py                    # CLI entry point (17 subcommands)
 ├── src/
 │   ├── harvester.py           # chess.com + lichess game fetcher
 │   ├── analyzer.py            # Stockfish analysis + clock extraction + motif tagging
@@ -169,7 +169,7 @@ ArrakisEngine/
 │   └── screenshots/           # Architecture diagram + UI screenshots
 ├── data/
 │   └── chess_coach.db         # SQLite database (auto-created, gitignored)
-├── tests/                     # Backend pytest suite (680 tests across 3 tiers)
+├── tests/                     # Backend pytest suite (725 tests across 3 tiers)
 └── reports/                   # Generated coach reports (gitignored)
 ```
 
@@ -186,6 +186,7 @@ ArrakisEngine/
 | `opponent_cache` (v1.4.1) | Hunter Mode profile JSON cache (24h TTL) |
 | `opponent_games` (v1.4.4) | Hunter Mode accumulating PGN cache (sliding window) (+ `motifs_json`, `analyzed_at` v1.20.0 Deep Scan) |
 | `tournaments` / `tournament_opponents` (v1.21.0) | Tournament Prep — player-scoped named roster of opponents |
+| `pipeline_lock` | Single-task lock (harvest/analyze/coach/patterns) shared across CLI, scheduler, dashboard |
 
 `move_analysis.motifs_json` shape: `{"played": [...], "best": [...], "missed": [...]}`,
 NULL on non-critical moves.
@@ -295,7 +296,9 @@ All `?player=X` params + path slugs resolve by **slug** (v1.16.4). Backend helpe
 `harvest`, `analyze`, `coach`, `patterns`, `trend` (v1.15.2 — LLM trend summary),
 `review` (v1.9.0 — Recent Form Review), `note` (v1.12.0 — Parent Note),
 `report`, `dashboard`, `serve` (v1.5.0), `rescan-motifs` (v1.14.0 — backfill motif
-tags, no Stockfish), `backfill-acpl`, `backfill-clocks`, `fide-update`, `run-all`.
+tags, no Stockfish), `hunt-scan` (v1.20.0 — opponent Deep Scan),
+`tournament-prep` (v1.21.0 — warm a roster's prep), `backfill-acpl`,
+`backfill-clocks`, `fide-update`, `run-all`.
 
 `--player` accepts the slug (v1.16.4 slug-only; v1.18.1 fixed rescan-motifs +
 harvest + report).

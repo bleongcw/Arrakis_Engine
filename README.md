@@ -377,15 +377,18 @@ analysis:
 
 coaching:
   default_provider: claude            # claude | openai | gemini | grok | mistral | deepseek | qwen | ollama
-  anthropic_model: claude-opus-4-7
-  openai_model: gpt-5.5-pro-2026-04-23
-  gemini_model: gemini-2.5-pro        # optional — requires ARRAKIS_GOOGLE_API_KEY
-  grok_model: grok-3                  # optional — requires ARRAKIS_XAI_API_KEY
+  anthropic_model: claude-opus-5
+  openai_model: gpt-5.6-sol
+  gemini_model: gemini-3.5-flash        # optional — requires ARRAKIS_GOOGLE_API_KEY
+  grok_model: grok-4.5                  # optional — requires ARRAKIS_XAI_API_KEY
   mistral_model: mistral-medium-latest # optional — requires ARRAKIS_MISTRAL_API_KEY
-  deepseek_model: deepseek-reasoner   # optional — requires ARRAKIS_DEEPSEEK_API_KEY
-  qwen_model: qwen3-235b-a22b        # optional — requires ARRAKIS_QWEN_API_KEY
+  deepseek_model: deepseek-v4-pro   # optional — requires ARRAKIS_DEEPSEEK_API_KEY
+  qwen_model: qwen3.7-max        # optional — requires ARRAKIS_QWEN_API_KEY
   ollama_model: deepseek-r1:8b        # optional — requires `ollama serve` running
   ollama_base_url: http://localhost:11434
+  reasoning_effort: medium            # low | medium | high | xhigh | max — applied to
+                                      # providers with a granular effort scale (Claude,
+                                      # ChatGPT, Mistral); others reason by default
 
   # How many recent coached games to inject into each new coaching prompt
   # so the AI avoids repeating prior advice. Default 5, range 1-20.
@@ -477,9 +480,9 @@ python main.py coach --limit 5
 python main.py coach --provider openai --limit 5
 ```
 
-> **LLM Cost Warning:** Each coaching call sends a detailed prompt (~3,000–7,000 tokens) and receives a structured response (~2,000–4,000 tokens). At current API pricing, coaching a single game costs approximately **$0.03–0.10 with Claude** and **$0.02–0.08 with GPT-5.4**. For a backlog of 400+ games, this can add up to **$15–40 or more**. Start with `--limit 5` to verify quality and estimate your costs before running large batches. **Ollama is free** — it runs locally with no API costs.
+> **LLM Cost Warning:** Each coaching call sends a detailed prompt (~3,000–7,000 tokens) and receives a structured response (~2,000–4,000 tokens). At current API pricing, coaching a single game costs approximately **$0.03–0.10 with Claude** and **$0.02–0.08 with GPT-5.6**. For a backlog of 400+ games, this can add up to **$15–40 or more**. Start with `--limit 5` to verify quality and estimate your costs before running large batches. **Ollama is free** — it runs locally with no API costs.
 
-> **Rate limits:** Cloud providers have tokens-per-minute caps (e.g., OpenAI's `gpt-5.5-pro-2026-04-23` at ~10,000 TPM on free tiers). Use `--limit 5` per batch to avoid 429 errors. Claude typically has higher throughput — `--limit 10-20` is safe. Ollama has no rate limits but is slower (~30–90s per game depending on model size).
+> **Rate limits:** Cloud providers have tokens-per-minute caps (e.g., OpenAI's `gpt-5.6-sol` at ~10,000 TPM on free tiers). Use `--limit 5` per batch to avoid 429 errors. Claude typically has higher throughput — `--limit 10-20` is safe. Ollama has no rate limits but is slower (~30–90s per game depending on model size).
 
 > **Dashboard coaching:** You can also coach individual games directly from the dashboard — select any provider from the dropdown on a game's detail page and click **Coach Game**. The pipeline panel also supports all 8 providers with Cloud/Local grouping. Results auto-refresh when complete.
 
@@ -624,13 +627,13 @@ Chess coaching demands multi-step reasoning at every level:
 
 | Provider | Model | API Identifier | Notes |
 |---|---|---|---|
-| Anthropic | Claude Opus 4.7 | `claude-opus-4-7` | Extended thinking, excellent coaching tone |
-| OpenAI | GPT-5.5 Pro | `gpt-5.5-pro-2026-04-23` | Strong reasoning via Responses API |
-| Google | Gemini 2.5 Pro | `gemini-2.5-pro` | Long context, strong reasoning |
-| xAI | Grok 3 | `grok-3` | OpenAI-compatible API |
+| Anthropic | Claude Opus 5 | `claude-opus-5` | Extended thinking, excellent coaching tone |
+| OpenAI | GPT-5.6 Sol | `gpt-5.6-sol` | Strong reasoning via Responses API |
+| Google | Gemini 3.5 Flash | `gemini-3.5-flash` | Long context, strong reasoning |
+| xAI | Grok 4.5 | `grok-4.5` | OpenAI-compatible API |
 | Mistral | Mistral Medium | `mistral-medium-latest` | European alternative |
-| DeepSeek | DeepSeek-R1 | `deepseek-reasoner` | Strong reasoning, affordable |
-| Alibaba | Qwen3 235B | `qwen3-235b-a22b` | Large reasoning model |
+| DeepSeek | DeepSeek V4 Pro | `deepseek-v4-pro` | Strong reasoning, affordable |
+| Alibaba | Qwen 3.7 Max | `qwen3.7-max` | Large reasoning model |
 | Ollama (Local) | DeepSeek-R1 8B | `deepseek-r1:8b` | Free, runs locally, no API key |
 
 See [ROADMAP.md](ROADMAP.md) for details on local model quality considerations.
@@ -668,7 +671,7 @@ The depth is configurable via the `coaching_history_count` setting (in `config.y
 
 **When to increase it.** If a player has 50+ coached games and you find the coach repeating itself or missing recurring issues that span more than 5 games, raise the depth to 10. If you're running a deep retrospective (end of month, end of season), 15–20 gives the AI enough context to surface long-arc patterns.
 
-**Local model warning.** Ollama with `deepseek-r1:8b` has a smaller context window. Settings above 10 may cause prompt truncation or degraded coaching quality. Use 5 for local Ollama, 10–20 for Claude / Gemini / GPT-5.
+**Local model warning.** Ollama with `deepseek-r1:8b` has a smaller context window. Settings above 10 may cause prompt truncation or degraded coaching quality. Use 5 for local Ollama, 10–20 for Claude / Gemini / GPT-5.6.
 
 ### Pattern Tracking
 
@@ -831,7 +834,7 @@ Arrakis_Engine/
 ├── pyproject.toml         # pytest marker config (integration/live)
 ├── main.py                # CLI entry point — all commands
 ├── src/
-│   ├── models.py          # SQLite schema (7 tables incl. opponent cache) + idempotent migrations
+│   ├── models.py          # SQLite schema (11 tables incl. opponent cache) + idempotent migrations
 │   ├── harvester.py       # Multi-platform game fetcher (Chess.com + Lichess)
 │   ├── analyzer.py        # Stockfish move-by-move analysis engine + clock extraction
 │   ├── coach.py           # LLM coaching layer (configurable history depth, 8 providers)
@@ -898,7 +901,7 @@ Arrakis_Engine/
 ├── docs/
 │   ├── architecture.md        # Tracked: contributor architecture reference
 │   └── screenshots/           # Architecture diagram and screenshots
-├── tests/                 # Backend test suite (680 tests across 3 tiers)
+├── tests/                 # Backend test suite (725 tests across 3 tiers)
 │   ├── conftest.py        # Shared fixtures (db, player, stockfish, llm)
 │   ├── test_models.py                # Schema, ensure_player, migrations, _slugify (v1.16.1)
 │   ├── test_harvester.py
@@ -939,6 +942,7 @@ Arrakis_Engine/
 | `opponent_cache` (v1.4.1) | Hunter Mode profile JSON cache, 24h TTL |
 | `opponent_games` (v1.4.4) | Hunter Mode accumulating PGN cache, sliding-window pruned (+ per-game `motifs_json`/`analyzed_at` for Deep Scan, v1.20.0) |
 | `tournaments` / `tournament_opponents` (v1.21.0) | Tournament Prep — player-scoped named rosters of opponents |
+| `pipeline_lock` | Single-task lock coordinating harvest/analyze/coach/patterns across CLI, scheduler, and dashboard |
 
 ## Running Tests
 
@@ -949,7 +953,7 @@ Arrakis_Engine/
 ```bash
 # Unit tests only (default — fast, no external dependencies)
 python -m pytest tests/ -v
-# → 680 tests in ~30s, all mocked
+# → 725 tests in ~30s, all mocked
 
 # Stockfish integration tests (requires Stockfish binary)
 python -m pytest tests/ -m integration -v
@@ -961,7 +965,7 @@ python -m pytest tests/ -m live -v
 
 # Frontend (Vitest)
 cd frontend && npx vitest run
-# → 225 tests in ~3s
+# → 228 tests in ~3s
 cd frontend && npx next build      # type-check
 ```
 
@@ -984,7 +988,7 @@ cd frontend && npx next build      # type-check
 | `test_llm_providers.py` | 52 | Provider registry validation (8 providers), thinking tag stripping, model resolution (explicit/config/default), provider dispatch (Anthropic/OpenAI/Google/Mistral/Ollama), API key detection, availability listing |
 | `test_scheduler.py` | 6 | 4-step pipeline execution (harvest→analyze→patterns→coach), player filter passthrough, cancel event propagation, provider passthrough, progress update verification (1/4–4/4), Stockfish validation |
 
-**Stockfish integration tests** (7 tests — requires Stockfish binary):
+**Stockfish integration tests** (9 tests — requires Stockfish binary):
 
 | File | Tests | Coverage |
 |------|-------|---------|
@@ -992,11 +996,11 @@ cd frontend && npx next build      # type-check
 
 The `stockfish_path` fixture auto-resolves from `config.yaml` → `STOCKFISH_PATH` env var → `which stockfish`. Tests skip with a clear message if Stockfish is not found.
 
-**LLM API live tests** (5 tests — requires API key, ~$0.05/run):
+**LLM API live tests** (12 tests — requires API key, ~$0.05/run):
 
 | File | Tests | Coverage |
 |------|-------|---------|
-| `test_coach_live.py` | 5 | Real LLM coaching: valid JSON response, all required keys present (narrative, key_lesson, practical_focus, critical_moments, coach_notes), DB storage with provider:model format, error handling |
+| `test_coach_live.py` | 11 | Real LLM coaching: valid JSON response, all required keys present (narrative, key_lesson, practical_focus, critical_moments, coach_notes), DB storage with provider:model format, error handling |
 
 The `llm_provider` fixture checks for `ARRAKIS_ANTHROPIC_API_KEY` first, falls back to `ARRAKIS_OPENAI_API_KEY`. Tests skip if neither is set.
 
@@ -1008,7 +1012,7 @@ The `llm_provider` fixture checks for `ARRAKIS_ANTHROPIC_API_KEY` first, falls b
 
 ### Frontend tests (Vitest, v1.6.0+)
 
-**205 tests**, few-second full run. No external dependencies; jsdom + Testing Library + `@testing-library/jest-dom`. Covers the chess + chart-format + motif helper libraries, the `use-chess-navigation` hook, and the Patterns / Journal / game-detail / settings / layout component suites.
+**228 tests**, few-second full run. No external dependencies; jsdom + Testing Library + `@testing-library/jest-dom`. Covers the chess + chart-format + motif helper libraries, the `use-chess-navigation` hook, and the Patterns / Journal / game-detail / settings / layout component suites.
 
 ```bash
 cd frontend

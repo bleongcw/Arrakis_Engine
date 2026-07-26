@@ -1,6 +1,6 @@
 # Arrakis Engine — Architecture
 
-*Last updated: 2026-05-29 — corresponds to v1.18.3*
+*Last updated: 2026-07-12 — corresponds to v1.27.4*
 
 This document describes the technical architecture of Arrakis Engine: how the pieces fit together, what runs where, and the design decisions behind them. It is aimed at contributors and developers reading the codebase. For end-user / setup docs, see [README.md](../README.md). For changelog, see [CHANGELOG.md](../CHANGELOG.md).
 
@@ -62,7 +62,7 @@ The same pipeline can be triggered three ways:
 | Language | Python 3.11+ |
 | Database | SQLite (WAL mode, single-file `data/chess_coach.db`) |
 | Engine | Stockfish (local binary, e.g. `/opt/homebrew/bin/stockfish`) |
-| LLM SDKs | `anthropic`, `openai`, `google-generativeai`, `mistralai`, plus OpenAI-compatible HTTP for xAI / DeepSeek / Qwen / Ollama |
+| LLM SDKs | `anthropic`, `openai`, `google-genai`, `mistralai`, plus OpenAI-compatible HTTP for xAI / DeepSeek / Qwen / Ollama |
 | Backend HTTP | Python `http.server` (stdlib) — no FastAPI / Flask dependency |
 | Frontend | Next.js 16, React 19, TypeScript, Tailwind CSS, shadcn/ui (Base UI primitives) |
 | Charts | Recharts |
@@ -83,7 +83,7 @@ The backend is intentionally dependency-light — `http.server` is enough for a 
 
 ### `analyzer.py` — Stockfish engine layer
 - Replays each PGN move-by-move against a local Stockfish process via `python-chess`.
-- Per move it stores `eval_cp`, `swing_cp`, `win_prob`, `best_move`, `pv_line`, and a classification.
+- Per move it stores `eval_before_cp`, `eval_after_cp`, `swing_cp`, `win_prob_before`, `win_prob_after`, `best_move`, `pv_line`, and a classification.
 - **ACPL capping at ±1000 cp + played-best-zero rule** (v1.7.1, extended in v1.7.4): per-move centipawn loss caps both the raw eval AND the resulting loss at `EVAL_CAP=1000`. If the played move equals the engine's #1 best move (`move_played == best_move`), loss is recorded as 0 — Lichess convention. This avoids the mate-transition bug where checkmate-delivering moves like `Qxf7#` would otherwise register as 2000cp losses (Stockfish encodes mate as ±30000 internally). v1.7.4 extracted the formula into a single helper `_per_move_player_loss()` in `patterns.py` and applied it across all 6 cross-game ACPL widgets that previously inlined the broken formula. Backfill via `python main.py backfill-acpl --force` after upgrading.
 - Move classifications:
   - Excellent: `< 30 cp` loss
@@ -112,16 +112,17 @@ The backend is intentionally dependency-light — `http.server` is enough for a 
   `python main.py rescan-motifs` (no Stockfish — reuses stored `pv_line`/`best_move`).
 
 ### `coach.py` + `llm_providers.py` — LLM coaching layer
-- `llm_providers.py` is the unified abstraction for **8 providers**: Anthropic, OpenAI, Google, xAI, Mistral, DeepSeek, Qwen, and Ollama. Each provider is registered with its SDK type, default model, API key env var, and request shape. Current default reasoning models (v1.7.0): Claude Opus 4.7 (`claude-opus-4-7`), GPT-5.5 Pro (`gpt-5.5-pro-2026-04-23`), Gemini 2.5 Pro.
+- `llm_providers.py` is the unified abstraction for **8 providers**: Anthropic, OpenAI, Google, xAI, Mistral, DeepSeek, Qwen, and Ollama. Each provider is registered with its SDK type, default model, API key env var, and request shape. Current default reasoning models (v1.27.3): Claude Opus 5 (`claude-opus-5`), GPT-5.6 Sol (`gpt-5.6-sol`), Gemini 3.5 Flash (`gemini-3.5-flash`), Grok 4.5 (`grok-4.5`), Mistral Medium (`mistral-medium-latest`), DeepSeek V4 Pro (`deepseek-v4-pro`), Qwen 3.7 Max (`qwen3.7-max`), Ollama (`deepseek-r1:8b`).
+- **Configurable reasoning effort** (v1.27.0): a single `coaching.reasoning_effort` setting (`low` / `medium` / `high` / `xhigh` / `max`, default `medium` since v1.27.2) is clamped per-provider by `_effort_for(...)` and applied where the SDK exposes a granular knob — Claude (`output_config.effort`), ChatGPT (`reasoning.effort`), Mistral (`reasoning_effort`, capped at `high`). The other providers reason by default and ignore the setting.
 - `coach.py` builds the prompt from Stockfish data + recent coaching history + the player's measured 30-day trajectory (v1.8.0), sends it through the provider abstraction, and stores the structured output in `game_coaching`.
-- **Reasoning models are required.** The system enforces this — non-reasoning models produce shallow, generic coaching that misses tactics. See [`ROADMAP.md`](../ROADMAP.md) (root, not the gitignored one) for the full rationale.
+- **Reasoning models are required** — as a project convention, not a runtime gate. `resolve_model` / `call_provider` accept any model string; the requirement is upheld by the curated per-provider defaults and documentation, not an allowlist. Non-reasoning models produce shallow, generic coaching that misses tactics. See [`ROADMAP.md`](../ROADMAP.md) (root, not the gitignored one) for the full rationale.
 - Coaching output is structured: narrative, key lesson, practical focus, critical moments, opening analysis, coach notes, and a personal `player_feedback` letter — for two audiences (child-facing, coach-facing).
 - **Coaching history injection** (v1.7.0): a configurable number of recent coached games' lessons are fed into the prompt so the LLM doesn't repeat itself and can build on prior advice. Default is 5 (range 1–20) via the `coaching_history_count` setting in `config.yaml` or the `--history N` CLI flag. Each history game adds ~500 prompt tokens — see the README "Coaching History Depth" section for per-provider guidance.
 - **Player trajectory injection** (v1.8.0): in addition to history, the per-game prompt now includes a structured `## Player Trajectory (last 30 days)` block built by `patterns.py::build_trajectory_block`. The block surfaces 6–8 measured cross-game signals (weakest/strongest phase ACPL, tactical miss rate, endgame conversion, ACPL trend direction over 4 weekly buckets, comeback/collapse rates, repertoire focus) plus a synthesized headline. ~200–250 tokens. Gated by `coaching_trajectory_enabled: true` (default ON); the CLI `--no-trajectory` flag overrides per-run for A/B comparison. When the player has no `player_patterns` row yet, the block is silently skipped.
 - **Auto-refresh of player_patterns** (v1.8.0): `_maybe_refresh_patterns()` calls `compute_player_patterns(player_id)` (pure-Python, no LLM, ~3–5s per player on a full DB) before coaching if the patterns row is >7 days old OR if completed games exist beyond the row's `period_end`. Means trajectory is always reasonably fresh without the user having to remember `python main.py patterns`. Never auto-calls `generate_trend_summary()` — that's a paid LLM round-trip.
 - **Game-type detection** classifies games into 10 archetypes (tactical battle, comeback, collapse, positional grind, miniature, etc.) and tailors the prompt accordingly.
 - **Coaching meta diagnostics** (v1.7.0, extended in v1.8.0): every coached game stores `coaching_meta_json` capturing history depth, prompt size, model, and trajectory state (`trajectory_injected`, `trajectory_age_days`, `trajectory_weakest_phase`, `trajectory_trend_direction`, `trajectory_tokens_estimate`). The frontend renders these as small badges on the coaching panel so the user can verify what the LLM actually saw.
-- Resilience: exponential backoff (30s → 60s → 120s, max 5 min), 3-failure circuit breaker, 300s SDK timeout for reasoning models, interruptible sleep via `threading.Event`.
+- Resilience: exponential backoff (30s → 60s → 120s, max 5 min), 3-failure circuit breaker, per-provider SDK timeouts (300s default; 600s for GPT-5.6 Sol, which runs longer at high/xhigh effort), interruptible sleep via `threading.Event`.
 
 ### `patterns.py` — cross-game aggregation
 Aggregates 20+ metrics per player across all analyzed games. Stored as one JSON blob per player in `player_patterns.stats_json`. Also exposes `build_trajectory_block(conn, player_id)` (v1.8.0) which extracts a structured 6–8-fact snapshot of the player's measured trajectory for injection into the per-game coaching prompt; see `coach.py` above.
@@ -182,7 +183,7 @@ Rating-based tiers (Beginner → Elementary → Intermediate → Advanced → Ex
 
 ### `scheduler.py` + `pipeline_state.py` — automation
 - `scheduler.py` runs the full pipeline (harvest → analyze → patterns → coach) on a configurable interval as a daemon thread.
-- `pipeline_state.py` enforces single-task-at-a-time across CLI, scheduler, and dashboard so two pipelines can't fight over the SQLite lock or the Stockfish process. The lock is **DB-backed** (a `pipeline_lock` row with a heartbeat, reclaimed after a 15-min stale window), so it coordinates across independent *processes* sharing the DB. `get_state()` reads it with a lightweight read-only connection (v1.22.3) so the high-frequency `/api/pipeline/status` poll never re-runs migrations or contends with a running analyzer. The pipeline `cancel_event` is honoured between every step **and between games inside the analyze step** (v1.22.4), so a long Run All is actually cancellable.
+- `pipeline_state.py` enforces single-task-at-a-time across CLI, scheduler, and dashboard so two pipelines can't fight over the SQLite lock or the Stockfish process. The lock is **DB-backed** (a `pipeline_lock` row with a heartbeat, reclaimed after a 15-min stale window), so it coordinates across independent *processes* sharing the DB. `get_state()` reads it with a lightweight read-only connection (v1.22.3) so the high-frequency `/api/pipeline/status` poll never re-runs migrations or contends with a running analyzer. **A stale `running` row is reported as `idle`** (v1.27.1) — a dead process (e.g. a killed `serve`) that left the lock in `running` no longer freezes the dashboard on "Working…". The pipeline `cancel_event` is honoured between every step **and between games inside the analyze step** (v1.22.4), so a long Run All is actually cancellable.
 
 ### `dev_runner.py` — `serve` orchestration (v1.5.0)
 Owns the subprocess plumbing for `python main.py serve`. Used only by the
@@ -242,19 +243,27 @@ Multi-opponent Hunter Mode. A `tournament` is a player-scoped, named roster (`to
 | GET | `/api/settings` | Analysis config + API key status |
 | GET | `/api/schedule/status` | Scheduler state |
 | GET | `/api/hunt/profile?opponent=X&platform=Y` | (v1.4.1) Opponent profile from cache or live fetch |
+| GET | `/api/tournament*` | (v1.21.0) Tournament rosters + combined prep |
 | POST | `/api/players` | Add player |
 | POST | `/api/coach` | Trigger coaching for a game |
 | POST | `/api/trend-summary` | Generate AI trend summary |
 | POST | `/api/journal/review` | (v1.10.0) Generate a Recent Form Review entry |
 | POST | `/api/journal/note` | (v1.12.0) Create a Parent Note |
-| POST | `/api/pipeline/{harvest,analyze,patterns,run-all}` | Trigger pipeline steps |
-
-All `?player=X` params resolve by **slug** (v1.16.4) via the `_resolve_player_id` helper. `PUT`/`DELETE /api/journal/note/{id}` edit/delete notes (v1.12.0).
+| POST | `/api/import-pgn` | (v1.24.0) Import a raw PGN → analyzed game; (v1.25.0) competition mode for OTB tournament PGNs |
+| POST | `/api/games/export` | (v1.24.0) `{ids, annotated}` → raw or annotated PGN file |
+| POST | `/api/pipeline/{harvest,analyze,patterns,coach,run-all,cancel}` | Trigger / cancel pipeline steps |
+| POST | `/api/pipeline/hunt-scan` | (v1.20.0) Opponent Deep Scan (background, single-task lock) |
+| POST | `/api/pipeline/tournament-prep` | (v1.21.0) Warm a roster's prep (background) |
 | POST | `/api/schedule/{toggle,interval}` | Scheduler control |
 | POST | `/api/hunt/refresh` | (v1.4.1) Force refresh of an opponent profile (bypass 24h cache) |
 | PUT | `/api/players/{id}` | Edit player |
-| PUT | `/api/settings/{analysis,api-keys}` | Update settings |
+| PUT | `/api/games/{id}/ratings` | (v1.25.1) Edit a game's player/opponent ratings |
+| PUT | `/api/games/{id}/classification` | (v1.26.2) Reclassify a game's category / type / date |
+| PUT | `/api/settings/{analysis,api-keys,coaching}` | Update settings (coaching incl. models + `reasoning_effort`) |
+| PUT / DELETE | `/api/journal/note/{id}` | (v1.12.0) Edit / delete a Parent Note |
 | DELETE | `/api/players/{id}` | Soft-delete player |
+
+All `?player=X` params resolve by **slug** (v1.16.4) via the `_resolve_player_id` helper.
 
 ---
 
@@ -267,13 +276,15 @@ Single-file SQLite. Schema migrations run via `init_db()` at startup — column 
 | Table | Key fields |
 |---|---|
 | `players` | username (chess.com handle), **slug** (v1.16.1 — URL/API/CLI id, partial UNIQUE index), display_name, age, rating, fide_id, fide_rating (+ fide_rating_classical/rapid/blitz v1.26.0), lichess_username, is_active |
-| `games` | player_id, game_url, pgn, player_color, ratings, result, time_class, platform, analysis_status, coaching_status, date_played |
-| `move_analysis` | game_id, move_number, side, move_played, best_move, eval_cp, swing_cp, win_prob, classification, pv_line, **clock_seconds**, **motifs_json** (v1.14.0 — `{played, best, missed}`, NULL on non-critical moves) |
+| `games` | player_id, game_url, pgn, player_color, player_rating, opponent_rating, result, time_control, time_class, platform, acpl, opponent_username, analysis_status, coaching_status, date_played |
+| `move_analysis` | game_id, move_number, side, move_played, best_move, eval_before_cp, eval_after_cp, swing_cp, win_prob_before, win_prob_after, classification, pv_line, **clock_seconds**, **motifs_json** (v1.14.0 — `{played, best, missed}`, NULL on non-critical moves) |
 | `game_coaching` | game_id, provider, narrative, key_lesson, practical_focus, coach_notes, player_feedback, critical_moments_json, opening_analysis_json, **coaching_meta_json** (v1.7.0; trajectory_* v1.8.0; motif_top_missed / motif_top_missed_phase v1.15.0/v1.16.0) |
 | `player_patterns` | player_id, period_start, period_end, stats_json (includes **motif_summary** v1.15.0 with per-phase splits v1.16.0), trend_summary, recent_form_review (legacy, superseded by journal_entries), updated_at |
-| `journal_entries` (v1.10.0) | player_id, **kind** ('review'\|'note'), platform, body, refs_json, provider, metadata_json, created_at — chronological coaching diary |
+| `journal_entries` (v1.10.0) | player_id, **kind** ('review'\|'note'\|'weakness_alert' v1.19.0), platform, body, refs_json, provider, metadata_json, created_at — chronological coaching diary |
 | `opponent_cache` (v1.4.1) | username, platform, profile_json, fetched_at — 24h TTL cache for Hunter Mode profile JSON |
-| `opponent_games` (v1.4.4) | username, platform, game_url, pgn, player_color, result, opening_name, eco, date_played, fetched_at — accumulating local PGN cache for Hunter Mode (sliding window + optional cap) |
+| `opponent_games` (v1.4.4) | username, platform, game_url, pgn, player_color, result, opening_name, eco, date_played, fetched_at (+ **motifs_json**, **analyzed_at** v1.20.0 Deep Scan) — accumulating local PGN cache for Hunter Mode (sliding window + optional cap) |
+| `tournaments` / `tournament_opponents` (v1.21.0) | Player-scoped named roster of opponents for Tournament Prep |
+| `pipeline_lock` | Single-row DB lock (task, holder, heartbeat) coordinating one pipeline task across CLI, scheduler, and dashboard |
 
 ### Design decisions
 

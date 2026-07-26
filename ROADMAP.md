@@ -139,6 +139,20 @@ provider.
   editable on the Settings form. FIDE ratings are FIDE-specific and no longer
   override the chess.com / lichess rating.
 
+### Coaching models & reliability (v1.27.0–v1.27.4)
+- **Flagship model refresh + configurable reasoning effort (v1.27.0)** — all
+  eight providers bumped to their current flagship reasoning models, plus a new
+  `coaching.reasoning_effort` setting (low / medium / high / xhigh / max) wired
+  into Claude (`output_config.effort`), ChatGPT (`reasoning.effort`), and Mistral
+  (`reasoning_effort`, capped at high); other providers reason by default. A
+  Reasoning-effort dropdown was added to Settings → Coaching.
+- **Stuck-pipeline fix (v1.27.1)** — a dead process could leave the
+  `pipeline_lock` row wedged in `running`, freezing the dashboard on "Working…";
+  `get_state()` now reports a stale lock as idle.
+- **Default effort → medium (v1.27.2)** and **Claude → Opus 5 (v1.27.3)**.
+- **`~/.env` is authoritative (v1.27.4)** — `load_dotenv(override=True)` so the
+  values in your `.env` win over any exported shell variables.
+
 ### Polish & bug fixes
 - v1.0.1, v1.0.2 — UI fixes (opening explorer, dialog hydration)
 - v1.3.1 — silenced client-disconnect log noise
@@ -160,13 +174,13 @@ Non-reasoning models produce shallow, generic feedback.
 
 | Provider | Model | Type | Status |
 |---|---|---|---|
-| Anthropic | `claude-opus-4-7` | Cloud / Reasoning | Active |
-| OpenAI | `gpt-5.5-pro-2026-04-23` | Cloud / Reasoning | Active |
-| Google | `gemini-2.5-pro` | Cloud / Reasoning | Active |
-| xAI | `grok-3` | Cloud / Reasoning | Active |
+| Anthropic | `claude-opus-5` | Cloud / Reasoning | Active |
+| OpenAI | `gpt-5.6-sol` | Cloud / Reasoning | Active |
+| Google | `gemini-3.5-flash` | Cloud / Reasoning | Active |
+| xAI | `grok-4.5` | Cloud / Reasoning | Active |
 | Mistral | `mistral-medium-latest` | Cloud / Reasoning | Active |
-| DeepSeek | `deepseek-reasoner` | Cloud / Reasoning | Active |
-| Alibaba | `qwen3-235b-a22b` | Cloud / Reasoning | Active |
+| DeepSeek | `deepseek-v4-pro` | Cloud / Reasoning | Active |
+| Alibaba | `qwen3.7-max` | Cloud / Reasoning | Active |
 | Ollama | `deepseek-r1:8b` | Local / Reasoning | Active |
 
 All providers are available in the CLI (`--provider`), the dashboard pipeline
@@ -184,7 +198,9 @@ models) fail at chess coaching because they:
 - Cannot maintain coherent analysis across 30+ move games
 - Produce inconsistent JSON structure
 
-This is a hard requirement enforced by the provider abstraction, not a preference.
+This is a strong project convention, not a code-level gate: `resolve_model` and
+`call_provider` accept any model string, so the requirement is enforced by the
+curated provider defaults and this guidance rather than by a runtime allowlist.
 
 ---
 
