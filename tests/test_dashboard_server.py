@@ -1068,7 +1068,7 @@ class TestCoachingSettingsAPI:
 
     def test_get_returns_new_model_defaults(self, live_server):
         c = api_get(live_server, "/api/settings")["coaching"]
-        assert c["anthropic_model"] == "claude-opus-4-8"
+        assert c["anthropic_model"] == "claude-opus-5"
         assert c["openai_model"] == "gpt-5.6-sol"
         assert c["reasoning_effort"] == "medium"
 

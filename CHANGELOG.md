@@ -4,6 +4,27 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.27.3] - 2026-07-18
+
+### Changed
+- **Claude coaching model → Opus 5 (`claude-opus-5`).** Bumped from
+  `claude-opus-4-8`. A clean model-string swap — Arrakis's existing Anthropic
+  call already sends `thinking={"type":"adaptive"}` + `output_config.effort`,
+  which is exactly Opus 5's control surface (thinking on by default, full
+  `low`→`max` effort ladder, same shape/pricing/context). Opus 5's one breaking
+  change — `thinking:{"type":"disabled"}` is rejected at `xhigh`/`max` effort —
+  does not affect us because we never disable thinking. Updated the registry
+  default, the `/api/settings` fallback, `config.yaml.example`, the Settings form
+  default, and docs. Other providers unchanged. Verified against the official
+  [What's new in Opus 5](https://platform.claude.com/docs/en/about-claude/models/whats-new-opus-5) doc.
+
+### Tests
+- Backend **725** (unchanged): all hardcoded `claude-opus-4-8` references updated
+  to `claude-opus-5` (default-resolution + settings-default assertions, mock SDK
+  call tests).
+
+---
+
 ## [1.27.2] - 2026-07-18
 
 ### Changed

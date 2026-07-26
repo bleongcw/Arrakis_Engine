@@ -27,7 +27,7 @@ PROVIDER_REGISTRY = {
     "claude": {
         "display_name": "Claude",
         "sdk_type": "anthropic",
-        "default_model": "claude-opus-4-8",
+        "default_model": "claude-opus-5",
         "env_var": "ARRAKIS_ANTHROPIC_API_KEY",
         "base_url": None,
         "default_timeout": 300.0,  # Opus with extended thinking needs more time
@@ -185,9 +185,11 @@ def _call_anthropic(prompt: str, model: str, api_key: str,
                     timeout: float = 120.0, effort: str | None = None) -> str:
     """Call Anthropic Claude API with adaptive thinking.
 
-    `effort` (e.g. "xhigh") sets `output_config.effort` — combined with adaptive
-    thinking, this is how Opus 4.8 dials reasoning depth. `budget_tokens` is
-    removed on Opus 4.7/4.8, so effort is the control.
+    `effort` (e.g. "medium"/"max") sets `output_config.effort` — the reasoning-depth
+    control on Opus 5 (thinking is on by default there; `thinking={"type":"adaptive"}`
+    stays valid and equivalent). We never disable thinking, so Opus 5's
+    "disabled thinking forbidden at xhigh/max" restriction never applies.
+    `budget_tokens` is removed on Opus 4.7+/5, so effort is the depth control.
     """
     import anthropic
 

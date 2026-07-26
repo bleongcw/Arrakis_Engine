@@ -114,11 +114,11 @@ class TestResolveModel:
 
     def test_default_model_used_when_no_config(self):
         result = resolve_model("claude", None, None)
-        assert result == "claude-opus-4-8"
+        assert result == "claude-opus-5"
 
     def test_default_model_used_when_config_key_missing(self):
         result = resolve_model("claude", None, {"openai_model": "gpt-5.6-sol"})
-        assert result == "claude-opus-4-8"
+        assert result == "claude-opus-5"
 
     def test_unknown_provider_raises(self):
         with pytest.raises(ValueError, match="Unknown provider"):
@@ -268,7 +268,7 @@ class TestReasoningEffort:
     def test_anthropic_passes_output_config_effort(self):
         client = self._fake_anthropic()
         with patch("anthropic.Anthropic", return_value=client):
-            _call_anthropic("prompt", "claude-opus-4-8", "key", effort="xhigh")
+            _call_anthropic("prompt", "claude-opus-5", "key", effort="xhigh")
         kwargs = client.messages.create.call_args.kwargs
         assert kwargs["output_config"] == {"effort": "xhigh"}
         assert kwargs["thinking"] == {"type": "adaptive"}  # kept
@@ -276,7 +276,7 @@ class TestReasoningEffort:
     def test_anthropic_omits_output_config_when_no_effort(self):
         client = self._fake_anthropic()
         with patch("anthropic.Anthropic", return_value=client):
-            _call_anthropic("prompt", "claude-opus-4-8", "key", effort=None)
+            _call_anthropic("prompt", "claude-opus-5", "key", effort=None)
         assert "output_config" not in client.messages.create.call_args.kwargs
 
     def test_openai_responses_passes_reasoning_effort(self):

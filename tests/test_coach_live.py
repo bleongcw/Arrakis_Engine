@@ -174,7 +174,7 @@ class TestStructuredFeedbackCompliance:
         """Claude opus-4-7 should produce all 5 sections reliably."""
         if not os.getenv("ARRAKIS_ANTHROPIC_API_KEY"):
             pytest.skip("ARRAKIS_ANTHROPIC_API_KEY not set")
-        model = "claude-opus-4-8"
+        model = "claude-opus-5"
         result = coach_game(
             analyzed_game, provider="claude", model=model, db_path=db_path,
         )

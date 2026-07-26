@@ -5,7 +5,7 @@ Local Python app that pulls games from Chess.com and Lichess, runs Stockfish ana
 and uses reasoning LLMs to generate age-appropriate coaching insights with
 pattern tracking over time. Inspired by Eleanor, Evan, and Estella.
 
-Current release: **v1.27.2** (2026-07-18). See `CHANGELOG.md` for full history.
+Current release: **v1.27.3** (2026-07-18). See `CHANGELOG.md` for full history.
 
 ## Architecture
 - Python 3.11+, SQLite (WAL mode), local Stockfish on Apple Silicon
@@ -48,7 +48,7 @@ Current release: **v1.27.2** (2026-07-18). See `CHANGELOG.md` for full history.
 ## Key Configuration
 - Stockfish: depth 22, 6 threads, 512MB hash, path configured in `config.yaml`
 - LLM: unified provider abstraction (`src/llm_providers.py`) supporting 8 providers:
-  - **Cloud (v1.27.0 flagships):** Claude (`claude-opus-4-8`), ChatGPT (`gpt-5.6-sol`),
+  - **Cloud (v1.27.3 flagships):** Claude (`claude-opus-5`), ChatGPT (`gpt-5.6-sol`),
     Gemini (`gemini-3.5-flash`), Grok (`grok-4.5`), Mistral (`mistral-medium-latest`),
     DeepSeek (`deepseek-v4-pro`), Qwen (`qwen3.7-max`)
   - **Local:** Ollama (`deepseek-r1:8b`) — no API key required
