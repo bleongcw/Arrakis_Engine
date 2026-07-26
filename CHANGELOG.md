@@ -4,6 +4,21 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.27.4] - 2026-07-18
+
+### Changed
+- **`.env` is now authoritative for API keys** (`load_dotenv(override=True)` in
+  both `main.py` and `src/llm_providers.py`). Previously `python-dotenv` left an
+  already-set environment variable alone, so a stray `export
+  ARRAKIS_ANTHROPIC_API_KEY=…` in the launching terminal silently **shadowed**
+  the `.env` file — the app would run on the exported key while `.env` was
+  ignored. Now the `.env` file's `ARRAKIS_*` keys win over any exported value,
+  making `.env` the single source of truth for this local, single-user app.
+  (A deployment with no `.env` is unaffected — nothing to override, so injected
+  env vars are still used.)
+
+---
+
 ## [1.27.3] - 2026-07-18
 
 ### Changed

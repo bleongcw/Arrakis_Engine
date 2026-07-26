@@ -15,7 +15,12 @@ import re
 
 from dotenv import load_dotenv
 
-load_dotenv()
+# v1.27.4: override=True makes the .env file authoritative — its ARRAKIS_* keys
+# win over any value already exported in the shell environment. Without this,
+# python-dotenv leaves an already-set var alone, so a stray `export
+# ARRAKIS_ANTHROPIC_API_KEY=...` in the launching terminal silently shadows
+# ~/.env. .env is the single source of truth for this local app.
+load_dotenv(override=True)
 
 logger = logging.getLogger(__name__)
 

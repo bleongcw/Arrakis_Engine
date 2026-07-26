@@ -14,7 +14,9 @@ import time
 import yaml
 from dotenv import load_dotenv
 
-load_dotenv()
+# v1.27.4: .env is authoritative — override=True so the file's ARRAKIS_* keys
+# win over any value exported in the shell (see src/llm_providers.py).
+load_dotenv(override=True)
 
 import http.server
 import functools
