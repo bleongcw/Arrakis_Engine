@@ -4,6 +4,49 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.28.0] - 2026-08-09
+
+### Fixed
+- **A game whose coaching failed was never retried, and never reported.**
+  `coach_pending` selected `coaching_status = 'pending'` only, making `'error'`
+  a terminal state: one transient API blip removed a game from the pipeline
+  permanently. `coach`, `run-all`, and the scheduler all skipped it, and the
+  only way back was to open the game and press **Coach Game** by hand. Worse,
+  the failure was invisible — `/api/status` has always returned
+  `coaching_error` and `types.ts` has always declared it, but no component
+  rendered it, so nothing anywhere in the UI showed that games had been
+  dropped.
+
+  - **Bounded automatic retry.** New `games.coaching_attempts` column (added by
+    an idempotent migration, default `0`) counts *consecutive* failures.
+    `coach_pending` now also picks up `'error'` games below
+    `coach.MAX_COACHING_ATTEMPTS` (3). Success resets the counter to `0`;
+    each failure increments it. Untried games are ordered ahead of retries so
+    a backlog of failures can't starve today's games under `--limit`.
+  - **The cap is never a dead end.** `POST /api/coach` — the per-game "Coach
+    Game" button — resets `coaching_attempts` to `0`, so a human can always
+    force another attempt on a game the batch has given up on.
+  - **Failures are now visible.** `/api/status` gained
+    `coaching_error_exhausted` (failures at or above the cap), and the
+    dashboard's Data Updates panel renders a failed-games notice that
+    distinguishes "these retry on the next run" from "these need you to press
+    Coach Game".
+
+  On upgrade, existing `'error'` rows default to `coaching_attempts = 0` and so
+  become eligible again exactly once — which is the intended behaviour, since
+  they were never actually retried.
+
+- **`coach --player <slug>` silently coached every player's games.** The
+  filter resolved the identifier with `WHERE username = ?`, but `--player` has
+  been the **slug** since v1.16.4 (v1.18.1 fixed `rescan-motifs`, `harvest`,
+  and `report` — `coach` was missed). A slug matched no row, which only logged
+  a warning and then fell through to coaching *all* pending games. It appeared
+  to work for any player whose slug and chess.com handle happen to be
+  identical, which is how it went unnoticed. Now resolved by `slug`,
+  consistent with every other player lookup.
+
+---
+
 ## [1.27.5] - 2026-08-08
 
 ### Fixed

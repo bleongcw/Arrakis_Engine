@@ -19,6 +19,16 @@ from src.tiers import get_tier
 
 logger = logging.getLogger(__name__)
 
+# v1.28.0: how many consecutive failures a game may accumulate before the
+# BATCH stops retrying it. Before this, 'error' was a terminal state — a game
+# that failed once was invisible to coach/run-all/the scheduler forever, so a
+# single transient API blip stranded it permanently and silently.
+#
+# The cap exists so a permanently-broken game (bad data, oversized prompt)
+# can't burn tokens on every run. It never becomes a new dead end: coaching a
+# game by hand resets the counter, so the manual path is always available.
+MAX_COACHING_ATTEMPTS = 3
+
 
 GAME_COACHING_PROMPT = """You are a professional chess coach for a {age}-year-old player named {name} (rated ~{rating}).
 Analyze this game and produce coaching insights.
@@ -1052,7 +1062,10 @@ def coach_game(game_id: int, provider: str | None = "claude",
         logger.error("Failed to parse LLM response for game %d: %s", game_id, e)
         logger.debug("Raw response: %s", raw[:500])
         conn.execute(
-            "UPDATE games SET coaching_status = 'error' WHERE id = ?",
+            # v1.28.0: count the attempt here too — same rule as
+            # _mark_game_error, which we can't call with this conn open.
+            "UPDATE games SET coaching_status = 'error', "
+            "coaching_attempts = coaching_attempts + 1 WHERE id = ?",
             (game_id,),
         )
         conn.commit()
@@ -1124,7 +1137,10 @@ def coach_game(game_id: int, provider: str | None = "claude",
          meta_json),
     )
     conn.execute(
-        "UPDATE games SET coaching_status = 'complete' WHERE id = ?",
+        # v1.28.0: clear the failure counter — the cap counts CONSECUTIVE
+        # failures, so a game that eventually succeeds starts clean.
+        "UPDATE games SET coaching_status = 'complete', coaching_attempts = 0 "
+        "WHERE id = ?",
         (game_id,),
     )
     conn.commit()
@@ -1172,22 +1188,32 @@ def coach_pending(provider: str = "claude", model: str | None = None,
 
     conn = init_db(db_path)
 
-    # Resolve player filter to player_id
+    # Resolve player filter to player_id.
+    # v1.28.0: by SLUG, not username — `--player` has been the slug since
+    # v1.16.4 (v1.18.1 fixed rescan-motifs/harvest/report but missed coach).
+    # Looking up by username meant `coach --player evanleong` matched nothing
+    # and then silently fell through to coaching EVERY player's games. It only
+    # appeared to work for players whose slug and handle happen to coincide.
     player_id = None
     if player:
-        row = conn.execute("SELECT id FROM players WHERE username = ?", (player,)).fetchone()
+        row = conn.execute("SELECT id FROM players WHERE slug = ?", (player,)).fetchone()
         if row:
             player_id = row["id"]
         else:
             logger.warning("Player '%s' not found — coaching all pending games.", player)
 
+    # v1.28.0: also pick up games stranded at 'error', up to the attempt cap.
     sql = """SELECT id FROM games
-        WHERE analysis_status = 'complete' AND coaching_status = 'pending'"""
-    params = []
+        WHERE analysis_status = 'complete'
+          AND (coaching_status = 'pending'
+               OR (coaching_status = 'error' AND coaching_attempts < ?))"""
+    params = [MAX_COACHING_ATTEMPTS]
     if player_id:
         sql += " AND player_id = ?"
         params.append(player_id)
-    sql += " ORDER BY date_played ASC"
+    # Never-tried games come first, so a backlog of retries can't starve
+    # today's games when --limit is in play.
+    sql += " ORDER BY (coaching_status = 'error'), date_played ASC"
     if limit > 0:
         sql += f" LIMIT {limit}"
     pending = conn.execute(sql, params).fetchall()
@@ -1363,10 +1389,17 @@ def coach_pending(provider: str = "claude", model: str | None = None,
 
 
 def _mark_game_error(game_id: int, db_path: str | None):
-    """Mark a game's coaching status as error."""
+    """Mark a game's coaching as failed and count the attempt.
+
+    v1.28.0: the increment is what bounds automatic retries — once
+    `coaching_attempts` reaches `MAX_COACHING_ATTEMPTS`, `coach_pending`
+    stops picking the game up. Kept in one place so the two callers can't
+    drift apart on the counter.
+    """
     err_conn = init_db(db_path)
     err_conn.execute(
-        "UPDATE games SET coaching_status = 'error' WHERE id = ?",
+        "UPDATE games SET coaching_status = 'error', "
+        "coaching_attempts = coaching_attempts + 1 WHERE id = ?",
         (game_id,),
     )
     err_conn.commit()

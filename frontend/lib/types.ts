@@ -657,4 +657,7 @@ export interface StatusResponse {
   coaching_pending: number;
   coaching_complete: number;
   coaching_error: number;
+  /** v1.28.0: failures the batch has given up on (attempts >= the cap).
+   *  These need a manual "Coach Game"; the rest clear on the next run. */
+  coaching_error_exhausted: number;
 }

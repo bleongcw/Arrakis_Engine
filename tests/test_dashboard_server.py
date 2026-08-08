@@ -5,6 +5,7 @@ import threading
 import time
 import urllib.request
 import urllib.error
+from unittest.mock import patch
 
 import pytest
 
@@ -674,6 +675,64 @@ class TestStatusCounts:
         assert data["total_games"] == 2
         assert data["analysis_complete"] == 1
         assert data["analysis_pending"] == 1
+
+    def test_status_splits_exhausted_coaching_failures(
+        self, live_server, db_with_data
+    ):
+        """v1.28.0: a retryable failure clears itself on the next run; an
+        exhausted one needs a human. The dashboard can only say which is
+        which if /api/status reports them separately."""
+        from src.coach import MAX_COACHING_ATTEMPTS
+        conn = init_db(db_with_data)
+        ids = [r["id"] for r in conn.execute("SELECT id FROM games")]
+        conn.execute(
+            "UPDATE games SET coaching_status='error', coaching_attempts=1 "
+            "WHERE id = ?", (ids[0],),
+        )
+        conn.execute(
+            "UPDATE games SET coaching_status='error', coaching_attempts=? "
+            "WHERE id = ?", (MAX_COACHING_ATTEMPTS, ids[1]),
+        )
+        conn.commit()
+        conn.close()
+
+        data = api_get(live_server, "/api/status")
+        assert data["coaching_error"] == 2
+        assert data["coaching_error_exhausted"] == 1
+
+
+class TestManualCoachResetsAttempts:
+    """v1.28.0: the retry cap must never become a new dead end — asking for a
+    game by hand always restores a full budget."""
+
+    # coach_game is imported INSIDE the handler, so per the project's
+    # patch-target rule it must be patched at the source module. Without
+    # this the endpoint spawns a real coaching thread that outlives the
+    # fixture and keeps port 18765 bound for every later test.
+    @patch("src.coach.coach_game")
+    def test_coach_endpoint_clears_attempts(self, mock_coach, live_server,
+                                            db_with_data):
+        from src.coach import MAX_COACHING_ATTEMPTS
+        mock_coach.return_value = {"narrative": "ok"}
+        conn = init_db(db_with_data)
+        gid = conn.execute(
+            "SELECT id FROM games WHERE analysis_status='complete'"
+        ).fetchone()["id"]
+        conn.execute(
+            "UPDATE games SET coaching_status='error', coaching_attempts=? "
+            "WHERE id = ?", (MAX_COACHING_ATTEMPTS, gid),
+        )
+        conn.commit()
+        conn.close()
+
+        api_post(live_server, "/api/coach", {"game_id": gid})
+
+        conn = init_db(db_with_data)
+        row = conn.execute(
+            "SELECT coaching_attempts FROM games WHERE id = ?", (gid,)
+        ).fetchone()
+        conn.close()
+        assert row["coaching_attempts"] == 0
 
 
 class TestPlayerFilter:

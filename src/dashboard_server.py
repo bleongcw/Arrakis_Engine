@@ -216,11 +216,15 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
         finally:
             conn.close()
 
-        # Mark as 'pending' so the dashboard poll can detect the transition
+        # Mark as 'pending' so the dashboard poll can detect the transition.
+        # v1.28.0: also clear coaching_attempts — a human asking for this game
+        # explicitly always gets a fresh budget, so the retry cap can never
+        # become a dead end the way terminal 'error' was.
         conn2 = self._get_conn()
         try:
             conn2.execute(
-                "UPDATE games SET coaching_status = 'pending' WHERE id = ?",
+                "UPDATE games SET coaching_status = 'pending', "
+                "coaching_attempts = 0 WHERE id = ?",
                 (game_id,),
             )
             conn2.commit()
@@ -1720,6 +1724,17 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             ).fetchall()
             coaching_map = {r["coaching_status"]: r["c"] for r in coaching}
 
+            # v1.28.0: of the failed games, how many the batch has given up on.
+            # Splitting these out is what makes the dashboard count actionable:
+            # a retryable failure clears itself on the next run, an exhausted
+            # one needs a human to press Coach Game.
+            from src.coach import MAX_COACHING_ATTEMPTS
+            exhausted = conn.execute(
+                "SELECT COUNT(*) AS c FROM games "
+                "WHERE coaching_status = 'error' AND coaching_attempts >= ?",
+                (MAX_COACHING_ATTEMPTS,),
+            ).fetchone()["c"]
+
             return {
                 "total_games": total,
                 "analysis_pending": analysis_map.get("pending", 0),
@@ -1729,6 +1744,7 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                 "coaching_pending": coaching_map.get("pending", 0),
                 "coaching_complete": coaching_map.get("complete", 0),
                 "coaching_error": coaching_map.get("error", 0),
+                "coaching_error_exhausted": exhausted,
             }
         finally:
             conn.close()

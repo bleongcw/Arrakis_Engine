@@ -5,6 +5,8 @@ import { createPortal } from "react-dom";
 import { usePipeline } from "@/hooks/use-pipeline";
 import { useSchedule } from "@/hooks/use-schedule";
 import { usePlayerContext } from "@/app/providers";
+import { fetchStatus } from "@/lib/api";
+import type { StatusResponse } from "@/lib/types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
@@ -147,8 +149,24 @@ export function PipelineControlPanel() {
   const [selectedProvider, setSelectedProvider] = useState<string>("openai");
   const [actionError, setActionError] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
+  const [status, setStatus] = useState<StatusResponse | null>(null);
 
   const isRunning = state.status === "running";
+
+  // v1.28.0: surface games whose coaching failed. Re-read whenever the
+  // pipeline changes state, so a run that clears (or adds) failures updates
+  // the count. Advisory only — a failed poll must never break the panel.
+  useEffect(() => {
+    let cancelledFetch = false;
+    fetchStatus()
+      .then((s) => {
+        if (!cancelledFetch) setStatus(s);
+      })
+      .catch(() => {});
+    return () => {
+      cancelledFetch = true;
+    };
+  }, [state.status]);
   const playerArg = selectedPlayer === "all" ? undefined : selectedPlayer;
 
   // Reset cancelling state when task finishes
@@ -436,6 +454,25 @@ export function PipelineControlPanel() {
             >
               &times;
             </button>
+          </div>
+        )}
+
+        {/* Failed coaching (v1.28.0) — before this, failures were invisible:
+            the count existed in /api/status but nothing rendered it. */}
+        {status && status.coaching_error > 0 && (
+          <div
+            className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3"
+            data-testid="coaching-failures"
+          >
+            <p className="text-sm font-medium text-amber-600 dark:text-amber-400">
+              {status.coaching_error} game
+              {status.coaching_error === 1 ? "" : "s"} failed coaching
+            </p>
+            <p className="text-sm text-muted-foreground mt-0.5">
+              {status.coaching_error_exhausted > 0
+                ? `${status.coaching_error_exhausted} stopped retrying after repeated failures — open the game and press Coach Game. Any others retry on the next run.`
+                : "These retry automatically on the next run."}
+            </p>
           </div>
         )}
 

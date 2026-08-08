@@ -369,6 +369,136 @@ class TestCoachPendingLimit:
         assert mock_coach.call_count == 1
 
 
+class TestCoachingRetry:
+    """v1.28.0 — 'error' used to be terminal: coach_pending only selected
+    'pending', so a game that failed once was never retried by the batch
+    (coach / run-all / scheduler) and silently vanished from the pipeline."""
+
+    def _seed(self, db_path, rows):
+        """rows: list of (coaching_status, coaching_attempts). Returns ids."""
+        conn = init_db(db_path)
+        pid = ensure_player(conn, "testplayer", display_name="T", age=9,
+                            rating=1000)
+        ids = []
+        for i, (status, attempts) in enumerate(rows):
+            cur = conn.execute(
+                """INSERT INTO games
+                (player_id, game_url, pgn, player_color, result, date_played,
+                 analysis_status, coaching_status, coaching_attempts)
+                VALUES (?, ?, ?, ?, ?, ?, 'complete', ?, ?)""",
+                (pid, f"https://chess.com/game/{i+200}", "1. e4 *", "white",
+                 "win", f"2026-01-0{i+1}", status, attempts),
+            )
+            ids.append(cur.lastrowid)
+        conn.commit()
+        conn.close()
+        return ids
+
+    @patch("src.coach.coach_game")
+    def test_errored_game_under_cap_is_retried(self, mock_coach, db_path):
+        ids = self._seed(db_path, [("error", 1)])
+        mock_coach.return_value = {"narrative": "ok"}
+        coach_pending(provider="claude", db_path=db_path)
+        assert mock_coach.call_count == 1
+        assert mock_coach.call_args[0][0] == ids[0]
+
+    @patch("src.coach.coach_game")
+    def test_errored_game_at_cap_is_left_alone(self, mock_coach, db_path):
+        from src.coach import MAX_COACHING_ATTEMPTS
+        self._seed(db_path, [("error", MAX_COACHING_ATTEMPTS)])
+        coach_pending(provider="claude", db_path=db_path)
+        assert mock_coach.call_count == 0
+
+    @patch("src.coach.coach_game")
+    def test_pending_games_are_coached_before_retries(self, mock_coach, db_path):
+        # The retry is OLDER, so date ordering alone would put it first;
+        # untried games must still win, or a backlog of failures starves
+        # today's games under --limit.
+        ids = self._seed(db_path, [("error", 1), ("pending", 0)])
+        mock_coach.return_value = {"narrative": "ok"}
+        coach_pending(provider="claude", db_path=db_path, limit=1)
+        assert mock_coach.call_count == 1
+        assert mock_coach.call_args[0][0] == ids[1]
+
+    def test_failure_increments_attempts(self, db_path):
+        from src.coach import _mark_game_error
+        ids = self._seed(db_path, [("pending", 0)])
+        _mark_game_error(ids[0], db_path)
+        _mark_game_error(ids[0], db_path)
+        conn = init_db(db_path)
+        row = conn.execute(
+            "SELECT coaching_status, coaching_attempts FROM games WHERE id = ?",
+            (ids[0],),
+        ).fetchone()
+        conn.close()
+        assert row["coaching_status"] == "error"
+        assert row["coaching_attempts"] == 2
+
+    @patch("src.coach.call_provider")
+    def test_success_resets_attempts(self, mock_provider, db_path,
+                                     game_with_analysis):
+        # The cap counts CONSECUTIVE failures — a game that recovers must
+        # not carry its old failures forward.
+        conn = init_db(db_path)
+        conn.execute(
+            "UPDATE games SET coaching_attempts = 2 WHERE id = ?",
+            (game_with_analysis,),
+        )
+        conn.commit()
+        conn.close()
+
+        mock_provider.return_value = json.dumps({
+            "narrative": "n", "key_lesson": "k", "practical_focus": "p",
+            "critical_moments": [], "coach_notes": "c",
+        })
+        coach_game(game_with_analysis, provider="claude", db_path=db_path)
+
+        conn = init_db(db_path)
+        row = conn.execute(
+            "SELECT coaching_status, coaching_attempts FROM games WHERE id = ?",
+            (game_with_analysis,),
+        ).fetchone()
+        conn.close()
+        assert row["coaching_status"] == "complete"
+        assert row["coaching_attempts"] == 0
+
+
+class TestCoachPendingPlayerFilter:
+    """v1.28.0 — `--player` is the SLUG (v1.16.4). coach_pending resolved it
+    against `username`, so a slug matched nothing and the filter silently
+    fell through to coaching EVERY player's games."""
+
+    def _seed_two_players(self, db_path):
+        conn = init_db(db_path)
+        a = ensure_player(conn, "handle-one", display_name="Evan Leong",
+                          age=9, rating=1000)
+        b = ensure_player(conn, "handle-two", display_name="Estella Leong",
+                          age=7, rating=600)
+        for i, pid in enumerate((a, b)):
+            conn.execute(
+                """INSERT INTO games
+                (player_id, game_url, pgn, player_color, result,
+                 analysis_status, coaching_status)
+                VALUES (?, ?, ?, ?, ?, 'complete', 'pending')""",
+                (pid, f"https://chess.com/game/{i+300}", "1. e4 *", "white",
+                 "win"),
+            )
+        conn.commit()
+        slug = conn.execute("SELECT slug FROM players WHERE id = ?",
+                            (a,)).fetchone()["slug"]
+        conn.close()
+        return slug
+
+    @patch("src.coach.coach_game")
+    def test_player_filter_resolves_by_slug(self, mock_coach, db_path):
+        slug = self._seed_two_players(db_path)
+        assert slug == "evanleong"          # derived from display_name
+        mock_coach.return_value = {"narrative": "ok"}
+        coach_pending(provider="claude", db_path=db_path, player=slug)
+        # Only Evan's game — not both players'.
+        assert mock_coach.call_count == 1
+
+
 class TestCoachingHistoryDepth:
     """Tests for the configurable coaching_history_count setting (v1.3.0)."""
 

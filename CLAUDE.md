@@ -5,7 +5,7 @@ Local Python app that pulls games from Chess.com and Lichess, runs Stockfish ana
 and uses reasoning LLMs to generate age-appropriate coaching insights with
 pattern tracking over time. Inspired by Eleanor, Evan, and Estella.
 
-Current release: **v1.27.5** (2026-08-08). See `CHANGELOG.md` for full history.
+Current release: **v1.28.0** (2026-08-09). See `CHANGELOG.md` for full history.
 
 ## Architecture
 - Python 3.11+, SQLite (WAL mode), local Stockfish on Apple Silicon
@@ -35,7 +35,9 @@ Current release: **v1.27.5** (2026-08-08). See `CHANGELOG.md` for full history.
   - **`slug`** — the URL / API `?player=` / CLI `--player` identifier. Auto-derived
     from `display_name` (lowercase, strip non-alphanumeric → "Evan Leong" =
     "evanleong"). v1.16.4 made lookups slug-only; v1.18.1 extended that to
-    rescan-motifs + harvest/report CLI.
+    rescan-motifs + harvest/report CLI; **v1.28.0 fixed the last holdout,
+    `coach_pending`**, which still resolved `--player` by `username` and so
+    silently coached EVERY player when given a slug.
   - **`display_name`** — what every visible label shows.
 - **FIDE ratings (v1.26.0):** three separate ratings —
   `fide_rating_classical` / `fide_rating_rapid` / `fide_rating_blitz` (FIDE
@@ -59,6 +61,11 @@ Current release: **v1.27.5** (2026-08-08). See `CHANGELOG.md` for full history.
   ChatGPT (`reasoning.effort`), Mistral (`reasoning_effort`, capped at high);
   clamped per provider by `_effort_for` in `src/llm_providers.py`
 - Coaching history depth (v1.3.0+): default 5 recent games, configurable 1-20
+- Coaching retry (v1.28.0): `coaching_status='error'` is no longer terminal —
+  `coach_pending` retries a failed game until `games.coaching_attempts` reaches
+  `coach.MAX_COACHING_ATTEMPTS` (3); success resets the counter, untried games
+  are ordered ahead of retries, and `POST /api/coach` ("Coach Game") zeroes the
+  counter so the cap never becomes a dead end
 - Hunter Mode (v1.4.4+): sliding window default 6 months, optional max games cap
 - Config via `config.yaml`, secrets via `.env`:
   - `ARRAKIS_ANTHROPIC_API_KEY`, `ARRAKIS_OPENAI_API_KEY`, `ARRAKIS_GOOGLE_API_KEY`
@@ -169,7 +176,7 @@ ArrakisEngine/
 │   └── screenshots/           # Architecture diagram + UI screenshots
 ├── data/
 │   └── chess_coach.db         # SQLite database (auto-created, gitignored)
-├── tests/                     # Backend pytest suite (725 tests across 3 tiers)
+├── tests/                     # Backend pytest suite (739 tests across 3 tiers)
 └── reports/                   # Generated coach reports (gitignored)
 ```
 
@@ -178,7 +185,7 @@ ArrakisEngine/
 | Table | Purpose |
 |---|---|
 | `players` | Player profiles (+ `slug` v1.16.1, `is_active` soft-delete, `fide_id` + three FIDE ratings `fide_rating_{classical,rapid,blitz}` v1.26.0) |
-| `games` | Stored games with PGN |
+| `games` | Stored games with PGN (+ `coaching_attempts` v1.28.0 — consecutive coaching failures, bounds automatic retry) |
 | `move_analysis` | Per-move Stockfish results (+ `clock_seconds`, `motifs_json` v1.14.0) |
 | `game_coaching` | LLM coaching output (+ `player_feedback`, `coaching_meta_json`) |
 | `player_patterns` | Aggregated pattern stats JSON (+ `trend_summary`, motif_summary) |
@@ -305,8 +312,8 @@ harvest + report).
 
 ## Testing
 
-**~953 tests total** — 725 backend (pytest, three tiers via `pyproject.toml`
-markers) + 228 frontend (Vitest). Integration (`-m integration`, needs Stockfish)
+**~971 tests total** — 739 backend (pytest, three tiers via `pyproject.toml`
+markers) + 232 frontend (Vitest). Integration (`-m integration`, needs Stockfish)
 and live (`-m live`, needs an LLM key) tiers are excluded by default.
 
 ### Running Tests
@@ -314,7 +321,7 @@ and live (`-m live`, needs an LLM key) tiers are excluded by default.
 pytest                                  # default unit tier (~30s, no deps)
 pytest -m integration                   # Stockfish tests (requires binary)
 pytest -m live                          # LLM API tests (~$0.30)
-cd frontend && npx vitest run           # 228 frontend tests, ~3s
+cd frontend && npx vitest run           # 232 frontend tests, ~3s
 cd frontend && npx next build           # type-check
 ```
 

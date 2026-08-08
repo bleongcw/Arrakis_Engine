@@ -1,6 +1,6 @@
 # Arrakis Engine Roadmap
 
-*Updated 2026-08-08 — current release v1.27.5*
+*Updated 2026-08-09 — current release v1.28.0*
 
 This is the public-facing roadmap. The full release history is in
 [CHANGELOG.md](CHANGELOG.md); architectural details are in
@@ -157,6 +157,20 @@ provider.
   "Evan Leong") matched nothing and silently defaulted to White, inverting the
   result and recording the player as their own opponent. Names now match as bags
   of words, and an unmatched name **fails the import instead of guessing** a side.
+
+### Pipeline reliability (v1.28.0, 2026-08-09)
+- **Failed coaching now retries, and is visible.** A game whose coaching failed
+  was stranded forever: the batch only ever looked at `pending` games, so
+  `coach`, `run-all`, and the scheduler all skipped it, and nothing in the UI
+  said so. Failures are now retried automatically up to 3 times (counted per
+  game, reset on success), untried games keep priority over retries, and the
+  Data Updates panel shows how many games failed — separating the ones that
+  retry themselves from the ones needing a manual **Coach Game**. Pressing that
+  button always restores a full retry budget, so the cap can't strand a game
+  either.
+- **`coach --player <slug>` no longer coaches everyone.** The filter resolved
+  the identifier against the chess.com handle instead of the slug, matched
+  nothing, and quietly fell through to every player's games.
 
 ### Polish & bug fixes
 - v1.0.1, v1.0.2 — UI fixes (opening explorer, dialog hydration)

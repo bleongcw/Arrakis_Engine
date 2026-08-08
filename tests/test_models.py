@@ -157,6 +157,8 @@ class TestMigrations:
         assert "opponent_username" in game_cols
         assert "platform" in game_cols
         assert "acpl" in game_cols
+        # v1.28.0: bounded coaching retry.
+        assert "coaching_attempts" in game_cols
 
         # Check migrated columns on game_coaching
         coaching_cols = {r[1] for r in conn.execute("PRAGMA table_info(game_coaching)").fetchall()}
@@ -172,6 +174,35 @@ class TestMigrations:
         assert "fide_rating_rapid" in player_cols
         assert "fide_rating_blitz" in player_cols
         assert "lichess_username" in player_cols
+        conn.close()
+
+    def test_coaching_attempts_migrates_onto_an_existing_db(self, db_path):
+        """v1.28.0: upgrading an older DB must add coaching_attempts and
+        default it to 0, so games stranded at 'error' under the old
+        never-retry behaviour become eligible again exactly once."""
+        conn = init_db(db_path)
+        pid = ensure_player(conn, "p", display_name="P", age=9, rating=1000)
+        conn.execute(
+            """INSERT INTO games
+            (player_id, game_url, pgn, player_color, result,
+             analysis_status, coaching_status)
+            VALUES (?, 'u1', '1. e4 *', 'white', 'win', 'complete', 'error')""",
+            (pid,),
+        )
+        conn.commit()
+        # Simulate the pre-v1.28.0 schema.
+        conn.execute("ALTER TABLE games DROP COLUMN coaching_attempts")
+        conn.commit()
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(games)")}
+        assert "coaching_attempts" not in cols
+        conn.close()
+
+        conn = init_db(db_path)          # re-run migrations
+        row = conn.execute(
+            "SELECT coaching_status, coaching_attempts FROM games"
+        ).fetchone()
+        assert row["coaching_status"] == "error"
+        assert row["coaching_attempts"] == 0
         conn.close()
 
 

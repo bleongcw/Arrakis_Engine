@@ -1,6 +1,6 @@
 # Arrakis Engine — Architecture
 
-*Last updated: 2026-08-08 — corresponds to v1.27.5*
+*Last updated: 2026-08-09 — corresponds to v1.28.0*
 
 This document describes the technical architecture of Arrakis Engine: how the pieces fit together, what runs where, and the design decisions behind them. It is aimed at contributors and developers reading the codebase. For end-user / setup docs, see [README.md](../README.md). For changelog, see [CHANGELOG.md](../CHANGELOG.md).
 
@@ -123,6 +123,7 @@ The backend is intentionally dependency-light — `http.server` is enough for a 
 - **Game-type detection** classifies games into 10 archetypes (tactical battle, comeback, collapse, positional grind, miniature, etc.) and tailors the prompt accordingly.
 - **Coaching meta diagnostics** (v1.7.0, extended in v1.8.0): every coached game stores `coaching_meta_json` capturing history depth, prompt size, model, and trajectory state (`trajectory_injected`, `trajectory_age_days`, `trajectory_weakest_phase`, `trajectory_trend_direction`, `trajectory_tokens_estimate`). The frontend renders these as small badges on the coaching panel so the user can verify what the LLM actually saw.
 - Resilience: exponential backoff (30s → 60s → 120s, max 5 min), 3-failure circuit breaker, per-provider SDK timeouts (300s default; 600s for GPT-5.6 Sol, which runs longer at high/xhigh effort), interruptible sleep via `threading.Event`.
+- **Bounded retry across runs** (v1.28.0): the resilience above covers a single invocation; a game that still fails is marked `coaching_status='error'`. That used to be a **terminal** state — `coach_pending` selected only `'pending'`, so one bad run removed a game from the pipeline permanently and invisibly. It now also selects `'error'` games whose `games.coaching_attempts` is below `MAX_COACHING_ATTEMPTS` (3). Each failure increments the counter (via `_mark_game_error`), success resets it to 0 — so the cap counts *consecutive* failures. Untried games sort ahead of retries (`ORDER BY (coaching_status = 'error'), date_played ASC`) so a backlog can't starve new games under `--limit`. The cap is not a new dead end: `POST /api/coach` zeroes the counter, so the per-game "Coach Game" button always grants a fresh budget. `/api/status` reports `coaching_error` alongside `coaching_error_exhausted` (at or above the cap) so the dashboard can distinguish "retries on the next run" from "needs a human".
 
 ### `patterns.py` — cross-game aggregation
 Aggregates 20+ metrics per player across all analyzed games. Stored as one JSON blob per player in `player_patterns.stats_json`. Also exposes `build_trajectory_block(conn, player_id)` (v1.8.0) which extracts a structured 6–8-fact snapshot of the player's measured trajectory for injection into the per-game coaching prompt; see `coach.py` above.
@@ -276,7 +277,7 @@ Single-file SQLite. Schema migrations run via `init_db()` at startup — column 
 | Table | Key fields |
 |---|---|
 | `players` | username (chess.com handle), **slug** (v1.16.1 — URL/API/CLI id, partial UNIQUE index), display_name, age, rating, fide_id, fide_rating (+ fide_rating_classical/rapid/blitz v1.26.0), lichess_username, is_active |
-| `games` | player_id, game_url, pgn, player_color, player_rating, opponent_rating, result, time_control, time_class, platform, acpl, opponent_username, analysis_status, coaching_status, date_played |
+| `games` | player_id, game_url, pgn, player_color, player_rating, opponent_rating, result, time_control, time_class, platform, acpl, opponent_username, analysis_status, coaching_status, **coaching_attempts** (v1.28.0 — consecutive coaching failures; bounds automatic retry), date_played |
 | `move_analysis` | game_id, move_number, side, move_played, best_move, eval_before_cp, eval_after_cp, swing_cp, win_prob_before, win_prob_after, classification, pv_line, **clock_seconds**, **motifs_json** (v1.14.0 — `{played, best, missed}`, NULL on non-critical moves) |
 | `game_coaching` | game_id, provider, narrative, key_lesson, practical_focus, coach_notes, player_feedback, critical_moments_json, opening_analysis_json, **coaching_meta_json** (v1.7.0; trajectory_* v1.8.0; motif_top_missed / motif_top_missed_phase v1.15.0/v1.16.0) |
 | `player_patterns` | player_id, period_start, period_end, stats_json (includes **motif_summary** v1.15.0 with per-phase splits v1.16.0), trend_summary, recent_form_review (legacy, superseded by journal_entries), updated_at |
@@ -293,6 +294,7 @@ Single-file SQLite. Schema migrations run via `init_db()` at startup — column 
 - **Soft-delete via `is_active`** — removing a player archives them; game history is preserved.
 - **WAL mode** — concurrent reads while the analyzer holds a write lock.
 - **Coaching status is a separate column from analysis status** — a game can be analyzed but not yet coached, which the UI surfaces as a filterable state.
+- **No status is terminal without an escape hatch** (v1.28.0) — `coaching_status='error'` was originally terminal, which meant a single transient API failure silently and permanently dropped a game from the pipeline. The replacement pairs a bounded automatic retry (`coaching_attempts` vs `MAX_COACHING_ATTEMPTS`) with an unbounded manual one (`POST /api/coach` resets the counter). A bounded retry alone would simply move the trap one level up: "exhausted" would become the new terminal state.
 - **`date_played` is full datetime, not just date** — needed so coaching runs in true chronological order across multiple games on the same day.
 - **`motifs_json` is sparse** — only critical moves (|cp_loss| ≥ 50) carry motif tags, so the column stays small. `rescan-motifs` backfills it from existing `move_analysis` rows without re-running Stockfish.
 
@@ -360,7 +362,7 @@ The `ARRAKIS_` prefix avoids collisions with other tools that use the unprefixed
 
 ## 7. Testing
 
-**~953 tests total** — 725 backend (pytest) + 228 frontend (Vitest). Counts as of v1.27.4; see CHANGELOG for per-release deltas. Backend integration (`-m integration`, Stockfish) and live (`-m live`, LLM key) tiers are excluded by default.
+**~971 tests total** — 739 backend (pytest) + 232 frontend (Vitest). Counts as of v1.28.0; see CHANGELOG for per-release deltas. Backend integration (`-m integration`, Stockfish) and live (`-m live`, LLM key) tiers are excluded by default.
 
 ### Backend (`tests/`)
 

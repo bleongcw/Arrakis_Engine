@@ -214,6 +214,16 @@ def _migrate(conn: sqlite3.Connection):
         # Backfill ACPL from existing move analysis with ±1000cp cap
         _backfill_acpl(conn)
 
+    if "coaching_attempts" not in game_cols:
+        # v1.28.0: bounded retry for games stuck at coaching_status='error'.
+        # Existing rows default to 0, so games that failed under the old
+        # never-retry behaviour become eligible again on upgrade — which is
+        # exactly what we want, since they were never actually retried.
+        conn.execute(
+            "ALTER TABLE games ADD COLUMN coaching_attempts INTEGER NOT NULL DEFAULT 0"
+        )
+        conn.commit()
+
     move_cols = {r[1] for r in conn.execute("PRAGMA table_info(move_analysis)").fetchall()}
     if "clock_seconds" not in move_cols:
         conn.execute("ALTER TABLE move_analysis ADD COLUMN clock_seconds REAL")
@@ -494,7 +504,11 @@ CREATE TABLE IF NOT EXISTS games (
     analysis_status TEXT NOT NULL DEFAULT 'pending'
         CHECK (analysis_status IN ('pending', 'analyzing', 'complete', 'error')),
     coaching_status TEXT NOT NULL DEFAULT 'pending'
-        CHECK (coaching_status IN ('pending', 'complete', 'error'))
+        CHECK (coaching_status IN ('pending', 'complete', 'error')),
+    -- v1.28.0: consecutive failed coaching attempts. Bounds automatic retries
+    -- of a game stuck at coaching_status='error' (see coach.MAX_COACHING_ATTEMPTS).
+    -- Reset to 0 on success and whenever a human re-triggers coaching by hand.
+    coaching_attempts INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_games_player_id ON games(player_id);
