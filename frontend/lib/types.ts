@@ -46,7 +46,9 @@ export interface GameListItem {
   time_class: string | null;
   date_played: string | null;
   analysis_status: "pending" | "analyzing" | "complete" | "error";
-  coaching_status: "pending" | "complete" | "error";
+  /** "skipped" (v1.28.1): analysed, but nothing to coach — e.g. abandoned
+   *  before a move was played. Resolved, not failed. */
+  coaching_status: "pending" | "complete" | "error" | "skipped";
   platform: "chess.com" | "lichess" | "competition";
   username: string;
   display_name: string | null;
@@ -660,4 +662,7 @@ export interface StatusResponse {
   /** v1.28.0: failures the batch has given up on (attempts >= the cap).
    *  These need a manual "Coach Game"; the rest clear on the next run. */
   coaching_error_exhausted: number;
+  /** v1.28.1: analysed but nothing to coach (e.g. abandoned before a move).
+   *  A resolved outcome — neither pending nor failed. */
+  coaching_skipped: number;
 }

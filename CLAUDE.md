@@ -5,7 +5,7 @@ Local Python app that pulls games from Chess.com and Lichess, runs Stockfish ana
 and uses reasoning LLMs to generate age-appropriate coaching insights with
 pattern tracking over time. Inspired by Eleanor, Evan, and Estella.
 
-Current release: **v1.28.0** (2026-08-09). See `CHANGELOG.md` for full history.
+Current release: **v1.28.1** (2026-08-09). See `CHANGELOG.md` for full history.
 
 ## Architecture
 - Python 3.11+, SQLite (WAL mode), local Stockfish on Apple Silicon
@@ -61,6 +61,9 @@ Current release: **v1.28.0** (2026-08-09). See `CHANGELOG.md` for full history.
   ChatGPT (`reasoning.effort`), Mistral (`reasoning_effort`, capped at high);
   clamped per provider by `_effort_for` in `src/llm_providers.py`
 - Coaching history depth (v1.3.0+): default 5 recent games, configurable 1-20
+- Coaching statuses: `pending` | `complete` | `error` | `skipped` (v1.28.1 —
+  analysed but nothing to coach, e.g. a game abandoned before a move; detected
+  as zero `move_analysis` rows, marked without an LLM call, never re-selected)
 - Coaching retry (v1.28.0): `coaching_status='error'` is no longer terminal —
   `coach_pending` retries a failed game until `games.coaching_attempts` reaches
   `coach.MAX_COACHING_ATTEMPTS` (3); success resets the counter, untried games
@@ -176,7 +179,7 @@ ArrakisEngine/
 │   └── screenshots/           # Architecture diagram + UI screenshots
 ├── data/
 │   └── chess_coach.db         # SQLite database (auto-created, gitignored)
-├── tests/                     # Backend pytest suite (739 tests across 3 tiers)
+├── tests/                     # Backend pytest suite (743 tests across 3 tiers)
 └── reports/                   # Generated coach reports (gitignored)
 ```
 
@@ -312,7 +315,7 @@ harvest + report).
 
 ## Testing
 
-**~971 tests total** — 739 backend (pytest, three tiers via `pyproject.toml`
+**~975 tests total** — 743 backend (pytest, three tiers via `pyproject.toml`
 markers) + 232 frontend (Vitest). Integration (`-m integration`, needs Stockfish)
 and live (`-m live`, needs an LLM key) tiers are excluded by default.
 

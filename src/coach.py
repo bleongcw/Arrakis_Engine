@@ -823,6 +823,29 @@ def coach_game(game_id: int, provider: str | None = "claude",
         conn.close()
         raise ValueError(f"Game {game_id} not yet analyzed (status: {game['analysis_status']})")
 
+    # v1.28.1: an analysed game with no moves has nothing to coach — a game
+    # abandoned before either side moved (chess.com Termination "... game
+    # abandoned"). Coaching it used to raise and land the game in 'error',
+    # which read as a failure and, from v1.28.0, burned retry attempts on a
+    # game that can never succeed. Resolve it as 'skipped' instead: a real
+    # outcome, no LLM call, and it leaves the queue for good.
+    move_count = conn.execute(
+        "SELECT COUNT(*) FROM move_analysis WHERE game_id = ?", (game_id,)
+    ).fetchone()[0]
+    if move_count == 0:
+        conn.execute(
+            "UPDATE games SET coaching_status = 'skipped', coaching_attempts = 0 "
+            "WHERE id = ?",
+            (game_id,),
+        )
+        conn.commit()
+        conn.close()
+        logger.info(
+            "Game %d has no moves (abandoned) — marked 'skipped', no coaching needed.",
+            game_id,
+        )
+        return {"skipped": True, "reason": "no moves to coach"}
+
     # Fetch move analysis
     moves = conn.execute(
         """SELECT * FROM move_analysis WHERE game_id = ?
@@ -1220,8 +1243,11 @@ def coach_pending(provider: str = "claude", model: str | None = None,
     conn.close()
 
     total_pending = len(pending)
-    result = {"coached": 0, "errors": 0, "skipped": 0, "total": total_pending,
-              "aborted": False, "abort_reason": None}
+    # NOTE: "skipped" here means "not attempted" (batch cancelled/aborted).
+    # v1.28.1 adds "no_coaching_needed" for games resolved as
+    # coaching_status='skipped' — analysed but with no moves to coach.
+    result = {"coached": 0, "errors": 0, "skipped": 0, "no_coaching_needed": 0,
+              "total": total_pending, "aborted": False, "abort_reason": None}
 
     if total_pending == 0:
         logger.info("No pending games to coach.")
@@ -1275,12 +1301,18 @@ def coach_pending(provider: str = "claude", model: str | None = None,
 
         # ── Attempt coaching with retries ──
         success = False
+        no_coaching_needed = False
         for attempt in range(1, max_retries_per_game + 1):
             try:
-                coach_game(game_id, provider=provider, model=model,
-                           db_path=db_path, config=config,
-                           dump_prompt_to=dump_prompt_to,
-                           trajectory_enabled=trajectory_enabled)
+                outcome = coach_game(game_id, provider=provider, model=model,
+                                     db_path=db_path, config=config,
+                                     dump_prompt_to=dump_prompt_to,
+                                     trajectory_enabled=trajectory_enabled)
+                # v1.28.1: an abandoned game resolves as 'skipped' without an
+                # LLM call — don't report it as a coached game.
+                no_coaching_needed = bool(
+                    isinstance(outcome, dict) and outcome.get("skipped")
+                )
                 success = True
                 consecutive_failures = 0  # Reset on success
                 # Gradually recover delay back to base after successful calls
@@ -1289,7 +1321,10 @@ def coach_pending(provider: str = "claude", model: str | None = None,
 
                 # ── Check cancellation immediately after LLM call ──
                 if cancel_event and cancel_event.is_set():
-                    result["coached"] += 1
+                    if no_coaching_needed:
+                        result["no_coaching_needed"] += 1
+                    else:
+                        result["coached"] += 1
                     result["skipped"] = total_pending - i - 1
                     result["aborted"] = True
                     result["abort_reason"] = "Cancelled by user"
@@ -1357,7 +1392,10 @@ def coach_pending(provider: str = "claude", model: str | None = None,
                 )
                 break
         else:
-            result["coached"] += 1
+            if no_coaching_needed:
+                result["no_coaching_needed"] += 1
+            else:
+                result["coached"] += 1
 
         # ── Delay before next game ──
         if i < total_pending - 1:

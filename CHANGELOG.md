@@ -4,6 +4,44 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.28.1] - 2026-08-09
+
+### Fixed
+- **An abandoned game was reported as a coaching failure.** A game where the
+  opponent never moved (chess.com `Termination "… game abandoned"`) analyses to
+  zero moves, so coaching raised and the game landed in `coaching_status='error'`
+  — indistinguishable from a real breakage on the dashboard, and after v1.28.0
+  it burned its three retry attempts on something that can never succeed. There
+  is nothing to coach in a game with no moves; that is an outcome, not an error.
+
+  `coaching_status` gained a fourth value, **`'skipped'`**: analysed, resolved,
+  nothing to do. `coach_game` now checks for zero `move_analysis` rows up front
+  and marks the game `'skipped'` **without any LLM call**. The detection is
+  engine truth (no stored moves) rather than string-matching a platform's
+  `Termination` header, so it covers lichess and PGN imports too. `'skipped'` is
+  neither `'pending'` nor `'error'`, so the batch selector never picks it up
+  again. `coach_pending` reports these as a distinct `no_coaching_needed` count
+  rather than inflating `coached`, `/api/status` exposes `coaching_skipped`, and
+  the games table renders ➖ instead of the ❌ that means something broke.
+
+### Changed
+- **`games` table rebuilt to widen the `coaching_status` CHECK constraint.**
+  SQLite cannot `ALTER` a `CHECK`, so permitting `'skipped'` requires the
+  documented create/copy/drop/rename procedure. The migration is idempotent
+  (guarded on the stored DDL), disables foreign keys for the swap, recreates all
+  three indexes, and aborts the transaction unless the row count is unchanged
+  and `PRAGMA foreign_key_check` is clean. Verified against a copy of a
+  1,298-game production database: identical row counts, id/URL/PGN/ACPL sums,
+  column names, indexes, and `integrity_check ok`.
+
+  The rebuild also **normalises column order**: fresh databases previously put
+  `coaching_attempts` before the older `ALTER`-added columns while upgraded ones
+  put it last. Both now converge on the canonical layout. Column order carries
+  no meaning here (every query names its columns), but the divergence made
+  schema comparisons across machines misleading.
+
+---
+
 ## [1.28.0] - 2026-08-09
 
 ### Fixed

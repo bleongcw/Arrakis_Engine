@@ -1745,6 +1745,9 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                 "coaching_complete": coaching_map.get("complete", 0),
                 "coaching_error": coaching_map.get("error", 0),
                 "coaching_error_exhausted": exhausted,
+                # v1.28.1: analysed but nothing to coach (abandoned games).
+                # A resolved state — never counted as pending or failed.
+                "coaching_skipped": coaching_map.get("skipped", 0),
             }
         finally:
             conn.close()

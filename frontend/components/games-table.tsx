@@ -36,6 +36,9 @@ const STATUS_ICONS: Record<string, string> = {
   analyzing: "\uD83D\uDD04",
   error: "\u274C",
   pending: "\u23F3",
+  // v1.28.1: nothing to coach (abandoned before a move) \u2014 a resolved
+  // outcome, so it must not wear the \u274C that means "something broke".
+  skipped: "\u2796",
 };
 
 export function GamesTable({

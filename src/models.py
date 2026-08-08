@@ -152,6 +152,100 @@ def backfill_acpl_for_games(conn: sqlite3.Connection, force: bool = False) -> in
     return updated
 
 
+def _migrate_coaching_status_allows_skipped(conn: sqlite3.Connection):
+    """v1.28.1: widen `games.coaching_status` to permit 'skipped'.
+
+    SQLite cannot ALTER a CHECK constraint, so adding a status value means
+    rebuilding the table — the documented procedure: disable foreign keys,
+    create the new table, copy, drop, rename, recreate indexes, verify.
+
+    Idempotent and self-guarding: it inspects the stored CREATE TABLE text
+    and returns immediately when 'skipped' is already allowed (a fresh DB
+    built from SCHEMA, or a DB already migrated).
+
+    Column list is read from the live table rather than hard-coded, so the
+    copy stays correct no matter which ADD COLUMN migrations have run.
+    """
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='games'"
+    ).fetchone()
+    if row is None or "'skipped'" in row[0]:
+        return
+
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(games)").fetchall()]
+    col_list = ", ".join(f'"{c}"' for c in cols)
+
+    # The rebuilt definition mirrors the canonical SCHEMA plus every column
+    # added by migration, with 'skipped' added to the coaching_status CHECK.
+    #
+    # Column ORDER deliberately matches what a fresh DB gets from SCHEMA +
+    # the ADD COLUMN migrations (coaching_attempts before the older
+    # ALTER-added trio), not the order an upgraded DB happens to have. The
+    # copy below names columns on both sides, so reordering is safe — and it
+    # makes fresh and upgraded databases converge on one identical layout.
+    new_table = """
+    CREATE TABLE games_new (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        player_id       INTEGER NOT NULL REFERENCES players(id),
+        game_url        TEXT UNIQUE NOT NULL,
+        pgn             TEXT NOT NULL,
+        player_color    TEXT NOT NULL CHECK (player_color IN ('white', 'black')),
+        player_rating   INTEGER,
+        opponent_rating INTEGER,
+        result          TEXT NOT NULL CHECK (result IN ('win', 'loss', 'draw')),
+        time_control    TEXT,
+        time_class      TEXT,
+        date_played     TEXT,
+        analysis_status TEXT NOT NULL DEFAULT 'pending'
+            CHECK (analysis_status IN ('pending', 'analyzing', 'complete', 'error')),
+        coaching_status TEXT NOT NULL DEFAULT 'pending'
+            CHECK (coaching_status IN ('pending', 'complete', 'error', 'skipped')),
+        coaching_attempts INTEGER NOT NULL DEFAULT 0,
+        opponent_username TEXT,
+        platform        TEXT DEFAULT 'chess.com',
+        acpl            REAL
+    )
+    """
+
+    before = conn.execute("SELECT COUNT(*) FROM games").fetchone()[0]
+
+    # PRAGMA foreign_keys cannot change inside a transaction, and DROP TABLE
+    # games would otherwise be refused / cascade into move_analysis +
+    # game_coaching, which both REFERENCE it.
+    conn.execute("COMMIT") if conn.in_transaction else None
+    conn.execute("PRAGMA foreign_keys=OFF")
+    try:
+        conn.execute("BEGIN")
+        conn.execute(new_table)
+        conn.execute(
+            f"INSERT INTO games_new ({col_list}) SELECT {col_list} FROM games"
+        )
+        conn.execute("DROP TABLE games")
+        conn.execute("ALTER TABLE games_new RENAME TO games")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_games_player_id ON games(player_id)")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_games_analysis_status ON games(analysis_status)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_games_date_played ON games(date_played)"
+        )
+
+        after = conn.execute("SELECT COUNT(*) FROM games").fetchone()[0]
+        if after != before:
+            raise RuntimeError(
+                f"games rebuild lost rows: {before} before, {after} after"
+            )
+        violations = conn.execute("PRAGMA foreign_key_check").fetchall()
+        if violations:
+            raise RuntimeError(f"games rebuild broke foreign keys: {violations[:3]}")
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+    finally:
+        conn.execute("PRAGMA foreign_keys=ON")
+
+
 def _backfill_acpl(conn: sqlite3.Connection):
     """Legacy alias retained for the in-place migration on first init_db.
     Use `backfill_acpl_for_games(conn)` directly in new code."""
@@ -223,6 +317,10 @@ def _migrate(conn: sqlite3.Connection):
             "ALTER TABLE games ADD COLUMN coaching_attempts INTEGER NOT NULL DEFAULT 0"
         )
         conn.commit()
+
+    # Must run AFTER the ADD COLUMN migrations above — it copies whatever
+    # columns the table has by this point.
+    _migrate_coaching_status_allows_skipped(conn)
 
     move_cols = {r[1] for r in conn.execute("PRAGMA table_info(move_analysis)").fetchall()}
     if "clock_seconds" not in move_cols:
@@ -503,8 +601,10 @@ CREATE TABLE IF NOT EXISTS games (
     date_played     TEXT,
     analysis_status TEXT NOT NULL DEFAULT 'pending'
         CHECK (analysis_status IN ('pending', 'analyzing', 'complete', 'error')),
+    -- 'skipped' (v1.28.1): analysed but nothing to coach — e.g. a game
+    -- abandoned before a move was played. A resolved state, not a failure.
     coaching_status TEXT NOT NULL DEFAULT 'pending'
-        CHECK (coaching_status IN ('pending', 'complete', 'error')),
+        CHECK (coaching_status IN ('pending', 'complete', 'error', 'skipped')),
     -- v1.28.0: consecutive failed coaching attempts. Bounds automatic retries
     -- of a game stuck at coaching_status='error' (see coach.MAX_COACHING_ATTEMPTS).
     -- Reset to 0 on success and whenever a human re-triggers coaching by hand.

@@ -463,6 +463,67 @@ class TestCoachingRetry:
         assert row["coaching_attempts"] == 0
 
 
+class TestAbandonedGameIsSkipped:
+    """v1.28.1 — a game abandoned before either side moved analyses to zero
+    moves. Coaching it used to raise → 'error', which read as a failure and
+    (from v1.28.0) burned retry attempts on something that can never succeed.
+    It now resolves as 'skipped' with no LLM call."""
+
+    def _seed_moveless_game(self, db_path):
+        conn = init_db(db_path)
+        pid = ensure_player(conn, "p", display_name="P", age=9, rating=1000)
+        cur = conn.execute(
+            """INSERT INTO games
+            (player_id, game_url, pgn, player_color, result, date_played,
+             analysis_status, coaching_status)
+            VALUES (?, 'abandoned-1', ?, 'black', 'win', '2026-01-01',
+                    'complete', 'pending')""",
+            (pid, '[Termination "opponent won - game abandoned"]\n\n*'),
+        )
+        gid = cur.lastrowid
+        conn.commit()
+        conn.close()
+        return gid
+
+    @patch("src.coach.call_provider")
+    def test_moveless_game_is_skipped_without_an_llm_call(self, mock_provider,
+                                                          db_path):
+        gid = self._seed_moveless_game(db_path)
+        out = coach_game(gid, provider="claude", db_path=db_path)
+
+        mock_provider.assert_not_called()      # the whole point: no spend
+        assert out["skipped"] is True
+
+        conn = init_db(db_path)
+        row = conn.execute(
+            "SELECT coaching_status, coaching_attempts FROM games WHERE id = ?",
+            (gid,),
+        ).fetchone()
+        conn.close()
+        assert row["coaching_status"] == "skipped"
+        assert row["coaching_attempts"] == 0
+
+    @patch("src.coach.call_provider")
+    def test_skipped_game_leaves_the_queue_for_good(self, mock_provider,
+                                                    db_path):
+        gid = self._seed_moveless_game(db_path)
+        coach_pending(provider="claude", db_path=db_path)
+        # Second pass must not see it again — 'skipped' is not 'pending' and
+        # not 'error', so the selector can never pick it up.
+        res = coach_pending(provider="claude", db_path=db_path)
+        assert res["total"] == 0
+        mock_provider.assert_not_called()
+
+    @patch("src.coach.call_provider")
+    def test_batch_reports_it_separately_from_coached(self, mock_provider,
+                                                     db_path):
+        self._seed_moveless_game(db_path)
+        res = coach_pending(provider="claude", db_path=db_path)
+        assert res["no_coaching_needed"] == 1
+        assert res["coached"] == 0            # not a coached game
+        assert res["errors"] == 0             # and emphatically not an error
+
+
 class TestCoachPendingPlayerFilter:
     """v1.28.0 — `--player` is the SLUG (v1.16.4). coach_pending resolved it
     against `username`, so a slug matched nothing and the filter silently

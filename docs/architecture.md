@@ -1,6 +1,6 @@
 # Arrakis Engine — Architecture
 
-*Last updated: 2026-08-09 — corresponds to v1.28.0*
+*Last updated: 2026-08-09 — corresponds to v1.28.1*
 
 This document describes the technical architecture of Arrakis Engine: how the pieces fit together, what runs where, and the design decisions behind them. It is aimed at contributors and developers reading the codebase. For end-user / setup docs, see [README.md](../README.md). For changelog, see [CHANGELOG.md](../CHANGELOG.md).
 
@@ -294,6 +294,7 @@ Single-file SQLite. Schema migrations run via `init_db()` at startup — column 
 - **Soft-delete via `is_active`** — removing a player archives them; game history is preserved.
 - **WAL mode** — concurrent reads while the analyzer holds a write lock.
 - **Coaching status is a separate column from analysis status** — a game can be analyzed but not yet coached, which the UI surfaces as a filterable state.
+- **"Nothing to do" is an outcome, not a failure** (v1.28.1) — a game abandoned before either side moved analyses to zero moves. Coaching it raised, so it landed in `'error'` and looked identical to a real breakage (and, post-v1.28.0, consumed retry attempts it could never satisfy). `coaching_status` gained `'skipped'`: `coach_game` detects zero `move_analysis` rows up front, resolves the game without an LLM call, and the selector — which only looks at `'pending'` and `'error'` — never sees it again. Detection is engine truth (no stored moves) rather than a platform-specific `Termination` string, so lichess and PGN imports are covered too.
 - **No status is terminal without an escape hatch** (v1.28.0) — `coaching_status='error'` was originally terminal, which meant a single transient API failure silently and permanently dropped a game from the pipeline. The replacement pairs a bounded automatic retry (`coaching_attempts` vs `MAX_COACHING_ATTEMPTS`) with an unbounded manual one (`POST /api/coach` resets the counter). A bounded retry alone would simply move the trap one level up: "exhausted" would become the new terminal state.
 - **`date_played` is full datetime, not just date** — needed so coaching runs in true chronological order across multiple games on the same day.
 - **`motifs_json` is sparse** — only critical moves (|cp_loss| ≥ 50) carry motif tags, so the column stays small. `rescan-motifs` backfills it from existing `move_analysis` rows without re-running Stockfish.
@@ -362,7 +363,7 @@ The `ARRAKIS_` prefix avoids collisions with other tools that use the unprefixed
 
 ## 7. Testing
 
-**~971 tests total** — 739 backend (pytest) + 232 frontend (Vitest). Counts as of v1.28.0; see CHANGELOG for per-release deltas. Backend integration (`-m integration`, Stockfish) and live (`-m live`, LLM key) tiers are excluded by default.
+**~975 tests total** — 743 backend (pytest) + 232 frontend (Vitest). Counts as of v1.28.1; see CHANGELOG for per-release deltas. Backend integration (`-m integration`, Stockfish) and live (`-m live`, LLM key) tiers are excluded by default.
 
 ### Backend (`tests/`)
 

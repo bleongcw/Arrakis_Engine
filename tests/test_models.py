@@ -176,6 +176,110 @@ class TestMigrations:
         assert "lichess_username" in player_cols
         conn.close()
 
+    def test_skipped_status_rebuild_preserves_data(self, db_path):
+        """v1.28.1: allowing coaching_status='skipped' needs a full table
+        rebuild (SQLite can't ALTER a CHECK). Prove the rebuild is lossless,
+        keeps indexes and foreign keys intact, and is idempotent."""
+        conn = init_db(db_path)
+        pid = ensure_player(conn, "p", display_name="P", age=9, rating=1000)
+        for i in range(3):
+            conn.execute(
+                """INSERT INTO games
+                (player_id, game_url, pgn, player_color, result, date_played,
+                 platform, acpl, analysis_status, coaching_status,
+                 coaching_attempts)
+                VALUES (?, ?, '1. e4 *', 'white', 'win', '2026-01-01',
+                        'chess.com', 42.5, 'complete', 'complete', ?)""",
+                (pid, f"u{i}", i),
+            )
+        gid = conn.execute("SELECT id FROM games LIMIT 1").fetchone()["id"]
+        conn.execute(
+            """INSERT INTO move_analysis (game_id, move_number, side,
+               move_played) VALUES (?, 1, 'white', 'e4')""",
+            (gid,),
+        )
+        conn.commit()
+
+        def snapshot(c):
+            return (
+                c.execute("SELECT COUNT(*), SUM(id), SUM(coaching_attempts), "
+                          "SUM(acpl) FROM games").fetchone()[:],
+                [r[1] for r in c.execute("PRAGMA table_info(games)")],
+                sorted(r[0] for r in c.execute(
+                    "SELECT name FROM sqlite_master WHERE type='index' "
+                    "AND tbl_name='games'")),
+                c.execute("SELECT COUNT(*) FROM move_analysis").fetchone()[0],
+            )
+
+        before = snapshot(conn)
+
+        # Genuinely downgrade to the pre-v1.28.1 schema, or the migration
+        # guard short-circuits and this test proves nothing.
+        cols = ", ".join(f'"{c}"' for c in before[1])
+        conn.execute("PRAGMA foreign_keys=OFF")
+        conn.executescript(f"""
+            CREATE TABLE games_legacy (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                player_id       INTEGER NOT NULL REFERENCES players(id),
+                game_url        TEXT UNIQUE NOT NULL,
+                pgn             TEXT NOT NULL,
+                player_color    TEXT NOT NULL CHECK (player_color IN ('white','black')),
+                player_rating   INTEGER,
+                opponent_rating INTEGER,
+                result          TEXT NOT NULL CHECK (result IN ('win','loss','draw')),
+                time_control    TEXT,
+                time_class      TEXT,
+                date_played     TEXT,
+                analysis_status TEXT NOT NULL DEFAULT 'pending'
+                    CHECK (analysis_status IN ('pending','analyzing','complete','error')),
+                coaching_status TEXT NOT NULL DEFAULT 'pending'
+                    CHECK (coaching_status IN ('pending','complete','error')),
+                opponent_username TEXT,
+                platform        TEXT DEFAULT 'chess.com',
+                acpl            REAL,
+                coaching_attempts INTEGER NOT NULL DEFAULT 0
+            );
+            INSERT INTO games_legacy ({cols}) SELECT {cols} FROM games;
+            DROP TABLE games;
+            ALTER TABLE games_legacy RENAME TO games;
+            CREATE INDEX IF NOT EXISTS idx_games_player_id ON games(player_id);
+            CREATE INDEX IF NOT EXISTS idx_games_analysis_status ON games(analysis_status);
+            CREATE INDEX IF NOT EXISTS idx_games_date_played ON games(date_played);
+        """)
+        conn.commit()
+        legacy_ddl = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE name='games'").fetchone()[0]
+        assert "'skipped'" not in legacy_ddl, "downgrade failed — test is a no-op"
+        conn.close()
+
+        conn = init_db(db_path)          # runs the rebuild migration
+        assert "'skipped'" in conn.execute(
+            "SELECT sql FROM sqlite_master WHERE name='games'").fetchone()[0]
+        after = snapshot(conn)
+        assert before == after, "rebuild changed the data or the shape"
+        assert not conn.execute("PRAGMA foreign_key_check").fetchall()
+        assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+
+        # The new value is accepted, and junk is still rejected.
+        conn.execute("UPDATE games SET coaching_status='skipped' WHERE id=?",
+                     (gid,))
+        conn.commit()
+        assert conn.execute(
+            "SELECT coaching_status FROM games WHERE id=?", (gid,)
+        ).fetchone()[0] == "skipped"
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute("UPDATE games SET coaching_status='bogus' WHERE id=?",
+                         (gid,))
+        conn.close()
+
+        # Idempotent: a second init_db must not rebuild again or lose the value.
+        conn = init_db(db_path)
+        assert snapshot(conn) == after
+        assert conn.execute(
+            "SELECT coaching_status FROM games WHERE id=?", (gid,)
+        ).fetchone()[0] == "skipped"
+        conn.close()
+
     def test_coaching_attempts_migrates_onto_an_existing_db(self, db_path):
         """v1.28.0: upgrading an older DB must add coaching_attempts and
         default it to 0, so games stranded at 'error' under the old

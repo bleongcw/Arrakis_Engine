@@ -1,6 +1,6 @@
 # Arrakis Engine Roadmap
 
-*Updated 2026-08-09 — current release v1.28.0*
+*Updated 2026-08-09 — current release v1.28.1*
 
 This is the public-facing roadmap. The full release history is in
 [CHANGELOG.md](CHANGELOG.md); architectural details are in
@@ -171,6 +171,11 @@ provider.
 - **`coach --player <slug>` no longer coaches everyone.** The filter resolved
   the identifier against the chess.com handle instead of the slug, matched
   nothing, and quietly fell through to every player's games.
+- **Abandoned games are "no coaching needed", not failures (v1.28.1).** A game
+  the opponent never moved in has no moves to coach, so it used to error — and
+  then burn retry attempts on something unachievable. Those games now resolve
+  as a **skipped** status: analysed, done, nothing to do, no LLM call, marked
+  ➖ rather than ❌.
 
 ### Polish & bug fixes
 - v1.0.1, v1.0.2 — UI fixes (opening explorer, dialog hydration)

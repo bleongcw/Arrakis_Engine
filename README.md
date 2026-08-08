@@ -901,7 +901,7 @@ Arrakis_Engine/
 ├── docs/
 │   ├── architecture.md        # Tracked: contributor architecture reference
 │   └── screenshots/           # Architecture diagram and screenshots
-├── tests/                 # Backend test suite (739 tests across 3 tiers)
+├── tests/                 # Backend test suite (743 tests across 3 tiers)
 │   ├── conftest.py        # Shared fixtures (db, player, stockfish, llm)
 │   ├── test_models.py                # Schema, ensure_player, migrations, _slugify (v1.16.1)
 │   ├── test_harvester.py
@@ -946,14 +946,14 @@ Arrakis_Engine/
 
 ## Running Tests
 
-**~971 tests total** — 739 backend (pytest) + 232 frontend (Vitest). Backend tests are organized into three tiers using pytest markers; integration (`-m integration`, Stockfish) and live (`-m live`, LLM key) tiers are excluded by default. Frontend tests run in a few seconds and cover the chess + chart + motif helper libraries, the `use-chess-navigation` hook, and the component suites.
+**~975 tests total** — 743 backend (pytest) + 232 frontend (Vitest). Backend tests are organized into three tiers using pytest markers; integration (`-m integration`, Stockfish) and live (`-m live`, LLM key) tiers are excluded by default. Frontend tests run in a few seconds and cover the chess + chart + motif helper libraries, the `use-chess-navigation` hook, and the component suites.
 
 ### Commands
 
 ```bash
 # Unit tests only (default — fast, no external dependencies)
 python -m pytest tests/ -v
-# → 739 tests in ~30s, all mocked
+# → 743 tests in ~30s, all mocked
 
 # Stockfish integration tests (requires Stockfish binary)
 python -m pytest tests/ -m integration -v
@@ -971,7 +971,7 @@ cd frontend && npx next build      # type-check
 
 ### Test Coverage by Module
 
-**Unit tests** (739 backend tests — all mocked, no external dependencies):
+**Unit tests** (743 backend tests — all mocked, no external dependencies):
 
 | File | Tests | Coverage |
 |------|-------|---------|
