@@ -1,6 +1,6 @@
 # Arrakis Engine Roadmap
 
-*Updated 2026-07-18 — current release v1.27.4*
+*Updated 2026-08-08 — current release v1.27.5*
 
 This is the public-facing roadmap. The full release history is in
 [CHANGELOG.md](CHANGELOG.md); architectural details are in
@@ -139,7 +139,7 @@ provider.
   editable on the Settings form. FIDE ratings are FIDE-specific and no longer
   override the chess.com / lichess rating.
 
-### Coaching models & reliability (v1.27.0–v1.27.4)
+### Coaching models & reliability (v1.27.0–v1.27.5)
 - **Flagship model refresh + configurable reasoning effort (v1.27.0)** — all
   eight providers bumped to their current flagship reasoning models, plus a new
   `coaching.reasoning_effort` setting (low / medium / high / xhigh / max) wired
@@ -152,6 +152,11 @@ provider.
 - **Default effort → medium (v1.27.2)** and **Claude → Opus 5 (v1.27.3)**.
 - **`~/.env` is authoritative (v1.27.4)** — `load_dotenv(override=True)` so the
   values in your `.env` win over any exported shell variables.
+- **FIDE-format names import correctly (v1.27.5)** — an over-the-board scoresheet
+  naming the player surname-first ("Leong, Xin Yu Evan" vs a display name of
+  "Evan Leong") matched nothing and silently defaulted to White, inverting the
+  result and recording the player as their own opponent. Names now match as bags
+  of words, and an unmatched name **fails the import instead of guessing** a side.
 
 ### Polish & bug fixes
 - v1.0.1, v1.0.2 — UI fixes (opening explorer, dialog hydration)

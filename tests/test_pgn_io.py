@@ -174,6 +174,75 @@ def test_parse_multi_splits_and_skips_undecided():
     assert "no decided result" in skipped[0]
 
 
+# --- Color inference across naming conventions -----------------------------
+# Regression: a FIDE-style surname-first header ("Leong, Kai Ming Evan") used
+# to match no known identifier, so parsing silently fell back to White —
+# assigning the player the OPPONENT's side and inverting the result. Names here
+# are fictional stand-ins for the real scoresheet, matching the v1.26.1 stance
+# of keeping real competition identities out of the repo.
+
+FIDE_FORMAT_LOSS = """[Date "2026.08.07"]
+[Round "1"]
+[White "Opponent Name"]
+[Black "Leong, Kai Ming Evan"]
+[Result "1-0"]
+
+1. e4 c5 2. d4 cxd4 3. Qxd4 Nc6 4. Qe3 g6 5. Qg3 1-0
+"""
+
+
+def test_fide_surname_first_matches_display_name():
+    g = parse_pgn(FIDE_FORMAT_LOSS, known_usernames=["evleong", "Evan Leong"])
+    assert g.player_color == "black"        # {evan, leong} ⊆ {leong, kai, ming, evan}
+    assert g.result == "loss"               # 1-0 as Black
+    assert g.opponent_username == "Opponent Name"
+
+
+def test_unmatched_names_refuse_to_guess_a_colour():
+    strangers = (
+        '[White "Alice Adams"]\n[Black "Bob Brown"]\n[Result "1-0"]\n\n1. e4 e5 1-0\n'
+    )
+    with pytest.raises(PgnParseError) as exc:
+        parse_pgn(strangers, known_usernames=["Evan Leong"])
+    # The message must name both sides so the user can pick the right one.
+    assert "Alice Adams" in str(exc.value) and "Bob Brown" in str(exc.value)
+
+
+def test_explicit_colour_still_wins_over_failed_inference():
+    strangers = (
+        '[White "Alice Adams"]\n[Black "Bob Brown"]\n[Result "1-0"]\n\n1. e4 e5 1-0\n'
+    )
+    g = parse_pgn(strangers, player_color="black", known_usernames=["Evan Leong"])
+    assert g.player_color == "black" and g.result == "loss"
+
+
+def test_shared_surname_alone_does_not_match():
+    # The safety rail on token matching: a sibling sharing only the surname
+    # must NOT be claimed, nor a bare single-word surname header.
+    sibling = (
+        '[White "Leong, Kai Ming Evan"]\n[Black "Bob Brown"]\n'
+        '[Result "1-0"]\n\n1. e4 e5 1-0\n'
+    )
+    with pytest.raises(PgnParseError):
+        parse_pgn(sibling, known_usernames=["Eleanor Leong"])
+
+    bare = '[White "Leong"]\n[Black "Bob Brown"]\n[Result "1-0"]\n\n1. e4 e5 1-0\n'
+    with pytest.raises(PgnParseError):
+        parse_pgn(bare, known_usernames=["Evan Leong"])
+
+
+def test_parse_multi_skips_unattributable_game():
+    # One round names the player, the next doesn't: import the first, report
+    # the second — never quietly store it under the wrong colour.
+    two = FIDE_FORMAT_LOSS + "\n\n" + (
+        '[White "Alice Adams"]\n[Black "Bob Brown"]\n[Result "1-0"]\n\n1. d4 d5 1-0\n'
+    )
+    games, skipped = parse_pgn_multi(two, known_usernames=["Evan Leong"])
+    assert len(games) == 1 and games[0].player_color == "black"
+    assert len(skipped) == 1
+    assert "Could not tell which side" in skipped[0]
+
+
 def test_parse_multi_empty_rejected():
     with pytest.raises(PgnParseError):
         parse_pgn_multi("   ")

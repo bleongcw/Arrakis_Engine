@@ -4,6 +4,38 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.27.5] - 2026-08-08
+
+### Fixed
+- **PGN import mis-attributed games whose player name is in FIDE format.**
+  Colour inference compared the White/Black headers to the player's handles and
+  display name by exact string equality. An over-the-board scoresheet written
+  surname-first — `[Black "Leong, Xin Yu Evan"]` against a display name of
+  "Evan Leong" — matched nothing, and the parser then **silently defaulted to
+  White**. That single fallback corrupted four fields at once: the player was
+  assigned the opponent's side, the result inverted (a `1-0` loss stored as a
+  win), the player's own name was recorded as the opponent, and ACPL was
+  averaged over the wrong side's moves. Nothing surfaced the error — the row
+  simply looked plausible.
+
+  Two complementary fixes in `src/pgn_io.py`:
+  - `_name_tokens` / `_infer_color` now match names as **bags of words** when
+    exact equality fails, so ordering, commas, and middle names stop mattering
+    (`{evan, leong} ⊆ {leong, xin, yu, evan}`). Exact matching still runs first
+    and is the only rule applied to single-word handles; token matching
+    requires **two or more words on both sides**, so a shared bare surname can
+    never claim a sibling's game.
+  - When identifiers are supplied and none matches, parsing now **fails instead
+    of guessing**. Single imports return a 422 naming both players (choose the
+    side with the existing "Played as" selector); multi-game competition
+    imports drop that round into `skipped` with the reason, leaving the other
+    rounds to import normally.
+
+  Behaviour is unchanged when the caller passes an explicit `player_color`, and
+  when no identifiers are supplied at all (the documented White default stands).
+
+---
+
 ## [1.27.4] - 2026-07-18
 
 ### Changed

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import re
 import sqlite3
 from dataclasses import dataclass
 
@@ -131,6 +132,58 @@ def _to_int(val: str | None) -> int | None:
         return None
 
 
+def _name_tokens(name: str) -> frozenset[str]:
+    """Lowercased word tokens of a player name, with order discarded.
+
+    Names reach us in two conventions: online handles ("evleong") and FIDE's
+    surname-first form ("Leong, Xin Yu Evan"). Comparing bags of words makes
+    ordering, commas, and middle names irrelevant, so the FIDE form still meets
+    the display name "Evan Leong" on {evan, leong}.
+    """
+    return frozenset(t for t in re.split(r"[^a-z0-9]+", name.lower()) if t)
+
+
+def _infer_color(
+    white: str | None, black: str | None, known_usernames: list[str] | None
+) -> str | None:
+    """Which side did the player have? None when nothing matches confidently.
+
+    Two passes, most-certain first:
+
+      1. Exact (case-insensitive) equality — how online handles match, and the
+         only rule applied to single-word identifiers.
+      2. Token-subset, both names multi-word — how human names match across
+         naming conventions. The multi-word floor is the safety rail: it stops
+         a bare surname from matching a sibling who shares it.
+
+    Black is tested before White to preserve the original precedence.
+
+    Returning None (rather than guessing) is deliberate — see the caller.
+    """
+    known = [u for u in (known_usernames or []) if u]
+    if not known:
+        return None
+
+    sides = (("black", black), ("white", white))
+
+    lowered = {u.lower() for u in known}
+    for color, name in sides:
+        if name and name.lower() in lowered:
+            return color
+
+    known_tokens = [t for t in (_name_tokens(u) for u in known) if len(t) >= 2]
+    for color, name in sides:
+        if not name:
+            continue
+        tokens = _name_tokens(name)
+        if len(tokens) < 2:
+            continue
+        if any(kt <= tokens or tokens <= kt for kt in known_tokens):
+            return color
+
+    return None
+
+
 def parse_pgn(
     pgn_text: str,
     player_color: str | None = None,
@@ -144,10 +197,11 @@ def parse_pgn(
         pgn_text: raw PGN (headers + movetext).
         player_color: 'white'/'black' if the caller knows which side the
             player had. If None, inferred by matching `known_usernames`
-            against the White/Black headers, defaulting to 'white'.
+            against the White/Black headers.
         known_usernames: the player's chess.com / lichess handles (and, for
             over-the-board games, display name), used to infer color when not
-            given explicitly.
+            given explicitly. If these are supplied but none matches, the
+            parse FAILS rather than guessing a side.
         result: explicit player-perspective result ('win'/'loss'/'draw'),
             REQUIRED when the PGN's own Result header is undecided ("*") —
             e.g. an in-progress or unrecorded OTB scoresheet. The `games`
@@ -159,7 +213,8 @@ def parse_pgn(
             When set it wins over the derived class.
 
     Raises PgnParseError on empty input, unparseable PGN, no moves, an illegal
-    move, or an undecided result with no `result` override.
+    move, an undecided result with no `result` override, or a player whose
+    side cannot be identified from `known_usernames`.
     """
     if not pgn_text or not pgn_text.strip():
         raise PgnParseError("Empty PGN.")
@@ -227,13 +282,23 @@ def _parsed_from_game(
     if player_color in {"white", "black"}:
         color = player_color
     else:
-        color = "white"
-        if known_usernames:
-            lowered = {u.lower() for u in known_usernames if u}
-            if black and black.lower() in lowered:
-                color = "black"
-            elif white and white.lower() in lowered:
-                color = "white"
+        color = _infer_color(white, black, known_usernames)
+        if color is None:
+            if known_usernames:
+                # Never guess. A wrong guess doesn't fail loudly — it silently
+                # stores the OPPONENT's side, which flips the result and buries
+                # a plausible-looking lie in the game history. Refusing sends
+                # single imports back to the explicit "Played as" selector and
+                # lands multi-game rounds in `skipped` with this reason.
+                raise PgnParseError(
+                    f"Could not tell which side the player had — neither "
+                    f"\"{white or '?'}\" (White) nor \"{black or '?'}\" (Black) "
+                    f"matches this player's name or handles. Import this game "
+                    f"on its own with an explicit colour."
+                )
+            # No identifiers supplied at all: the caller never asked us to
+            # infer, so keep the documented default.
+            color = "white"
 
     if result is not None:
         # Explicit player-perspective override (lets undecided "*" games in).
@@ -304,8 +369,10 @@ def parse_pgn_multi(
     (so every stored `pgn` and dedup `game_url` hash is that game's own), then
     parses it via the shared builder. Player color is auto-detected per game
     from `known_usernames` (which for OTB should include the player's display
-    name). A game that can't be parsed — e.g. an undecided Result "*" with no
-    override — is recorded in `skipped` rather than failing the whole batch.
+    name). A game that can't be parsed — an undecided Result "*" with no
+    override, or a game where neither player name matches — is recorded in
+    `skipped` rather than failing the whole batch, so a mis-attributed game can
+    never slip in silently among the good ones.
 
     Returns (parsed_games, skipped_reasons). Raises only when the input is
     empty or contains no games at all.
