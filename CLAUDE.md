@@ -5,7 +5,7 @@ Local Python app that pulls games from Chess.com and Lichess, runs Stockfish ana
 and uses reasoning LLMs to generate age-appropriate coaching insights with
 pattern tracking over time. Inspired by Eleanor, Evan, and Estella.
 
-Current release: **v1.31.0** (2026-08-09). See `CHANGELOG.md` for full history.
+Current release: **v1.32.0** (2026-08-09). See `CHANGELOG.md` for full history.
 
 ## Architecture
 - Python 3.11+, SQLite (WAL mode), local Stockfish on Apple Silicon
@@ -106,7 +106,8 @@ Current release: **v1.31.0** (2026-08-09). See `CHANGELOG.md` for full history.
 /<slug>/games               → game list for player (+ PGN export: select/filtered bulk)
 /<slug>/games/<id>          → game detail (board, eval, coaching panels, motif badges,
                               Export PGN; inline editors: Edit ratings (v1.25.1),
-                              Edit details = category/type/date (v1.26.2–v1.26.3))
+                              Edit details = category/type/date (v1.26.2–v1.26.3),
+                              Edit moves = replace PGN + re-analyse (v1.32.0))
 /<slug>/import              → import a PGN (paste/upload) → analyzed game (v1.24.0);
                               competition mode (v1.25.0) tags OTB tournament games
                               (multi-game file; game type sets time_class; Event/Site
@@ -190,7 +191,7 @@ ArrakisEngine/
 │   └── screenshots/           # Architecture diagram + UI screenshots
 ├── data/
 │   └── chess_coach.db         # SQLite database (auto-created, gitignored)
-├── tests/                     # Backend pytest suite (773 tests across 3 tiers)
+├── tests/                     # Backend pytest suite (779 tests across 3 tiers)
 └── reports/                   # Generated coach reports (gitignored)
 ```
 
@@ -309,6 +310,11 @@ All `?player=X` params + path slugs resolve by **slug** (v1.16.4). Backend helpe
 - `PUT /api/games/<id>/classification` — (v1.26.2) set `platform` (category) +
   `time_class` (game type) + (v1.26.3) `date_played` (timing). Marking a game
   `competition` also strips the private Event/Site headers from its stored PGN.
+- `PUT /api/games/<id>/pgn` — (v1.32.0) replace a game's moves with a corrected
+  PGN (fix a scoresheet typo): re-validates via `parse_pgn` (illegal move → 400
+  with the ply), re-derives result/colour, preserves curated metadata
+  (ratings/date/time_class/platform), wipes `move_analysis` + `game_coaching`,
+  resets statuses, and re-runs analyze+coach via `_spawn_import_pipeline`.
 - `PUT /api/journal/note/<id>`, `DELETE /api/journal/note/<id>` (v1.12.0)
 - `DELETE /api/players/<id>` (soft-delete via `is_active`)
 
@@ -326,8 +332,8 @@ harvest + report).
 
 ## Testing
 
-**~1006 tests total** — 773 backend (pytest, three tiers via `pyproject.toml`
-markers) + 233 frontend (Vitest). Integration (`-m integration`, needs Stockfish)
+**~1014 tests total** — 779 backend (pytest, three tiers via `pyproject.toml`
+markers) + 235 frontend (Vitest). Integration (`-m integration`, needs Stockfish)
 and live (`-m live`, needs an LLM key) tiers are excluded by default.
 
 ### Running Tests
@@ -335,7 +341,7 @@ and live (`-m live`, needs an LLM key) tiers are excluded by default.
 pytest                                  # default unit tier (~30s, no deps)
 pytest -m integration                   # Stockfish tests (requires binary)
 pytest -m live                          # LLM API tests (~$0.30)
-cd frontend && npx vitest run           # 233 frontend tests, ~3s
+cd frontend && npx vitest run           # 235 frontend tests, ~3s
 cd frontend && npx next build           # type-check
 ```
 

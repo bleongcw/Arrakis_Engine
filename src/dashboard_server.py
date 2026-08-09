@@ -1680,6 +1680,117 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             }
         )
 
+    def _handle_replace_game_pgn(self, body, game_id):
+        """v1.32.0: replace a game's MOVES with a corrected PGN, then re-analyse.
+
+        For fixing a scoresheet transcription error. Re-derives only the
+        moves-dependent fields (pgn, game_url, player_color, result) and
+        preserves the metadata the user curated by hand (ratings, opponent,
+        date, time_class, platform). Wipes the now-invalid analysis + coaching
+        and re-runs the pipeline in the background.
+
+        Body: {pgn (required), player_color?, result?}.
+        """
+        import io as _io
+        import sqlite3
+        import chess.pgn
+        from src.pgn_io import (
+            parse_pgn, PgnParseError, strip_private_headers, _synthesize_url,
+        )
+
+        new_pgn = (body.get("pgn") or "").strip()
+        if not new_pgn:
+            self._send_json({"error": "pgn is required"}, 400)
+            return
+
+        conn = self._get_conn()
+        try:
+            row = conn.execute(
+                "SELECT g.player_id, g.platform, g.time_class, "
+                "p.username, p.lichess_username, p.display_name "
+                "FROM games g JOIN players p ON p.id = g.player_id "
+                "WHERE g.id = ?",
+                (game_id,),
+            ).fetchone()
+            if row is None:
+                self._send_json({"error": "Game not found"}, 404)
+                return
+
+            # Identifiers used to infer which colour the player had (mirrors the
+            # import handler; supports FIDE surname-first names via v1.27.5).
+            usernames = [
+                u for u in (row["username"], row["lichess_username"],
+                            row["display_name"]) if u
+            ]
+
+            # Validate + re-derive from the corrected PGN. parse_pgn raises with
+            # a ply-specific message on an illegal move — surface it verbatim.
+            try:
+                parsed = parse_pgn(
+                    new_pgn,
+                    player_color=body.get("player_color"),
+                    known_usernames=usernames,
+                    result=body.get("result"),
+                    time_class_override=row["time_class"],
+                )
+            except PgnParseError as exc:
+                self._send_json({"error": str(exc)}, 400)
+                return
+
+            stored_pgn = parsed.pgn
+            game_url = parsed.game_url
+            # Competition games keep their privacy treatment: strip the
+            # tournament name/venue from the stored PGN and re-hash.
+            if row["platform"] == "competition":
+                node = chess.pgn.read_game(_io.StringIO(stored_pgn))
+                if node is not None:
+                    strip_private_headers(node)
+                    stored_pgn = node.accept(
+                        chess.pgn.StringExporter(
+                            headers=True, variations=True, comments=True)
+                    ).strip()
+                    game_url = _synthesize_url(
+                        stored_pgn, {k: v for k, v in node.headers.items()})
+
+            # Replace moves + re-derived fields; PRESERVE curated metadata
+            # (ratings, opponent, date, time_class, platform). Reset the
+            # pipeline state and drop the now-invalid derived data.
+            try:
+                conn.execute(
+                    """UPDATE games
+                       SET pgn = ?, game_url = ?, player_color = ?, result = ?,
+                           analysis_status = 'pending', coaching_status = 'pending',
+                           analysis_attempts = 0, coaching_attempts = 0, acpl = NULL
+                       WHERE id = ?""",
+                    (stored_pgn, game_url, parsed.player_color, parsed.result,
+                     game_id),
+                )
+            except sqlite3.IntegrityError:
+                self._send_json(
+                    {"error": "A game with these exact moves already exists."},
+                    409,
+                )
+                return
+            conn.execute("DELETE FROM move_analysis WHERE game_id = ?", (game_id,))
+            conn.execute("DELETE FROM game_coaching WHERE game_id = ?", (game_id,))
+            conn.commit()
+        finally:
+            conn.close()
+
+        # Re-analyse + re-coach in the background (respects the single-task lock;
+        # if busy, the game stays pending for the next pipeline run).
+        from src import pipeline_state
+        self._spawn_import_pipeline(body.get("provider"))
+        re_analyzing = pipeline_state.current_task(db_path=self.db_path) == "import"
+
+        self._send_json({
+            "status": "saved",
+            "game_id": game_id,
+            "player_color": parsed.player_color,
+            "result": parsed.result,
+            "re_analyzing": re_analyzing,
+        })
+
     def _api_patterns(self, params):
         conn = self._get_conn()
         try:
@@ -2508,6 +2619,10 @@ register_regex_route(
 register_regex_route(
     "PUT", r"^/api/games/(\d+)/classification$",
     lambda self, body, gid: self._handle_update_game_classification(body, int(gid)),
+)
+register_regex_route(
+    "PUT", r"^/api/games/(\d+)/pgn$",
+    lambda self, body, gid: self._handle_replace_game_pgn(body, int(gid)),
 )
 register_route("GET", "/api/patterns", lambda self, params: self._api_patterns(params))
 register_route("GET", "/api/report", lambda self, params: self._api_report(params))

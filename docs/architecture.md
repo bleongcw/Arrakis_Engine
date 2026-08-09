@@ -1,6 +1,6 @@
 # Arrakis Engine — Architecture
 
-*Last updated: 2026-08-09 — corresponds to v1.31.0*
+*Last updated: 2026-08-09 — corresponds to v1.32.0*
 
 This document describes the technical architecture of Arrakis Engine: how the pieces fit together, what runs where, and the design decisions behind them. It is aimed at contributors and developers reading the codebase. For end-user / setup docs, see [README.md](../README.md). For changelog, see [CHANGELOG.md](../CHANGELOG.md).
 
@@ -267,6 +267,7 @@ Settings writes to `config.yaml` go through an atomic helper (`_write_config_ato
 | PUT | `/api/players/{id}` | Edit player |
 | PUT | `/api/games/{id}/ratings` | (v1.25.1) Edit a game's player/opponent ratings |
 | PUT | `/api/games/{id}/classification` | (v1.26.2) Reclassify a game's category / type / date |
+| PUT | `/api/games/{id}/pgn` | (v1.32.0) Replace a game's moves with a corrected PGN → wipe analysis+coaching → re-analyse |
 | PUT | `/api/settings/{analysis,api-keys,coaching}` | Update settings (coaching incl. models + `reasoning_effort`) |
 | PUT / DELETE | `/api/journal/note/{id}` | (v1.12.0) Edit / delete a Parent Note |
 | DELETE | `/api/players/{id}` | Soft-delete player |
@@ -370,7 +371,7 @@ The `ARRAKIS_` prefix avoids collisions with other tools that use the unprefixed
 
 ## 7. Testing
 
-**~1006 tests total** — 773 backend (pytest) + 233 frontend (Vitest). Counts as of v1.31.0; see CHANGELOG for per-release deltas. Backend integration (`-m integration`, Stockfish) and live (`-m live`, LLM key) tiers are excluded by default.
+**~1014 tests total** — 779 backend (pytest) + 235 frontend (Vitest). Counts as of v1.32.0; see CHANGELOG for per-release deltas. Backend integration (`-m integration`, Stockfish) and live (`-m live`, LLM key) tiers are excluded by default.
 
 ### Backend (`tests/`)
 

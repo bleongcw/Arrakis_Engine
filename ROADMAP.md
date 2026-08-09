@@ -1,6 +1,6 @@
 # Arrakis Engine Roadmap
 
-*Updated 2026-08-09 — current release v1.31.0*
+*Updated 2026-08-09 — current release v1.32.0*
 
 This is the public-facing roadmap. The full release history is in
 [CHANGELOG.md](CHANGELOG.md); architectural details are in
@@ -157,6 +157,13 @@ provider.
   "Evan Leong") matched nothing and silently defaulted to White, inverting the
   result and recording the player as their own opponent. Names now match as bags
   of words, and an unmatched name **fails the import instead of guessing** a side.
+
+### Fix a game's moves (v1.32.0, 2026-08-09)
+- **Replace PGN** — an "Edit moves" control on the game detail page corrects a
+  scoresheet transcription error: paste the fixed PGN, it re-validates (pointing
+  at the exact illegal-move ply if any), re-derives the result/colour, and
+  re-runs analysis + coaching in place — same game, keeping your ratings, date,
+  and category. First way to fix moves without deleting + re-importing.
 
 ### Reliability review — concurrency-core batch (v1.31.0, 2026-08-09)
 The last (and highest-stakes) cluster from the v1.29.0 review — preventing two

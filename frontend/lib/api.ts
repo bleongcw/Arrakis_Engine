@@ -104,6 +104,30 @@ export async function updateGameClassification(
   return data;
 }
 
+/** Replace a game's moves with a corrected PGN (v1.32.0). Re-validates the PGN,
+ *  re-derives result/colour, wipes the old analysis+coaching, and re-analyses
+ *  in the background. Throws with the server's message (e.g. the illegal-move
+ *  ply) on a bad PGN. */
+export async function replaceGamePgn(
+  gameId: number,
+  input: { pgn: string; player_color?: "white" | "black"; result?: string }
+): Promise<{
+  status: string;
+  game_id: number;
+  player_color: string;
+  result: string;
+  re_analyzing: boolean;
+}> {
+  const res = await fetch(`${BASE}/games/${gameId}/pgn`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `Replace failed: ${res.status}`);
+  return data;
+}
+
 export async function fetchPatterns(player: string): Promise<{
   stats: PatternStats;
   trend_summary?: string;

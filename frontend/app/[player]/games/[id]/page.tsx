@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { fetchGameDetail, updateGameRatings, updateGameClassification } from "@/lib/api";
+import { fetchGameDetail, updateGameRatings, updateGameClassification, replaceGamePgn } from "@/lib/api";
 import { platformMeta } from "@/lib/platforms";
 import { useChessNavigation } from "@/hooks/use-chess-navigation";
 import { ChessBoard } from "@/components/game-detail/chess-board";
@@ -157,6 +157,60 @@ function GameDetailView({
     }
   }
 
+  // Replace-PGN editor (v1.32.0): correct a scoresheet transcription error.
+  // Saving re-validates the PGN, re-derives result/colour, wipes the old
+  // analysis+coaching, and re-analyses in the background — we poll until done.
+  const [editingPgn, setEditingPgn] = useState(false);
+  const [pgnInput, setPgnInput] = useState("");
+  const [savingPgn, setSavingPgn] = useState(false);
+  const [pgnError, setPgnError] = useState<string | null>(null);
+  const [reAnalyzing, setReAnalyzing] = useState(false);
+  const pgnPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (pgnPollRef.current) clearInterval(pgnPollRef.current);
+    };
+  }, []);
+
+  function openPgnEditor() {
+    setPgnInput(game.pgn || "");
+    setPgnError(null);
+    setEditingPgn(true);
+  }
+
+  async function savePgn() {
+    setSavingPgn(true);
+    setPgnError(null);
+    try {
+      await replaceGamePgn(game.id, { pgn: pgnInput });
+      setEditingPgn(false);
+      setReAnalyzing(true);
+      // Poll until the re-analysis + coaching settle, then refresh the view.
+      if (pgnPollRef.current) clearInterval(pgnPollRef.current);
+      let attempts = 0;
+      pgnPollRef.current = setInterval(async () => {
+        attempts++;
+        try {
+          const fresh = await fetchGameDetail(game.id);
+          const done = fresh.game.analysis_status === "complete"
+            && fresh.game.coaching_status !== "pending";
+          if (done || attempts >= 200) {
+            if (pgnPollRef.current) clearInterval(pgnPollRef.current);
+            setReAnalyzing(false);
+            onUpdate(fresh);
+          }
+        } catch {
+          // ignore transient poll errors; the attempt cap ends the wait
+        }
+      }, 3000);
+    } catch (e) {
+      setPgnError(e instanceof Error ? e.message : "Replace failed.");
+    } finally {
+      setSavingPgn(false);
+    }
+  }
+
   return (
     <div>
       {/* Header */}
@@ -305,6 +359,14 @@ function GameDetailView({
                 >
                   Edit details
                 </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-6 text-xs text-muted-foreground"
+                  onClick={openPgnEditor}
+                >
+                  Edit moves
+                </Button>
               </>
             ) : null}
           </div>
@@ -313,6 +375,45 @@ function GameDetailView({
           )}
           {typeError && (
             <div className="text-center text-xs text-red-500 mt-1">{typeError}</div>
+          )}
+          {editingPgn && (
+            <div className="mt-3 border-t pt-3">
+              <p className="text-xs text-muted-foreground mb-1">
+                Paste the corrected PGN. Saving re-validates the moves, then
+                re-runs analysis and coaching (a few minutes).
+              </p>
+              <textarea
+                value={pgnInput}
+                onChange={(e) => setPgnInput(e.target.value)}
+                spellCheck={false}
+                rows={10}
+                className="w-full rounded-md border bg-background px-2 py-1.5 font-mono text-xs"
+                placeholder="[Event ...]&#10;&#10;1. e4 e5 ..."
+              />
+              <div className="flex items-center gap-2 mt-2">
+                <Button size="sm" onClick={savePgn} disabled={savingPgn}>
+                  {savingPgn ? "Saving…" : "Save & re-analyse"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setEditingPgn(false)}
+                  disabled={savingPgn}
+                >
+                  Cancel
+                </Button>
+              </div>
+              {pgnError && (
+                <div className="text-xs text-red-500 mt-1 whitespace-pre-wrap">
+                  {pgnError}
+                </div>
+              )}
+            </div>
+          )}
+          {reAnalyzing && (
+            <div className="text-center text-xs text-blue-500 mt-2">
+              Moves updated — re-analysing and re-coaching this game…
+            </div>
           )}
         </CardContent>
       </Card>

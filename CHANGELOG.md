@@ -4,7 +4,23 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [1.31.0] - 2026-08-09
+## [1.32.0] - 2026-08-09
+
+### Added
+- **Replace a game's PGN (fix scoresheet transcription errors).** A new
+  "Edit moves" control on the game detail page (and `PUT /api/games/{id}/pgn`)
+  lets you paste a corrected PGN for an existing game. It re-validates the moves
+  (rejecting an illegal move with the exact ply, e.g. *"illegal san: 'Qxe5' …"*),
+  re-derives the moves-dependent fields (result, colour), wipes the now-invalid
+  analysis + coaching, and **re-runs Stockfish analysis and LLM coaching** in the
+  background — in place, keeping the same game id so journal references and
+  history survive. Curated metadata (manually-entered ratings, round date/time,
+  category, game type) is preserved; a competition game keeps its Event/Site
+  privacy stripping. Re-analysis runs under the single-task pipeline lock; if a
+  task is already running, the game stays pending for the next run.
+
+  This is the first way to correct a game's moves without deleting and
+  re-importing (which would have minted a new game row and orphaned the old one).
 
 Internal review — concurrency-core batch (the last cluster from the v1.29.0
 review). These prevent two pipeline tasks from running Stockfish concurrently

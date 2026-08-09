@@ -78,15 +78,28 @@ def live_server(db_with_data):
     port = 18765
     # v1.13.3: handler is BaseHTTPRequestHandler-based — no `directory` kwarg
     handler = partial(DashboardHandler, db_path=db_with_data)
-    httpd = http.server.HTTPServer(("127.0.0.1", port), handler)
+    # The fixture is function-scoped on a fixed port; back-to-back tests can
+    # collide in TIME_WAIT before the previous socket is fully released. Retry
+    # the bind briefly instead of erroring the test on a transient EADDRINUSE.
+    httpd = None
+    for attempt in range(10):
+        try:
+            httpd = http.server.HTTPServer(("127.0.0.1", port), handler)
+            break
+        except OSError:
+            if attempt == 9:
+                raise
+            time.sleep(0.2)
 
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
     time.sleep(0.3)
 
-    yield f"http://127.0.0.1:{port}"
-
-    httpd.shutdown()
+    try:
+        yield f"http://127.0.0.1:{port}"
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
 
 
 def api_get(base_url, path):
@@ -1202,6 +1215,138 @@ class TestGameClassification:
             {"platform": "competition"},
         )
         assert status == 404
+
+
+class TestReplaceGamePgn:
+    """v1.32.0: PUT /api/games/{id}/pgn replaces the moves, re-derives the
+    moves-dependent fields, wipes stale analysis/coaching, and re-analyses.
+    _spawn_import_pipeline is patched so no real Stockfish runs."""
+
+    NEW_PGN = (
+        '[White "Evan Leong"]\n[Black "Rival"]\n[Result "1-0"]\n\n'
+        '1. d4 d5 2. c4 e6 3. Nc3 Nf6 1-0\n'
+    )
+
+    def _seed_analyzed_game(self, db_with_data):
+        """Return an existing game id, marked complete with analysis+coaching."""
+        conn = init_db(db_with_data)
+        gid = conn.execute("SELECT id FROM games ORDER BY id LIMIT 1").fetchone()["id"]
+        conn.execute(
+            "UPDATE games SET analysis_status='complete', coaching_status='complete', "
+            "acpl=42.0, player_rating=1234, opponent_rating=1300, "
+            "date_played='2026-07-12 14:30:00', time_class='classical' WHERE id=?",
+            (gid,),
+        )
+        conn.execute(
+            "INSERT INTO game_coaching (game_id, provider, narrative) "
+            "VALUES (?, 'claude', 'old narrative')",
+            (gid,),
+        )
+        conn.commit()
+        conn.close()
+        return gid
+
+    @patch("src.dashboard_server.DashboardHandler._spawn_import_pipeline")
+    def test_replace_resets_and_deletes_derived_data(
+        self, mock_spawn, live_server, db_with_data,
+    ):
+        gid = self._seed_analyzed_game(db_with_data)
+        status, data = api_put(
+            live_server, f"/api/games/{gid}/pgn",
+            {"pgn": self.NEW_PGN, "player_color": "white"},
+        )
+        assert status == 200
+        assert data["status"] == "saved"
+
+        conn = init_db(db_with_data)
+        g = conn.execute("SELECT * FROM games WHERE id=?", (gid,)).fetchone()
+        moves = conn.execute(
+            "SELECT COUNT(*) c FROM move_analysis WHERE game_id=?", (gid,)
+        ).fetchone()["c"]
+        coaching = conn.execute(
+            "SELECT COUNT(*) c FROM game_coaching WHERE game_id=?", (gid,)
+        ).fetchone()["c"]
+        conn.close()
+
+        assert "d4 d5" in g["pgn"]                 # new moves stored
+        assert g["analysis_status"] == "pending"   # reset
+        assert g["coaching_status"] == "pending"
+        assert g["acpl"] is None
+        assert moves == 0 and coaching == 0        # stale derived data wiped
+        mock_spawn.assert_called_once()            # re-analysis kicked off
+
+    @patch("src.dashboard_server.DashboardHandler._spawn_import_pipeline")
+    def test_preserves_curated_metadata(self, mock_spawn, live_server, db_with_data):
+        gid = self._seed_analyzed_game(db_with_data)
+        # The replacement PGN carries NO Elo — manual ratings must survive.
+        api_put(live_server, f"/api/games/{gid}/pgn",
+                {"pgn": self.NEW_PGN, "player_color": "white"})
+        conn = init_db(db_with_data)
+        g = conn.execute(
+            "SELECT player_rating, opponent_rating, date_played, time_class "
+            "FROM games WHERE id=?", (gid,)
+        ).fetchone()
+        conn.close()
+        assert g["player_rating"] == 1234
+        assert g["opponent_rating"] == 1300
+        assert g["date_played"] == "2026-07-12 14:30:00"
+        assert g["time_class"] == "classical"
+
+    @patch("src.dashboard_server.DashboardHandler._spawn_import_pipeline")
+    def test_illegal_move_is_rejected_without_touching_the_game(
+        self, mock_spawn, live_server, db_with_data,
+    ):
+        gid = self._seed_analyzed_game(db_with_data)
+        bad = ('[White "Evan Leong"]\n[Black "Rival"]\n[Result "1-0"]\n\n'
+               '1. e4 e5 2. Qxe5 1-0\n')  # no queen can reach e5 — illegal
+        status, data = api_put(
+            live_server, f"/api/games/{gid}/pgn",
+            {"pgn": bad, "player_color": "white"},
+        )
+        assert status == 400
+        assert "illegal" in data["error"].lower() or "invalid" in data["error"].lower()
+
+        # The game is untouched and no re-analysis was spawned.
+        conn = init_db(db_with_data)
+        g = conn.execute(
+            "SELECT analysis_status FROM games WHERE id=?", (gid,)
+        ).fetchone()
+        conn.close()
+        assert g["analysis_status"] == "complete"
+        mock_spawn.assert_not_called()
+
+    def test_empty_pgn_is_400(self, live_server, db_with_data):
+        gid = self._seed_analyzed_game(db_with_data)
+        status, _ = api_put(live_server, f"/api/games/{gid}/pgn", {"pgn": "   "})
+        assert status == 400
+
+    def test_missing_game_is_404(self, live_server):
+        status, _ = api_put(
+            live_server, "/api/games/999999/pgn",
+            {"pgn": TestReplaceGamePgn.NEW_PGN, "player_color": "white"},
+        )
+        assert status == 404
+
+    @patch("src.dashboard_server.DashboardHandler._spawn_import_pipeline")
+    def test_competition_game_strips_private_headers(
+        self, mock_spawn, live_server, db_with_data,
+    ):
+        gid = self._seed_analyzed_game(db_with_data)
+        conn = init_db(db_with_data)
+        conn.execute("UPDATE games SET platform='competition' WHERE id=?", (gid,))
+        conn.commit()
+        conn.close()
+
+        pgn_with_venue = (
+            '[Event "Secret Open"]\n[Site "Secret Venue"]\n'
+            '[White "Evan Leong"]\n[Black "Rival"]\n[Result "1-0"]\n\n'
+            '1. d4 d5 2. c4 1-0\n'
+        )
+        api_put(live_server, f"/api/games/{gid}/pgn",
+                {"pgn": pgn_with_venue, "player_color": "white"})
+        detail = api_get(live_server, f"/api/games/{gid}")
+        pgn = detail["game"]["pgn"]
+        assert "Secret Open" not in pgn and "Secret Venue" not in pgn
 
 
 class TestGameDateEdit:
