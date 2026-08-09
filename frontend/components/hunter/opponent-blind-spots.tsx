@@ -4,7 +4,7 @@
 // Copyright (C) 2026 Bernard Leong
 // Licensed under AGPL-3.0. See LICENSE file.
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { MotifThemes } from "@/components/patterns/motif-themes";
 import type { MotifSummaryData } from "@/components/patterns/motif-themes";
 import { motifLabel } from "@/lib/motifs";
@@ -60,6 +60,11 @@ export function OpponentBlindSpots({
       pollRef.current = null;
     }
   }, []);
+
+  // v1.30.0: stop the deep-scan status poll on unmount. This is the only one of
+  // the polling components with no ceiling on its 2s /api/pipeline/status poll,
+  // so without unmount cleanup it would poll indefinitely after navigating away.
+  useEffect(() => stopPolling, [stopPolling]);
 
   const runScan = useCallback(async () => {
     setError(null);

@@ -75,19 +75,30 @@ export function RecentFormReview({
   const [selectedProvider, setSelectedProvider] = useState("openai");
   const [showInfo, setShowInfo] = useState(false);
   const previousReviewRef = useRef(review);
+  // v1.30.0: track timers so they stop on unmount / restart (see trend-summary).
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const stopPolling = useCallback(() => {
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+    if (timeoutRef.current) { clearTimeout(timeoutRef.current); timeoutRef.current = null; }
+  }, []);
+
+  useEffect(() => stopPolling, [stopPolling]);
 
   const handleGenerate = useCallback(
     async (p: string) => {
       setSelectedProvider(p);
       setGenerating(true);
+      stopPolling();  // clear any prior run's timers
       const oldReview = previousReviewRef.current;
       try {
         await triggerRecentFormReview(player, p, 10);
-        const poll = setInterval(async () => {
+        pollRef.current = setInterval(async () => {
           try {
             const data = await fetchPatterns(player);
             if (data.recent_form_review && data.recent_form_review !== oldReview) {
-              clearInterval(poll);
+              stopPolling();
               previousReviewRef.current = data.recent_form_review;
               setGenerating(false);
               onReviewGenerated();
@@ -97,10 +108,10 @@ export function RecentFormReview({
             // below provides the escape hatch if the LLM is slow or fails.
           }
         }, 5000);
-        // Safety timeout — gpt-5.5-pro reasoning can run 2–5 min on this prompt;
+        // Safety timeout — reasoning models can run 2–5 min on this prompt;
         // give it 8 min before giving up.
-        setTimeout(() => {
-          clearInterval(poll);
+        timeoutRef.current = setTimeout(() => {
+          stopPolling();
           setGenerating(false);
         }, 480000);
       } catch (err) {

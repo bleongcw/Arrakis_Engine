@@ -304,3 +304,35 @@ class TestRunFullPipeline:
 
         with pytest.raises(RuntimeError, match="Stockfish not found"):
             run_full_pipeline(_make_config("/nonexistent/stockfish"), "test.db")
+
+
+class TestScheduledRunHonestErrorReporting:
+    """v1.30.0: a run that lost data (e.g. rate-limited harvest) must report
+    status 'partial', not a clean 'success'."""
+
+    def test_errors_yield_partial_status(self):
+        from src.scheduler import SchedulerManager, get_schedule_state
+        mgr = SchedulerManager(_make_config(), "test.db")
+        with patch("src.scheduler.pipeline_state") as ps, \
+             patch("src.scheduler.run_full_pipeline") as rfp:
+            ps.is_busy.return_value = False
+            ps.start_task.return_value = True
+            rfp.return_value = {"new_games": 0, "games_analyzed": 0,
+                                "players_updated": 0, "errors": 3}
+            mgr._execute_job()
+        state = get_schedule_state()
+        assert state["last_run_status"] == "partial"
+        assert "error" in state["last_run_message"].lower()
+
+    def test_clean_run_yields_success(self):
+        from src.scheduler import SchedulerManager, get_schedule_state
+        mgr = SchedulerManager(_make_config(), "test.db")
+        with patch("src.scheduler.pipeline_state") as ps, \
+             patch("src.scheduler.run_full_pipeline") as rfp:
+            ps.is_busy.return_value = False
+            ps.start_task.return_value = True
+            rfp.return_value = {"new_games": 2, "games_analyzed": 2,
+                                "players_updated": 1, "errors": 0}
+            mgr._execute_job()
+        state = get_schedule_state()
+        assert state["last_run_status"] == "success"

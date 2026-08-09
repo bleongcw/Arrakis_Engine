@@ -257,7 +257,7 @@ _schedule_state = {
     "interval_hours": 6,
     "next_run_time": None,
     "last_run_at": None,
-    "last_run_status": None,    # "success" | "error" | "skipped" | None
+    "last_run_status": None,    # "success" | "partial" | "error" | "skipped" | None
     "last_run_message": None,
 }
 
@@ -400,12 +400,21 @@ class SchedulerManager:
                 parts.append(f"{result['players_updated']} players updated")
             msg = ", ".join(parts) if parts else "No new data."
 
+            # v1.30.0: surface harvest/analysis errors instead of reporting a
+            # clean "success". A rate-limited harvest silently dropped months of
+            # games and still logged "No new data" as a success — the run must
+            # say so, and its status must be "partial" when data was lost.
+            errors = result.get("errors", 0)
+            if errors:
+                msg += f" ({errors} error{'s' if errors != 1 else ''} — some data may be missing)"
+            status = "partial" if errors else "success"
+
             _update_schedule_state(
                 last_run_at=datetime.now().isoformat(),
-                last_run_status="success",
+                last_run_status=status,
                 last_run_message=msg,
             )
-            logger.info("Scheduled pipeline complete: %s", msg)
+            logger.info("Scheduled pipeline complete (%s): %s", status, msg)
 
         except Exception as e:
             logger.exception("Scheduled pipeline failed: %s", e)

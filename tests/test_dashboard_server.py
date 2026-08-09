@@ -772,6 +772,52 @@ class TestAnalysisErrorRecoveryAPI:
         assert attempts == 0
 
 
+class TestMutationErrorHandling:
+    """v1.30.0: do_POST/PUT/DELETE must always return an HTTP response. Before
+    this, a malformed body / bad Content-Length / handler exception escaped to
+    socketserver, which dropped the connection with no status code — the client
+    saw a network error, not a 4xx/5xx."""
+
+    def _raw_post(self, base_url, path, raw_bytes, content_length=None):
+        url = base_url + path
+        headers = {"Content-Type": "application/json"}
+        req = urllib.request.Request(url, data=raw_bytes, headers=headers, method="POST")
+        if content_length is not None:
+            req.add_header("Content-Length", content_length)
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return resp.status, resp.read()
+        except urllib.error.HTTPError as exc:
+            return exc.code, exc.read()
+
+    def test_malformed_json_returns_400_not_dropped(self, live_server):
+        status, body = self._raw_post(live_server, "/api/coach", b"{not valid json")
+        assert status == 400
+        assert b"Malformed JSON" in body
+
+    def test_wrong_body_type_returns_500_not_dropped(self, live_server):
+        # game_id as a dict reaches the SQL layer and raises — must surface as
+        # a 500 with a body, not a dropped socket.
+        status, data = api_post(live_server, "/api/coach", {"game_id": {}})
+        assert status in (400, 500)
+
+    def test_unhashable_export_ids_returns_response(self, live_server):
+        # {"ids": [{}]} used to raise TypeError (unhashable) before validation.
+        status, data = api_post(live_server, "/api/games/export", {"ids": [{}]})
+        assert status in (400, 500)  # a response, not a dropped connection
+
+    def test_bad_provider_does_not_wedge_the_pipeline_lock(self, live_server):
+        # resolve_model raises on an unknown provider. It must 400 WITHOUT
+        # having taken the pipeline lock, so a following real task can start.
+        status, data = api_post(
+            live_server, "/api/pipeline/coach", {"provider": "nonesuch"}
+        )
+        assert status == 400
+        # Lock must be free — the status poll reports idle, not a stuck 'coach'.
+        st = api_get(live_server, "/api/pipeline/status")
+        assert st.get("task") != "coach" or st.get("status") != "running"
+
+
 class TestManualCoachResetsAttempts:
     """v1.28.0: the retry cap must never become a new dead end — asking for a
     game by hand always restores a full budget."""

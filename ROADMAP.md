@@ -1,6 +1,6 @@
 # Arrakis Engine Roadmap
 
-*Updated 2026-08-09 — current release v1.29.0*
+*Updated 2026-08-09 — current release v1.30.0*
 
 This is the public-facing roadmap. The full release history is in
 [CHANGELOG.md](CHANGELOG.md); architectural details are in
@@ -157,6 +157,19 @@ provider.
   "Evan Leong") matched nothing and silently defaulted to White, inverting the
   result and recording the player as their own opponent. Names now match as bags
   of words, and an unmatched name **fails the import instead of guessing** a side.
+
+### Reliability review — robustness batch (v1.30.0, 2026-08-09)
+The deferred, lower-severity items from the v1.29.0 review:
+- **API mutation endpoints never drop the connection** — a malformed body or a
+  handler error now returns a proper 4xx/5xx instead of a silent socket close,
+  and a bad coaching `provider` no longer wedges the pipeline lock.
+- **Frontend pollers stop when you navigate away** — five polling surfaces
+  (coaching, trend summary, recent-form review, journal, opponent blind spots)
+  cleared their intervals on unmount; the coaching poller also no longer orphans
+  a prior run.
+- **Harvest survives rate limits** — 429/5xx retries with backoff, resilient to
+  a non-JSON interstitial, and a scheduled run that loses data now reports
+  `partial` (with an error count) instead of a misleading "success".
 
 ### Security & reliability review — critical batch (v1.29.0, 2026-08-09)
 Findings from an internal review (three parallel code surveys, each finding

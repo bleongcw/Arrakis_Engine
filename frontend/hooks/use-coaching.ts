@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { triggerCoaching, fetchGameDetail } from "@/lib/api";
 import type { GameDetail } from "@/lib/types";
 
@@ -9,8 +9,21 @@ export function useCoaching(gameId: number) {
   const [status, setStatus] = useState("");
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // v1.30.0: stop the poller on unmount. Without this, navigating away
+  // mid-coaching left the 3s interval firing fetchGameDetail (and calling
+  // setState / onComplete on a dead component) for up to 10 minutes.
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, []);
+
   const startCoaching = useCallback(
     async (provider: string, onComplete: (detail: GameDetail) => void) => {
+      // v1.30.0: clear any interval still running from a prior start so it
+      // isn't orphaned (its handle overwritten below), which previously let a
+      // stale poller clear the wrong handle and hang the UI.
+      if (pollRef.current) clearInterval(pollRef.current);
       setIsCoaching(true);
       setStatus(`Coaching with ${provider}...`);
 

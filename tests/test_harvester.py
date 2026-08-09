@@ -91,15 +91,24 @@ SAMPLE_LICHESS_PGN_DRAW = """[Event "Rated Classical game"]
 
 class TestChessComFilterRecent:
     def test_filters_old_archives(self):
-        urls = [
-            "https://api.chess.com/pub/player/testplayer1/games/2020/01",
-            "https://api.chess.com/pub/player/testplayer1/games/2026/01",
-            "https://api.chess.com/pub/player/testplayer1/games/2026/02",
-            "https://api.chess.com/pub/player/testplayer1/games/2026/03",
-        ]
+        # v1.30.0: build the archive dates RELATIVE to now instead of
+        # hardcoding calendar months. The old fixture (2026/01–03) rotted as
+        # real time advanced past its 6-month window and started failing.
+        from datetime import datetime, timedelta
+
+        def archive_url(dt):
+            return (f"https://api.chess.com/pub/player/testplayer1/games/"
+                    f"{dt.year}/{dt.month:02d}")
+
+        now = datetime.now()
+        this_month = now.replace(day=1)
+        last_month = (this_month - timedelta(days=1)).replace(day=1)
+        ancient = "https://api.chess.com/pub/player/testplayer1/games/2010/01"
+        urls = [ancient, archive_url(last_month), archive_url(this_month)]
+
         recent = _chesscom_filter_recent(urls, months=6)
-        assert len(recent) >= 2
-        assert urls[0] not in recent
+        assert len(recent) >= 2          # this month + last month are within 6mo
+        assert ancient not in recent      # the 2010 archive is excluded
 
     def test_empty_list(self):
         assert _chesscom_filter_recent([], months=6) == []
@@ -282,3 +291,63 @@ class TestHarvestPlayer:
             )
             mock_archives.assert_not_called()
             mock_lichess.assert_called_once()
+
+
+# ── v1.30.0: outbound request resilience (_get_json_with_retry) ──────
+
+class TestGetJsonWithRetry:
+    """429 / 5xx / non-JSON handling for chess.com + lichess API calls."""
+
+    def _resp(self, status, *, json_data=None, text=None, headers=None):
+        r = MagicMock()
+        r.status_code = status
+        r.headers = headers or {}
+        if json_data is not None:
+            r.json.return_value = json_data
+        else:
+            r.json.side_effect = ValueError("no json")
+            r.text = text or ""
+        r.raise_for_status.side_effect = (
+            None if status < 400 else __import__("requests").HTTPError(f"{status}")
+        )
+        return r
+
+    def test_retries_on_429_then_succeeds(self):
+        from src import harvester
+        calls = [self._resp(429, headers={"Retry-After": "0"}),
+                 self._resp(200, json_data={"archives": ["a"]})]
+        with patch("src.harvester.requests.get", side_effect=calls), \
+             patch("src.harvester.time.sleep"):
+            out = harvester._get_json_with_retry("http://x", timeout=5)
+        assert out == {"archives": ["a"]}
+
+    def test_non_json_200_raises_requestexception(self):
+        import requests
+        from src import harvester
+        with patch("src.harvester.requests.get",
+                   return_value=self._resp(200, text="<html>bot check</html>")), \
+             patch("src.harvester.time.sleep"):
+            with pytest.raises(requests.RequestException):
+                harvester._get_json_with_retry("http://x", timeout=5)
+
+    def test_gives_up_after_max_retries_on_persistent_429(self):
+        import requests
+        from src import harvester
+        with patch("src.harvester.requests.get",
+                   return_value=self._resp(429, headers={"Retry-After": "0"})), \
+             patch("src.harvester.time.sleep"):
+            with pytest.raises(requests.HTTPError):
+                harvester._get_json_with_retry("http://x", timeout=5)
+
+
+class TestFilterRecentGuards:
+    def test_skips_unparseable_archive_url(self):
+        # A malformed archive URL must not abort the whole filter.
+        urls = [
+            "https://api.chess.com/pub/player/x/games/notayear/notamonth",
+            "https://api.chess.com/pub/player/x/games/2026/03",
+        ]
+        # Should not raise; the good one survives (recency depends on clock,
+        # so just assert no exception and the bad one is dropped).
+        recent = _chesscom_filter_recent(urls, months=600)
+        assert all("notayear" not in u for u in recent)

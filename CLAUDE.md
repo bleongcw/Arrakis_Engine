@@ -5,7 +5,7 @@ Local Python app that pulls games from Chess.com and Lichess, runs Stockfish ana
 and uses reasoning LLMs to generate age-appropriate coaching insights with
 pattern tracking over time. Inspired by Eleanor, Evan, and Estella.
 
-Current release: **v1.29.0** (2026-08-09). See `CHANGELOG.md` for full history.
+Current release: **v1.30.0** (2026-08-09). See `CHANGELOG.md` for full history.
 
 ## Architecture
 - Python 3.11+, SQLite (WAL mode), local Stockfish on Apple Silicon
@@ -190,7 +190,7 @@ ArrakisEngine/
 │   └── screenshots/           # Architecture diagram + UI screenshots
 ├── data/
 │   └── chess_coach.db         # SQLite database (auto-created, gitignored)
-├── tests/                     # Backend pytest suite (743 tests across 3 tiers)
+├── tests/                     # Backend pytest suite (765 tests across 3 tiers)
 └── reports/                   # Generated coach reports (gitignored)
 ```
 
@@ -326,8 +326,8 @@ harvest + report).
 
 ## Testing
 
-**~975 tests total** — 743 backend (pytest, three tiers via `pyproject.toml`
-markers) + 232 frontend (Vitest). Integration (`-m integration`, needs Stockfish)
+**~998 tests total** — 765 backend (pytest, three tiers via `pyproject.toml`
+markers) + 233 frontend (Vitest). Integration (`-m integration`, needs Stockfish)
 and live (`-m live`, needs an LLM key) tiers are excluded by default.
 
 ### Running Tests
@@ -335,7 +335,7 @@ and live (`-m live`, needs an LLM key) tiers are excluded by default.
 pytest                                  # default unit tier (~30s, no deps)
 pytest -m integration                   # Stockfish tests (requires binary)
 pytest -m live                          # LLM API tests (~$0.30)
-cd frontend && npx vitest run           # 232 frontend tests, ~3s
+cd frontend && npx vitest run           # 233 frontend tests, ~3s
 cd frontend && npx next build           # type-check
 ```
 

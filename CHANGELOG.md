@@ -4,6 +4,41 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.30.0] - 2026-08-09
+
+Internal review — robustness batch (deferred items from the v1.29.0 review).
+
+### Fixed
+- **Mutation endpoints always return an HTTP response.** `do_POST/PUT/DELETE`
+  had no error handling, so a malformed JSON body, a bad `Content-Length`, or
+  any exception escaping a handler propagated to `socketserver`, which dropped
+  the connection with no status code (the client saw a network error, not a
+  4xx/5xx). All three now parse the body and dispatch under `try/except`:
+  malformed input → 400, DB lock → 503, handler error → 500. Also caps request
+  bodies at 64 MB.
+- **A bad `provider` no longer wedges the pipeline lock.** `POST /api/pipeline/coach`
+  called `resolve_model` (which raises on an unknown provider) *after*
+  `start_task`, leaving the lock held with no release — blocking every other
+  pipeline task until the 15-minute stale reclaim. Model resolution now happens
+  before the lock is taken.
+- **Coaching poller stops on unmount.** `use-coaching` never cleared its 3-second
+  interval when the component unmounted, so navigating away mid-coaching left it
+  polling `fetchGameDetail` (and calling setState on a dead component) for up to
+  10 minutes; a double-start could also orphan the first interval and clear the
+  wrong handle. Same unmount-cleanup fix applied to the other four polling
+  surfaces (trend summary, recent-form review, journal, opponent blind spots).
+- **Harvester survives rate limits instead of silently losing games.** chess.com
+  API calls now retry on 429/5xx with `Retry-After`-aware backoff, a 200-with-
+  non-JSON (bot interstitial) is treated as a request failure rather than a bare
+  `ValueError` that aborted the whole player's harvest, and an unparseable
+  archive URL is skipped rather than crashing the run. Scheduled runs that hit
+  errors now report status **`partial`** with an error count in the message,
+  instead of a clean "success" that hid missing data.
+- **Fixed a date-rotted test** (`test_filters_old_archives`) that hardcoded
+  calendar months and began failing as real time advanced past its window.
+
+---
+
 ## [1.29.0] - 2026-08-09
 
 Internal security + correctness review — critical batch. The full review

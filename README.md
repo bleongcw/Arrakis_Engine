@@ -901,7 +901,7 @@ Arrakis_Engine/
 ├── docs/
 │   ├── architecture.md        # Tracked: contributor architecture reference
 │   └── screenshots/           # Architecture diagram and screenshots
-├── tests/                 # Backend test suite (743 tests across 3 tiers)
+├── tests/                 # Backend test suite (765 tests across 3 tiers)
 │   ├── conftest.py        # Shared fixtures (db, player, stockfish, llm)
 │   ├── test_models.py                # Schema, ensure_player, migrations, _slugify (v1.16.1)
 │   ├── test_harvester.py
@@ -946,14 +946,14 @@ Arrakis_Engine/
 
 ## Running Tests
 
-**~975 tests total** — 743 backend (pytest) + 232 frontend (Vitest). Backend tests are organized into three tiers using pytest markers; integration (`-m integration`, Stockfish) and live (`-m live`, LLM key) tiers are excluded by default. Frontend tests run in a few seconds and cover the chess + chart + motif helper libraries, the `use-chess-navigation` hook, and the component suites.
+**~998 tests total** — 765 backend (pytest) + 233 frontend (Vitest). Backend tests are organized into three tiers using pytest markers; integration (`-m integration`, Stockfish) and live (`-m live`, LLM key) tiers are excluded by default. Frontend tests run in a few seconds and cover the chess + chart + motif helper libraries, the `use-chess-navigation` hook, and the component suites.
 
 ### Commands
 
 ```bash
 # Unit tests only (default — fast, no external dependencies)
 python -m pytest tests/ -v
-# → 743 tests in ~30s, all mocked
+# → 765 tests in ~30s, all mocked
 
 # Stockfish integration tests (requires Stockfish binary)
 python -m pytest tests/ -m integration -v
@@ -965,13 +965,13 @@ python -m pytest tests/ -m live -v
 
 # Frontend (Vitest)
 cd frontend && npx vitest run
-# → 232 tests in ~3s
+# → 233 tests in ~3s
 cd frontend && npx next build      # type-check
 ```
 
 ### Test Coverage by Module
 
-**Unit tests** (743 backend tests — all mocked, no external dependencies):
+**Unit tests** (765 backend tests — all mocked, no external dependencies):
 
 | File | Tests | Coverage |
 |------|-------|---------|
@@ -1012,7 +1012,7 @@ The `llm_provider` fixture checks for `ARRAKIS_ANTHROPIC_API_KEY` first, falls b
 
 ### Frontend tests (Vitest, v1.6.0+)
 
-**232 tests**, few-second full run. No external dependencies; jsdom + Testing Library + `@testing-library/jest-dom`. Covers the chess + chart-format + motif helper libraries, the `use-chess-navigation` hook, and the Patterns / Journal / game-detail / settings / layout component suites.
+**233 tests**, few-second full run. No external dependencies; jsdom + Testing Library + `@testing-library/jest-dom`. Covers the chess + chart-format + motif helper libraries, the `use-chess-navigation` hook, and the Patterns / Journal / game-detail / settings / layout component suites.
 
 ```bash
 cd frontend

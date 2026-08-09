@@ -52,33 +52,46 @@ export function TrendSummary({ summary, player, onSummaryGenerated }: TrendSumma
   const [selectedProvider, setSelectedProvider] = useState("openai");
   const [showInfo, setShowInfo] = useState(false);
   const previousSummaryRef = useRef(summary);
+  // v1.30.0: track the poll interval + safety timeout so they can be cleared on
+  // unmount (previously they kept hitting /api/patterns for up to 5 min from a
+  // component the user had navigated away from) and on a restart.
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const stopPolling = useCallback(() => {
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+    if (timeoutRef.current) { clearTimeout(timeoutRef.current); timeoutRef.current = null; }
+  }, []);
+
+  useEffect(() => stopPolling, [stopPolling]);
 
   const handleGenerate = useCallback(async (p: string) => {
     setSelectedProvider(p);
     setGenerating(true);
+    stopPolling();  // clear any prior run's timers
     const oldSummary = previousSummaryRef.current;
     try {
       await triggerTrendSummary(player, p);
-      const poll = setInterval(async () => {
+      pollRef.current = setInterval(async () => {
         try {
           const data = await fetchPatterns(player);
           if (data.trend_summary && data.trend_summary !== oldSummary) {
-            clearInterval(poll);
+            stopPolling();
             previousSummaryRef.current = data.trend_summary;
             setGenerating(false);
             onSummaryGenerated();
           }
         } catch {}
       }, 5000);
-      setTimeout(() => {
-        clearInterval(poll);
+      timeoutRef.current = setTimeout(() => {
+        stopPolling();
         setGenerating(false);
       }, 300000);
     } catch (err) {
       console.error("Failed to trigger trend summary:", err);
       setGenerating(false);
     }
-  }, [player, onSummaryGenerated]);
+  }, [player, onSummaryGenerated, stopPolling]);
 
   // Parse summary into paragraphs. Helper handles plain text, JSON
   // {"paragraphs": [...]} format, and literal `\n\n` escape leaks (v1.8.2).

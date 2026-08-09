@@ -24,6 +24,66 @@ logger = logging.getLogger(__name__)
 USER_AGENT = "ArrakisEngine/1.0 (contact: bernardleong@dorje.ai)"
 REQUEST_HEADERS = {"User-Agent": USER_AGENT}
 
+# v1.30.0: rate-limit + transient-error handling for outbound API calls.
+_MAX_RETRIES = 4
+_BACKOFF_BASE_S = 2.0
+_MAX_BACKOFF_S = 30.0
+
+
+def _get_json_with_retry(url: str, timeout: int, **kwargs) -> dict:
+    """GET a JSON endpoint, retrying on 429 / 5xx with backoff.
+
+    v1.30.0: chess.com returns 429 under load. The old code had a single
+    `time.sleep(0.5)` between archives and no retry, so a rate-limit on some
+    archives silently dropped those months. This honours `Retry-After` when
+    present, otherwise backs off exponentially (capped), and — importantly —
+    raises `requests.RequestException` when the body is a 200-with-non-JSON
+    (a Cloudflare/bot interstitial), which `resp.json()` alone would surface as
+    a bare `ValueError` that the callers' `except RequestException` misses.
+    """
+    headers = {**REQUEST_HEADERS, **kwargs.pop("headers", {})}
+    last_exc = None
+    for attempt in range(1, _MAX_RETRIES + 1):
+        try:
+            resp = requests.get(url, headers=headers, timeout=timeout, **kwargs)
+        except requests.RequestException as e:
+            last_exc = e
+            if attempt == _MAX_RETRIES:
+                raise
+            time.sleep(min(_BACKOFF_BASE_S * 2 ** (attempt - 1), _MAX_BACKOFF_S))
+            continue
+
+        if resp.status_code == 429 or resp.status_code >= 500:
+            if attempt == _MAX_RETRIES:
+                resp.raise_for_status()
+            retry_after = resp.headers.get("Retry-After")
+            try:
+                delay = float(retry_after) if retry_after else None
+            except ValueError:
+                delay = None
+            if delay is None:
+                delay = _BACKOFF_BASE_S * 2 ** (attempt - 1)
+            logger.warning(
+                "[api] %s -> %d, retry %d/%d in %.0fs",
+                url, resp.status_code, attempt, _MAX_RETRIES, min(delay, _MAX_BACKOFF_S),
+            )
+            time.sleep(min(delay, _MAX_BACKOFF_S))
+            continue
+
+        resp.raise_for_status()
+        try:
+            return resp.json()
+        except ValueError as e:
+            # 200 OK but not JSON — e.g. an HTML interstitial. Treat as a
+            # request failure so the caller's RequestException handler catches
+            # it instead of it aborting the whole player's harvest.
+            raise requests.RequestException(
+                f"Non-JSON response from {url}: {e}"
+            ) from e
+    if last_exc:
+        raise last_exc
+    raise requests.RequestException(f"Exhausted retries for {url}")
+
 
 # ── Chess.com Harvester ─────────────────────────────────────────────
 
@@ -33,9 +93,7 @@ CHESS_COM_BASE = "https://api.chess.com/pub/player"
 def _chesscom_get_archive_urls(username: str) -> list[str]:
     """Fetch the list of monthly archive URLs for a Chess.com player."""
     url = f"{CHESS_COM_BASE}/{username}/games/archives"
-    resp = requests.get(url, headers=REQUEST_HEADERS, timeout=30)
-    resp.raise_for_status()
-    return resp.json().get("archives", [])
+    return _get_json_with_retry(url, timeout=30).get("archives", [])
 
 
 def _chesscom_filter_recent(archive_urls: list[str], months: int = 6) -> list[str]:
@@ -44,8 +102,15 @@ def _chesscom_filter_recent(archive_urls: list[str], months: int = 6) -> list[st
     recent = []
     for url in archive_urls:
         parts = url.rstrip("/").split("/")
-        year, month = int(parts[-2]), int(parts[-1])
-        archive_date = datetime(year, month, 1)
+        # v1.30.0: guard the int() parse — an unexpected archive URL shape
+        # used to raise ValueError/IndexError here and abort the whole
+        # player's harvest before any error handling. Skip the odd one out.
+        try:
+            year, month = int(parts[-2]), int(parts[-1])
+            archive_date = datetime(year, month, 1)
+        except (ValueError, IndexError):
+            logger.warning("[chess.com] Skipping unparseable archive URL: %s", url)
+            continue
         if archive_date >= cutoff.replace(day=1):
             recent.append(url)
     return recent
@@ -53,9 +118,7 @@ def _chesscom_filter_recent(archive_urls: list[str], months: int = 6) -> list[st
 
 def _chesscom_fetch_archive(url: str) -> list[dict]:
     """Fetch all games from a single monthly archive."""
-    resp = requests.get(url, headers=REQUEST_HEADERS, timeout=60)
-    resp.raise_for_status()
-    return resp.json().get("games", [])
+    return _get_json_with_retry(url, timeout=60).get("games", [])
 
 
 def _chesscom_determine_side(game: dict, username: str) -> tuple[str, int | None, int | None, str | None]:

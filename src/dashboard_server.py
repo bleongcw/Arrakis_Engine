@@ -172,45 +172,87 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
         else:
             self._send_json({"error": "Not found"}, 404)
 
+    # v1.30.0: cap request bodies. The API is loopback-only (v1.29.0), so this
+    # is a guard against an accidental huge paste OOM-ing the server, not a
+    # hostile-input defense. Import PGNs are the largest legitimate body.
+    MAX_BODY_BYTES = 64 * 1024 * 1024  # 64 MB
+
     def do_POST(self):
-        parsed = urlparse(self.path)
-        path = parsed.path
-
-        content_length = int(self.headers.get("Content-Length", 0))
-        body = json.loads(self.rfile.read(content_length)) if content_length else {}
-
-        self._dispatch_mutation(_POST_ROUTES, _POST_REGEX_ROUTES, path, body)
+        self._handle_mutation(_POST_ROUTES, _POST_REGEX_ROUTES, read_body=True)
 
     def do_PUT(self):
-        parsed = urlparse(self.path)
-        path = parsed.path
-
-        content_length = int(self.headers.get("Content-Length", 0))
-        body = json.loads(self.rfile.read(content_length)) if content_length else {}
-
-        self._dispatch_mutation(_PUT_ROUTES, _PUT_REGEX_ROUTES, path, body)
+        self._handle_mutation(_PUT_ROUTES, _PUT_REGEX_ROUTES, read_body=True)
 
     def do_DELETE(self):
-        parsed = urlparse(self.path)
-        path = parsed.path
+        self._handle_mutation(_DELETE_ROUTES, _DELETE_REGEX_ROUTES, read_body=False)
 
-        self._dispatch_mutation(_DELETE_ROUTES, _DELETE_REGEX_ROUTES, path, None)
+    def _read_json_body(self):
+        """Parse the request body as JSON. Raises ValueError with a
+        client-safe message on a bad Content-Length or malformed JSON."""
+        raw_len = self.headers.get("Content-Length", 0)
+        try:
+            content_length = int(raw_len)
+        except (TypeError, ValueError):
+            raise ValueError("Invalid Content-Length header")
+        if content_length < 0:
+            raise ValueError("Invalid Content-Length header")
+        if content_length == 0:
+            return {}
+        if content_length > self.MAX_BODY_BYTES:
+            raise ValueError(
+                f"Request body too large ({content_length} bytes; "
+                f"max {self.MAX_BODY_BYTES})"
+            )
+        raw = self.rfile.read(content_length)
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Malformed JSON body: {e}")
 
-    def _dispatch_mutation(self, routes, regex_routes, path, body):
-        """Look up an exact route, then the regex routes, else 404.
+    def _handle_mutation(self, routes, regex_routes, read_body):
+        """Parse the body (if any) and dispatch a POST/PUT/DELETE.
 
-        Handlers send their own response (the registry stores them so that
-        out-of-tree code can register POST/PUT/DELETE endpoints too)."""
-        handler = routes.get(path)
-        if handler is not None:
-            handler(self, body)
+        v1.30.0: everything runs under try/except. Previously do_POST/PUT/DELETE
+        had NO error handling — a malformed body, a bad Content-Length, or any
+        exception escaping a handler propagated to socketserver, which logged a
+        traceback and dropped the connection with no HTTP response (the client
+        saw a network error, not a 4xx/5xx). Mirrors the GET path in
+        _handle_api: client-disconnects stay quiet, DB-lock -> 503, bad input
+        -> 400, else 500 — and, crucially, the connection always gets a
+        response so a wedged handler can't also strand the socket."""
+        path = urlparse(self.path).path
+        try:
+            body = self._read_json_body() if read_body else None
+        except ValueError as e:
+            self._send_json({"error": str(e)}, 400)
             return
-        for pattern, h in regex_routes:
-            m = pattern.match(path)
-            if m:
-                h(self, body, *m.groups())
+
+        try:
+            handler = routes.get(path)
+            if handler is not None:
+                handler(self, body)
                 return
-        self._send_json({"error": "Not found"}, 404)
+            for pattern, h in regex_routes:
+                m = pattern.match(path)
+                if m:
+                    h(self, body, *m.groups())
+                    return
+            self._send_json({"error": "Not found"}, 404)
+        except Exception as e:
+            import sqlite3 as _sqlite3
+            if isinstance(e, (ConnectionResetError, BrokenPipeError)):
+                logger.debug("Client disconnected during %s: %s", path, e)
+                return
+            if isinstance(e, _sqlite3.OperationalError) and "locked" in str(e):
+                logger.warning("Mutation hit DB lock: %s %s", path, e)
+                self._send_json(
+                    {"error": "Database is busy (analysis in progress). "
+                              "Please try again in a moment."},
+                    503,
+                )
+            else:
+                logger.exception("Mutation error on %s: %s", path, e)
+                self._send_json({"error": str(e)}, 500)
 
     def do_OPTIONS(self):
         """Respond to OPTIONS without advertising cross-origin access.
@@ -1140,6 +1182,23 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
         """Trigger LLM coaching on analyzed but uncoached games."""
         from src import pipeline_state
         from src.coach import coach_pending
+        from src.llm_providers import resolve_model
+
+        config = self.config
+        db_path = self.db_path
+        coaching_config = config.get("coaching", {})
+
+        # v1.30.0: resolve the model BEFORE taking the lock. resolve_model raises
+        # ValueError on an unknown provider; doing it after start_task left the
+        # pipeline lock held with no fail_task, wedging every other task until
+        # the 15-min stale-lock reclaim. Validate first, then acquire.
+        provider = body.get("provider") or coaching_config.get("default_provider", "claude")
+        player_filter = body.get("player")
+        try:
+            model = resolve_model(provider, None, coaching_config)
+        except ValueError as e:
+            self._send_json({"error": str(e)}, 400)
+            return
 
         if not pipeline_state.start_task("coach", db_path=self.db_path):
             current = pipeline_state.current_task()
@@ -1148,16 +1207,6 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                 409,
             )
             return
-
-        config = self.config
-        db_path = self.db_path
-        coaching_config = config.get("coaching", {})
-
-        from src.llm_providers import resolve_model
-
-        provider = body.get("provider") or coaching_config.get("default_provider", "claude")
-        player_filter = body.get("player")
-        model = resolve_model(provider, None, coaching_config)
 
         cancel_event = threading.Event()
         DashboardHandler._coach_cancel_event = cancel_event

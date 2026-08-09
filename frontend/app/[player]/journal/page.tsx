@@ -76,19 +76,30 @@ export default function JournalPage() {
     loadJournal();
   }, [loadJournal]);
 
+  // v1.30.0: stop the review poller on unmount (previously it kept polling
+  // /api/journal for up to 8 min after navigating away).
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stopPolling = useCallback(() => {
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+    if (timeoutRef.current) { clearTimeout(timeoutRef.current); timeoutRef.current = null; }
+  }, []);
+  useEffect(() => stopPolling, [stopPolling]);
+
   const handleGenerate = useCallback(
     async (p: string) => {
       if (!player) return;
       setSelectedProvider(p);
       setGenerating(true);
+      stopPolling();  // clear any prior run's timers
       const oldCount = entryCountRef.current;
       try {
         await triggerRecentFormReview(player, p, 10);
-        const poll = setInterval(async () => {
+        pollRef.current = setInterval(async () => {
           try {
             const j = await fetchJournal(player);
             if ((j.entries || []).length > oldCount) {
-              clearInterval(poll);
+              stopPolling();
               const newEntries = j.entries || [];
               setEntries(newEntries);
               setPlatformCounts(j.platform_counts || {});
@@ -101,9 +112,9 @@ export default function JournalPage() {
             // Polling errors swallowed; the safety timeout below ends the wait
           }
         }, 5000);
-        // gpt-5.5-pro reasoning can take 2-5 min on this prompt
-        setTimeout(() => {
-          clearInterval(poll);
+        // reasoning models can take 2-5 min on this prompt
+        timeoutRef.current = setTimeout(() => {
+          stopPolling();
           setGenerating(false);
         }, 480000);
       } catch (err) {
@@ -111,7 +122,7 @@ export default function JournalPage() {
         setGenerating(false);
       }
     },
-    [player],
+    [player, stopPolling],
   );
 
   if (playerLoading || loading) {
