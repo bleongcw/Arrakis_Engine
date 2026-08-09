@@ -121,7 +121,7 @@ You don't need to understand Stockfish, centipawns, or LLMs to use Arrakis Engin
 
 Add your child's Chess.com or Lichess username to the config file. Arrakis fetches every game from the last 6 months automatically — rapid, blitz, bullet, and daily. It deduplicates, so you can run it as often as you like without worrying about double-counting.
 
-Games that aren't online — **over-the-board tournament games** played in person — can be brought in too: paste or upload their PGN on the Import page (a whole multi-game tournament file works). Turn on **"Over-the-board / competition game"**, pick the game type (Classical / Rapid / Blitz), and each game is analyzed and coached exactly like an online one, tagged with a 🏆 Competition badge. Ratings, the date/time, and the category are all editable per game afterwards — and the competition's name and venue are never stored, for privacy.
+Games that aren't online — **over-the-board tournament games** played in person — can be brought in too: paste or upload their PGN on the Import page (a whole multi-game tournament file works). Turn on **"Over-the-board / competition game"**, pick the game type (Classical / Rapid / Blitz), and each game is analyzed and coached exactly like an online one, tagged with a 🏆 Competition badge. Ratings, the date/time, and the category are all editable per game afterwards — and if you mistyped a move off the scoresheet, **Edit moves** on the game's detail page lets you paste a corrected PGN, which re-validates the moves (pointing at the exact illegal move if any) and re-runs analysis and coaching in place (v1.32.0). The competition's name and venue are never stored, for privacy.
 
 ### 2. See What Happened
 
@@ -204,7 +204,7 @@ Press Ctrl+C to stop both servers.
 
 **Open `http://localhost:3000` in your browser** — that's the dashboard. Hit Ctrl+C in the terminal to stop both servers cleanly.
 
-> **What `serve` does under the hood.** The Python API backend runs on port 8000. The Next.js frontend is launched as a child process on port 3000 (with output prefixed `[frontend]` so it stays scannable). Both are stopped together when you Ctrl+C. The `--install` flag will run `pnpm install` for you if you skipped step 6.
+> **What `serve` does under the hood.** The Python API backend runs on port 8000, bound to **`127.0.0.1` (loopback) by default** (v1.29.0) — the API has no authentication, so it is not exposed to your network unless you opt in with `--host 0.0.0.0`. The Next.js frontend is launched as a child process on port 3000 (with output prefixed `[frontend]` so it stays scannable) and reaches the API same-origin via a Next.js rewrite. Both are stopped together when you Ctrl+C. The `--install` flag will run `pnpm install` for you if you skipped step 6.
 
 ### Manual two-terminal mode (advanced)
 
@@ -418,7 +418,7 @@ database:
 | `python main.py hunt-scan` | **(v1.20.0)** Deep-scan an opponent's recent games for tactical blind spots (`--opponent`, `--platform`, `--games`) |
 | `python main.py tournament-prep` | **(v1.21.0)** Warm a tournament roster's profiles + print the top opening targets (`--id`) |
 | `python main.py report` | Generate Markdown coaching reports |
-| `python main.py serve` | **(v1.5.0)** Launch backend + frontend together (recommended for end users; supports `--port`, `--frontend-port`, `--install`) |
+| `python main.py serve` | **(v1.5.0)** Launch backend + frontend together (recommended for end users; supports `--port`, `--host`, `--frontend-port`, `--install`) |
 | `python main.py dashboard` | Launch only the API backend (use `serve` for the full app) |
 | `python main.py fide-update` | Update a player's FIDE rating |
 | `python main.py backfill-acpl` / `backfill-clocks` | Backfill capped ACPL / clock data on existing games |
@@ -934,7 +934,7 @@ Arrakis_Engine/
 | Table | Purpose |
 |---|---|
 | `players` | Player profiles (username = chess.com handle, **slug** = URL/API/CLI id (v1.16.1), display name, age, rating, FIDE ID + three FIDE ratings Classical/Rapid/Blitz (v1.26.0)) |
-| `games` | Game records with PGN, ratings, result, platform, ACPL, analysis/coaching status |
+| `games` | Game records with PGN, ratings, result, platform, ACPL, analysis/coaching status (coaching status is `pending`/`complete`/`error`/`skipped` — `skipped` = analysed but no moves to coach, v1.28.1) + `coaching_attempts` (v1.28.0) / `analysis_attempts` (v1.29.0) bounded-retry counters |
 | `move_analysis` | Per-move Stockfish evaluation (capped centipawn, win prob, classification, clock_seconds, **motifs_json** v1.14.0) |
 | `game_coaching` | LLM-generated coaching output per game (narrative, feedback, opening analysis, coaching_meta) |
 | `player_patterns` | Aggregated pattern statistics per player per period (incl. Self-Analysis v1.4.0 + **motif_summary** v1.15.0) |
@@ -993,10 +993,12 @@ cd frontend && npx next build      # type-check
 | File | Tests | Coverage |
 |------|-------|---------|
 | `test_analyzer_integration.py` | 7 | End-to-end Stockfish analysis on Scholar's Mate: move row creation, eval sanity checks (opening ~0cp, mate→±1000cp), ACPL storage, move classifications, batch processing, stuck game recovery, empty PGN handling |
+| `test_hunter.py` | 1 | Deep-scan an opponent's game through the real engine (Hunter Mode) |
+| `test_pipeline_e2e.py` | 1 | (also `-m live`) counted in the integration tier — see Full pipeline E2E below |
 
 The `stockfish_path` fixture auto-resolves from `config.yaml` → `STOCKFISH_PATH` env var → `which stockfish`. Tests skip with a clear message if Stockfish is not found.
 
-**LLM API live tests** (12 tests — requires API key, ~$0.05/run):
+**LLM API live tests** (12 tests — requires API key, ~$0.30/run):
 
 | File | Tests | Coverage |
 |------|-------|---------|
@@ -1056,33 +1058,24 @@ Homebrew Stockfish runs at ~4.4M nodes/sec vs ~9–14M nodes/sec for a source-co
 Your API tier has a tokens-per-minute cap (e.g. 10,000 TPM on free tier). Use `--limit 5` to batch and allow the 10-second delay between calls. Upgrading your OpenAI plan raises the limit. Alternatively, use `--provider claude`.
 
 **Games show "error" analysis or coaching status**
-Reset errored games and re-run:
-```bash
-# Reset analysis errors
-python3 -c "
-from src.models import init_db
-conn = init_db('data/chess_coach.db')
-conn.execute(\"UPDATE games SET analysis_status = 'pending' WHERE analysis_status = 'error'\")
-conn.commit()
-print('Reset', conn.total_changes, 'games')
-conn.close()
-"
-python main.py analyze
+As of v1.28.0/v1.29.0, transient failures **retry automatically** — a failed
+game is re-attempted on the next `analyze`/`coach`/`run-all` (up to 3 times each
+for analysis and coaching) rather than being stranded. A game that exhausts its
+retries is surfaced on the dashboard's Data Updates panel; clear it with:
+- **Coaching** — open the game and click **Coach Game** (resets its retry
+  budget), or run `python main.py coach`.
+- **Analysis** — `POST /api/pipeline/reset-analysis-errors` (re-arms exhausted
+  games), then `python main.py analyze`.
 
-# Reset coaching errors
-python3 -c "
-from src.models import init_db
-conn = init_db('data/chess_coach.db')
-conn.execute(\"UPDATE games SET coaching_status = 'pending' WHERE coaching_status = 'error'\")
-conn.commit()
-print('Reset', conn.total_changes, 'games')
-conn.close()
-"
-python main.py coach --limit 5
-```
+A game with **no moves** (abandoned before either side moved) is not an error —
+it resolves to the `skipped` coaching status (analysed, nothing to coach).
 
 **"database is locked"**
-SQLite only allows one writer at a time. Stop the analyzer before running harvest or coach in another terminal. The dashboard (read-only) can run concurrently without issues.
+SQLite allows one writer at a time. Since v1.31.0 the CLI participates in the
+same single-task lock as the dashboard and scheduler, so `python main.py
+analyze/coach/patterns/run-all` will refuse to start (exit 1) while another task
+is running — just wait for it to finish. Status polls and other reads run
+concurrently without issue (WAL mode).
 
 ## Acknowledgements
 
