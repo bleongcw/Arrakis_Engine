@@ -2385,18 +2385,39 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                         pipeline_state.fail_task("Stockfish not found.")
                         return
                     resolved = found
+                # v1.31.0: heartbeat per game. The import task had NO progress
+                # reporting, so a multi-game import that ran past
+                # STALE_LOCK_MINUTES (analysis is minutes/game) let its own lock
+                # be reclaimed as stale mid-run — enabling a second task to run
+                # Stockfish concurrently. These callbacks keep the lock fresh.
+                def analyze_hb(processed, total):
+                    pipeline_state.update_progress(
+                        f"Import: analyzing {processed}/{total}...",
+                        {"games_processed": processed, "games_total": total},
+                        db_path=db_path,
+                    )
+
+                def coach_hb(coached, errors, total, message):
+                    pipeline_state.update_progress(
+                        message,
+                        {"games_processed": coached + errors, "games_total": total},
+                        db_path=db_path,
+                    )
+
                 analyze_pending(
                     stockfish_path=resolved,
                     depth=sf_config.get("depth", 22),
                     threads=sf_config.get("threads", 6),
                     hash_mb=sf_config.get("hash_mb", 512),
                     db_path=db_path,
+                    progress_callback=analyze_hb,
                 )
                 coach_pending(
                     provider=provider
                     or config.get("coaching", {}).get("default_provider", "claude"),
                     db_path=db_path,
                     config=config,
+                    progress_callback=coach_hb,
                 )
                 pipeline_state.complete_task({"source": "import"})
             except Exception as e:

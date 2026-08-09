@@ -157,3 +157,71 @@ def test_stale_running_lock_not_reported_as_running(db_path):
 
     # And a new task can still claim the reclaimable lock.
     assert pipeline_state.start_task("analyze", db_path=db_path) is True
+
+
+# ── v1.31.0: holder fencing ──────────────────────────────────────────
+
+def _reclaim_by_other_process(db_path, task, *, stale=False):
+    """Rewrite the lock row as if a DIFFERENT process now owns it."""
+    hb = (datetime.now()
+          - timedelta(minutes=pipeline_state.STALE_LOCK_MINUTES + 5)).isoformat() \
+        if stale else datetime.now().isoformat()
+    conn = models.init_db(db_path)
+    conn.execute(
+        "UPDATE pipeline_lock SET status='running', task=?, holder=?, heartbeat_at=? "
+        "WHERE id = 1",
+        (task, "otherhost:99999", hb),
+    )
+    conn.commit()
+    conn.close()
+
+
+def test_release_does_not_clobber_a_reclaimed_lock(db_path):
+    """v1.31.0: after this process's stale lock is reclaimed by another, its
+    complete_task/_release must NOT release the new holder's live lock."""
+    assert pipeline_state.start_task("analyze", db_path=db_path) is True
+    _reclaim_by_other_process(db_path, "harvest")  # another process took over
+
+    # Our (original) holder finishes and tries to release — must be a no-op.
+    pipeline_state.complete_task({"games_analyzed": 1}, db_path=db_path)
+
+    assert pipeline_state.is_busy(db_path=db_path) is True
+    assert pipeline_state.current_task(db_path=db_path) == "harvest"
+    # A third process must still be blocked — the reclaimer's lock survived.
+    assert pipeline_state.start_task("patterns", db_path=db_path) is False
+
+
+def test_zombie_heartbeat_does_not_refresh_other_holder(db_path):
+    """v1.31.0: a reclaimed holder's update_progress must not refresh the
+    heartbeat of the row it no longer owns (which would mask the real holder)."""
+    assert pipeline_state.start_task("analyze", db_path=db_path) is True
+    # Another process reclaimed, but ITS heartbeat is already stale.
+    _reclaim_by_other_process(db_path, "harvest", stale=True)
+
+    # Our zombie progress update must not revive that stale lock.
+    pipeline_state.update_progress("still going", db_path=db_path)
+
+    # The other holder's lock is still stale → reclaimable, not "busy".
+    assert pipeline_state.is_busy(db_path=db_path) is False
+    assert pipeline_state.start_task("patterns", db_path=db_path) is True
+
+
+def test_stuck_running_mirror_reconciled_to_idle(db_path):
+    """v1.31.0: if the in-memory mirror is stuck at 'running' but the DB lock is
+    no longer live, get_state() reconciles to idle instead of a phantom task."""
+    assert pipeline_state.start_task("run_all", db_path=db_path) is True
+
+    # Freeze the heartbeat (dead holder) but LEAVE the mirror saying "running"
+    # — the case v1.27.1 didn't cover (it only reset an already-idle mirror).
+    stale = (datetime.now()
+             - timedelta(minutes=pipeline_state.STALE_LOCK_MINUTES + 5)).isoformat()
+    conn = models.init_db(db_path)
+    conn.execute("UPDATE pipeline_lock SET heartbeat_at = ? WHERE id = 1", (stale,))
+    conn.commit()
+    conn.close()
+    with pipeline_state._lock:
+        assert pipeline_state._state["status"] == "running"  # mirror is stuck
+
+    state = pipeline_state.get_state(db_path=db_path)
+    assert state["status"] == "idle"
+    assert state["task"] is None

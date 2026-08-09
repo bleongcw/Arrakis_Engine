@@ -1,6 +1,6 @@
 # Arrakis Engine — Architecture
 
-*Last updated: 2026-08-09 — corresponds to v1.30.0*
+*Last updated: 2026-08-09 — corresponds to v1.31.0*
 
 This document describes the technical architecture of Arrakis Engine: how the pieces fit together, what runs where, and the design decisions behind them. It is aimed at contributors and developers reading the codebase. For end-user / setup docs, see [README.md](../README.md). For changelog, see [CHANGELOG.md](../CHANGELOG.md).
 
@@ -186,6 +186,8 @@ Rating-based tiers (Beginner → Elementary → Intermediate → Advanced → Ex
 - `scheduler.py` runs the full pipeline (harvest → analyze → patterns → coach) on a configurable interval as a daemon thread.
 - `pipeline_state.py` enforces single-task-at-a-time across CLI, scheduler, and dashboard so two pipelines can't fight over the SQLite lock or the Stockfish process. The lock is **DB-backed** (a `pipeline_lock` row with a heartbeat, reclaimed after a 15-min stale window), so it coordinates across independent *processes* sharing the DB. `get_state()` reads it with a lightweight read-only connection (v1.22.3) so the high-frequency `/api/pipeline/status` poll never re-runs migrations or contends with a running analyzer. **A stale `running` row is reported as `idle`** (v1.27.1) — a dead process (e.g. a killed `serve`) that left the lock in `running` no longer freezes the dashboard on "Working…". The pipeline `cancel_event` is honoured between every step **and between games inside the analyze step** (v1.22.4), so a long Run All is actually cancellable.
 
+**Ownership fencing + full-participation** (v1.31.0). Three gaps closed so two tasks can never run Stockfish concurrently against one DB: (1) the **CLI** (`main.py` `analyze`/`coach`/`patterns`/`run-all`) now acquires the lock via a `_pipeline_lock` context manager and exits cleanly when busy — previously it took no lock and its `analyze_pending` `'analyzing'→'pending'` reset could stomp a dashboard run's in-flight game (`harvest` stays lock-free: no Stockfish, dedups on UNIQUE `game_url`). (2) `_release` and the progress heartbeat are guarded by `AND holder = ?`, so a holder whose stale lock was already reclaimed can't cross-release or keep refreshing a row it no longer owns. (3) `analyze_pending` takes a per-game `progress_callback` wired to the heartbeat, so a long **import** task (which had no progress reporting) can't self-stale past the 15-min window and get reclaimed mid-run. `get_state()` also reconciles a stuck in-memory `running` mirror to `idle` when the lock is no longer live.
+
 ### `dev_runner.py` — `serve` orchestration (v1.5.0)
 Owns the subprocess plumbing for `python main.py serve`. Used only by the
 `cmd_serve` orchestrator in `main.py`; nothing else in the backend imports it.
@@ -368,7 +370,7 @@ The `ARRAKIS_` prefix avoids collisions with other tools that use the unprefixed
 
 ## 7. Testing
 
-**~998 tests total** — 765 backend (pytest) + 233 frontend (Vitest). Counts as of v1.30.0; see CHANGELOG for per-release deltas. Backend integration (`-m integration`, Stockfish) and live (`-m live`, LLM key) tiers are excluded by default.
+**~1006 tests total** — 773 backend (pytest) + 233 frontend (Vitest). Counts as of v1.31.0; see CHANGELOG for per-release deltas. Backend integration (`-m integration`, Stockfish) and live (`-m live`, LLM key) tiers are excluded by default.
 
 ### Backend (`tests/`)
 

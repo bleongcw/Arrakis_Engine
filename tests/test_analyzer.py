@@ -347,3 +347,62 @@ class TestAnalysisErrorRecovery:
         conn.close()
         assert row["analysis_status"] == "error"
         assert row["analysis_attempts"] == 1
+
+
+class TestAnalyzePendingHeartbeat:
+    """v1.31.0: analyze_pending invokes progress_callback after each game so the
+    pipeline lock heartbeat stays fresh through a long analyze phase."""
+
+    def test_progress_callback_fires_per_game(self, tmp_path):
+        from unittest.mock import patch
+        from src.analyzer import analyze_pending
+        from src.models import init_db, ensure_player
+        db = str(tmp_path / "a.db")
+        conn = init_db(db)
+        pid = ensure_player(conn, "p", display_name="P", age=9, rating=1000)
+        for i in range(3):
+            conn.execute(
+                """INSERT INTO games
+                (player_id, game_url, pgn, player_color, result,
+                 analysis_status) VALUES (?, ?, '1. e4 *', 'white', 'win',
+                 'pending')""",
+                (pid, f"u{i}"),
+            )
+        conn.commit()
+        conn.close()
+        dummy = tmp_path / "sf"; dummy.write_text("")
+
+        calls = []
+        with patch("src.analyzer.analyze_game", return_value={"moves": 1}):
+            analyze_pending(
+                str(dummy), db_path=db,
+                progress_callback=lambda done, total: calls.append((done, total)),
+            )
+        assert calls == [(1, 3), (2, 3), (3, 3)]
+
+    def test_callback_error_does_not_abort_analysis(self, tmp_path):
+        from unittest.mock import patch
+        from src.analyzer import analyze_pending
+        from src.models import init_db, ensure_player
+        db = str(tmp_path / "a.db")
+        conn = init_db(db)
+        pid = ensure_player(conn, "p", display_name="P", age=9, rating=1000)
+        for i in range(2):
+            conn.execute(
+                """INSERT INTO games
+                (player_id, game_url, pgn, player_color, result,
+                 analysis_status) VALUES (?, ?, '1. e4 *', 'white', 'win',
+                 'pending')""",
+                (pid, f"u{i}"),
+            )
+        conn.commit()
+        conn.close()
+        dummy = tmp_path / "sf"; dummy.write_text("")
+
+        def boom(*a):
+            raise RuntimeError("heartbeat down")
+
+        with patch("src.analyzer.analyze_game", return_value={"moves": 1}) as mag:
+            n = analyze_pending(str(dummy), db_path=db, progress_callback=boom)
+        assert n == 2                 # both games still processed
+        assert mag.call_count == 2

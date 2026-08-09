@@ -124,9 +124,14 @@ def update_progress(progress_text: str, detail: dict | None = None,
 
     conn = init_db(_resolve_db_path(db_path))
     try:
+        # v1.31.0: guard on holder too. A zombie holder (its stale lock already
+        # reclaimed by another process) must not keep refreshing the heartbeat
+        # of the row it no longer owns — that would indefinitely mask the new
+        # holder's liveness and could resurrect overlapping-task conditions.
         conn.execute(
-            "UPDATE pipeline_lock SET heartbeat_at = ? WHERE id = 1 AND status = 'running'",
-            (datetime.now().isoformat(),),
+            "UPDATE pipeline_lock SET heartbeat_at = ? "
+            "WHERE id = 1 AND status = 'running' AND holder = ?",
+            (datetime.now().isoformat(), _holder()),
         )
         conn.commit()
     finally:
@@ -154,12 +159,20 @@ def fail_task(error_msg: str, db_path: str | None = None):
 
 
 def _release(db_path: str | None, status: str):
-    """Set the lock row to a non-running status so it can be re-acquired."""
+    """Set the lock row to a non-running status so it can be re-acquired.
+
+    v1.31.0: guarded by `AND holder = ?`. Without it, a holder whose stale lock
+    had already been reclaimed by another process would still run this UPDATE
+    and clobber the *new* holder's live lock — releasing a task that was still
+    running. The guard makes release a no-op unless this process still owns the
+    row, so a reclaimed (or crashed-then-revived) holder can't cross-release.
+    """
     conn = init_db(_resolve_db_path(db_path))
     try:
         conn.execute(
-            "UPDATE pipeline_lock SET status = ?, heartbeat_at = ? WHERE id = 1",
-            (status, datetime.now().isoformat()),
+            "UPDATE pipeline_lock SET status = ?, heartbeat_at = ? "
+            "WHERE id = 1 AND holder = ?",
+            (status, datetime.now().isoformat(), _holder()),
         )
         conn.commit()
     finally:
@@ -185,18 +198,23 @@ def get_state(db_path: str | None = None) -> dict:
             snapshot["task"] = row["task"]
             snapshot["started_at"] = row["started_at"]
             snapshot["holder"] = row["holder"]
-        elif snapshot["status"] != "running":
-            # No live lock anywhere — trust the DB's terminal status only if our
-            # mirror has nothing more specific (complete/error with result/error).
+        elif snapshot["status"] in ("running", "idle"):
+            # No live lock anywhere, yet our in-memory mirror still says
+            # "running" (or is idle). Reconcile from the DB's terminal status.
+            #
+            # v1.27.1 fixed the idle-mirror case. v1.31.0 also covers the
+            # stuck-"running"-mirror case: if this process was reclaimed (its
+            # slow task's lock taken by another process) or it crashed mid-run
+            # without updating the mirror, `_state["status"]` stays "running"
+            # forever and get_state kept reporting a phantom task — the
+            # dashboard spun "Working…" while is_busy() (DB-only) said idle.
+            # We only reach here when the lock is NOT live, so never propagate a
+            # raw "running".
+            db_status = row["status"] or "idle"
+            snapshot["status"] = "idle" if db_status == "running" else db_status
+            # The task label is meaningless once nothing is running.
             if snapshot["status"] == "idle":
-                db_status = row["status"] or "idle"
-                # v1.27.1: NEVER propagate a stale 'running'. We just determined
-                # above that this lock is NOT running (dead holder / stale
-                # heartbeat). Copying the row's raw 'running' string here made
-                # /api/pipeline/status report {task: null, status: "running"}
-                # forever after a crash or restart mid-run, so the dashboard
-                # spun "Working…" on a task nobody was executing.
-                snapshot["status"] = "idle" if db_status == "running" else db_status
+                snapshot["task"] = None
     return snapshot
 
 

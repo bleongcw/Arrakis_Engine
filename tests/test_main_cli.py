@@ -454,3 +454,61 @@ class TestCmdTournamentPrep:
         )
         out = capsys.readouterr().out
         assert "ERROR" in out
+
+
+class TestCliPipelineLock:
+    """v1.31.0: CLI pipeline commands participate in the cross-process lock so
+    `python main.py analyze` can't run Stockfish concurrently with a dashboard
+    or scheduler task against the same DB."""
+
+    def test_patterns_refuses_when_another_task_holds_the_lock(
+        self, tmp_path, monkeypatch, capsys,
+    ):
+        from src import pipeline_state
+        db = str(tmp_path / "c.db")
+        init_db(db).close()
+        pipeline_state._active_db_path = None
+        # Simulate another process holding the lock.
+        assert pipeline_state.start_task("analyze", db_path=db) is True
+
+        called = {"n": 0}
+        monkeypatch.setattr(
+            "main.update_patterns",
+            lambda **kw: called.__setitem__("n", called["n"] + 1),
+        )
+
+        with pytest.raises(SystemExit) as exc:
+            main_module.cmd_patterns(_args(), _config(db))
+        assert exc.value.code == 1
+        assert called["n"] == 0                      # work never ran
+        assert "already running" in capsys.readouterr().out.lower()
+
+    def test_patterns_acquires_and_releases_when_free(
+        self, tmp_path, monkeypatch,
+    ):
+        from src import pipeline_state
+        db = str(tmp_path / "c.db")
+        init_db(db).close()
+        pipeline_state._active_db_path = None
+
+        monkeypatch.setattr("main.update_patterns", lambda **kw: 3)
+        main_module.cmd_patterns(_args(), _config(db))
+
+        # Lock released after the command — a subsequent task can acquire.
+        assert pipeline_state.is_busy(db_path=db) is False
+        assert pipeline_state.start_task("analyze", db_path=db) is True
+
+    def test_lock_released_even_if_command_raises(self, tmp_path, monkeypatch):
+        from src import pipeline_state
+        db = str(tmp_path / "c.db")
+        init_db(db).close()
+        pipeline_state._active_db_path = None
+
+        def boom(**kw):
+            raise RuntimeError("kaboom")
+        monkeypatch.setattr("main.update_patterns", boom)
+
+        with pytest.raises(RuntimeError):
+            main_module.cmd_patterns(_args(), _config(db))
+        # fail_task released the lock despite the exception.
+        assert pipeline_state.is_busy(db_path=db) is False

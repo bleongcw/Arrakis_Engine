@@ -397,7 +397,8 @@ def analyze_pending(stockfish_path: str, depth: int = 22,
                     threads: int = 6, hash_mb: int = 512,
                     move_time_limit: float = 10.0,
                     db_path: str | None = None,
-                    cancel_event=None) -> int:
+                    cancel_event=None,
+                    progress_callback=None) -> int:
     """Analyze all games with pending analysis status.
 
     Returns the number of games processed.
@@ -406,6 +407,13 @@ def analyze_pending(stockfish_path: str, depth: int = 22,
     so a "Run All" / analyze cancellation stops between games instead of
     grinding through every pending game (analysis is the long pole — minutes
     per game). The in-progress game finishes; remaining games stay 'pending'.
+
+    v1.31.0: ``progress_callback(processed, total)`` is invoked after each game.
+    Callers wire it to ``pipeline_state.update_progress`` so the pipeline lock's
+    heartbeat is bumped per game. Without it, a long analyze phase (many games
+    at depth 22) went 15+ minutes with no heartbeat and its own lock could be
+    reclaimed mid-run as "stale" — the analysis step is the long pole, so this
+    is where the heartbeat gap actually bit.
 
     Raises FileNotFoundError if the Stockfish binary doesn't exist.
     """
@@ -485,5 +493,13 @@ def analyze_pending(stockfish_path: str, depth: int = 22,
             err_conn.commit()
             err_conn.close()
         processed += 1
+
+        # v1.31.0: heartbeat per game so a long analyze phase keeps the pipeline
+        # lock fresh. Never let a progress-reporting failure abort analysis.
+        if progress_callback is not None:
+            try:
+                progress_callback(processed, len(pending))
+            except Exception:
+                logger.debug("analyze progress_callback failed", exc_info=True)
 
     return processed

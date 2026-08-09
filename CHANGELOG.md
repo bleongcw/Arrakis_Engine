@@ -4,6 +4,41 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.31.0] - 2026-08-09
+
+Internal review — concurrency-core batch (the last cluster from the v1.29.0
+review). These prevent two pipeline tasks from running Stockfish concurrently
+against the same database.
+
+### Fixed
+- **The CLI now participates in the pipeline lock.** `python main.py
+  analyze/coach/patterns` (and `run-all`, which chains them) previously acquired
+  no lock, so a CLI run could execute Stockfish alongside a dashboard or
+  scheduler analyze on the same DB — and `analyze_pending`'s
+  `'analyzing'→'pending'` reset would stomp the other run's in-progress game,
+  with both writing `move_analysis` for it. The CLI now takes the same
+  single-task lock and exits cleanly (code 1) when another task is running.
+  (`harvest` stays lock-free by design — it runs no Stockfish and dedups on a
+  UNIQUE `game_url`.)
+- **Lock ownership is fenced by holder.** `_release` and the progress heartbeat
+  now include `AND holder = ?`. Without it, a holder whose stale lock had
+  already been reclaimed by another process would still release (or keep
+  heartbeating) the row it no longer owned — cross-releasing a task that was
+  still running, or masking the real holder's liveness. A reclaimed holder's
+  writes are now no-ops.
+- **The import task heartbeats.** `POST /api/import-pgn`'s background
+  analyze+coach ran with no progress reporting, so a multi-game import that took
+  longer than `STALE_LOCK_MINUTES` (15) let its own lock be reclaimed as stale
+  mid-run. `analyze_pending` gained a per-game `progress_callback`; the import
+  task (and the CLI) wire it to the lock heartbeat.
+- **A stuck in-memory `running` mirror is reconciled.** `get_state()` already
+  refused to propagate a stale DB `running` (v1.27.1); it now also fixes the case
+  where *this process's* in-memory mirror is stuck at `running` (reclaimed or
+  crashed mid-run) while the DB lock is no longer live — it reports `idle`
+  instead of a phantom task.
+
+---
+
 ## [1.30.0] - 2026-08-09
 
 Internal review — robustness batch (deferred items from the v1.29.0 review).

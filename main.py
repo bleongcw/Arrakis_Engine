@@ -21,12 +21,43 @@ load_dotenv(override=True)
 import http.server
 import functools
 
+from contextlib import contextmanager
+
 from src.harvester import harvest_player
 from src.analyzer import analyze_pending
 from src.coach import coach_pending
 from src.patterns import update_patterns
 from src.report import generate_report
 from src.models import init_db
+
+
+@contextmanager
+def _pipeline_lock(task_name, config):
+    """Hold the cross-process pipeline lock for a CLI command.
+
+    v1.31.0: the CLI previously acquired no lock, so `python main.py analyze`
+    could run Stockfish concurrently with a dashboard/scheduler analyze against
+    the same DB — and analyze_pending's 'analyzing'->'pending' reset would stomp
+    the other run's in-progress game (both then wrote move_analysis for it). The
+    CLI now participates in the same single-task lock: if another task is
+    running it exits cleanly (code 1) instead of colliding. Releases on exit,
+    and marks the task failed if the command raises.
+    """
+    from src import pipeline_state
+    db_path = config["database"]["path"]
+    if not pipeline_state.start_task(task_name, triggered_by="cli", db_path=db_path):
+        current = pipeline_state.current_task(db_path=db_path)
+        print(f"⚠️  Another pipeline task is already running ({current}). "
+              f"Wait for it to finish (or check the dashboard), then retry.")
+        raise SystemExit(1)
+    try:
+        yield
+    except BaseException as e:
+        pipeline_state.fail_task(str(e), db_path=db_path)
+        raise
+    else:
+        pipeline_state.complete_task(
+            {"source": "cli", "task": task_name}, db_path=db_path)
 
 
 def load_config(path: str = "config.yaml") -> dict:
@@ -147,14 +178,18 @@ def cmd_analyze(args, config):
             print("     stockfish <<< 'quit'")
             return
 
-    count = analyze_pending(
-        stockfish_path=sf_path,
-        depth=sf_config["depth"],
-        threads=sf_config["threads"],
-        hash_mb=sf_config["hash_mb"],
-        move_time_limit=sf_config.get("move_time_limit", 10.0),
-        db_path=db_path,
-    )
+    from src import pipeline_state
+    with _pipeline_lock("analyze", config):
+        count = analyze_pending(
+            stockfish_path=sf_path,
+            depth=sf_config["depth"],
+            threads=sf_config["threads"],
+            hash_mb=sf_config["hash_mb"],
+            move_time_limit=sf_config.get("move_time_limit", 10.0),
+            db_path=db_path,
+            progress_callback=lambda done, total: pipeline_state.update_progress(
+                f"Analyzing game {done}/{total}...", db_path=db_path),
+        )
     print(f"Analyzed {count} games.")
 
 
@@ -184,11 +219,15 @@ def cmd_coach(args, config):
     trajectory_enabled = False if no_trajectory else None  # None = read config
     if no_trajectory:
         print("Trajectory injection: OFF (--no-trajectory)")
-    result = coach_pending(
-        provider=provider, model=model, db_path=db_path,
-        limit=limit, config=config, dump_prompt_to=dump_prompt_to,
-        trajectory_enabled=trajectory_enabled,
-    )
+    from src import pipeline_state
+    with _pipeline_lock("coach", config):
+        result = coach_pending(
+            provider=provider, model=model, db_path=db_path,
+            limit=limit, config=config, dump_prompt_to=dump_prompt_to,
+            trajectory_enabled=trajectory_enabled,
+            progress_callback=lambda coached, errors, total, message:
+                pipeline_state.update_progress(message, db_path=db_path),
+        )
     print(f"Coached {result['coached']} games with {provider} ({model}). "
           f"Errors: {result['errors']}, Skipped: {result['skipped']}"
           + (f" — Aborted: {result['abort_reason']}" if result.get('aborted') else ""))
@@ -197,7 +236,8 @@ def cmd_coach(args, config):
 def cmd_patterns(args, config):
     """Update pattern tracking for all players."""
     db_path = config["database"]["path"]
-    count = update_patterns(db_path=db_path)
+    with _pipeline_lock("patterns", config):
+        count = update_patterns(db_path=db_path)
     print(f"Updated patterns for {count} players.")
 
 

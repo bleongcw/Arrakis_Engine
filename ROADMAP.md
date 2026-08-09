@@ -1,6 +1,6 @@
 # Arrakis Engine Roadmap
 
-*Updated 2026-08-09 — current release v1.30.0*
+*Updated 2026-08-09 — current release v1.31.0*
 
 This is the public-facing roadmap. The full release history is in
 [CHANGELOG.md](CHANGELOG.md); architectural details are in
@@ -157,6 +157,19 @@ provider.
   "Evan Leong") matched nothing and silently defaulted to White, inverting the
   result and recording the player as their own opponent. Names now match as bags
   of words, and an unmatched name **fails the import instead of guessing** a side.
+
+### Reliability review — concurrency-core batch (v1.31.0, 2026-08-09)
+The last (and highest-stakes) cluster from the v1.29.0 review — preventing two
+pipeline tasks from running Stockfish at once against the same database:
+- **The CLI joins the pipeline lock** — `analyze` / `coach` / `patterns` /
+  `run-all` now refuse to start (exit 1) when a dashboard or scheduled task is
+  running, instead of colliding and stomping the in-flight game.
+- **Lock ownership is fenced** — a process whose stale lock was reclaimed can no
+  longer cross-release or keep heartbeating the row it no longer owns.
+- **Long imports keep their lock alive** — the import task heartbeats per game,
+  so it can't be reclaimed mid-run and overlapped.
+- **No more phantom "Working…"** — a stuck in-memory status mirror reconciles to
+  idle when the lock is no longer live.
 
 ### Reliability review — robustness batch (v1.30.0, 2026-08-09)
 The deferred, lower-severity items from the v1.29.0 review:
