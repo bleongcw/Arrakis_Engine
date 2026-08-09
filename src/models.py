@@ -201,6 +201,7 @@ def _migrate_coaching_status_allows_skipped(conn: sqlite3.Connection):
         coaching_status TEXT NOT NULL DEFAULT 'pending'
             CHECK (coaching_status IN ('pending', 'complete', 'error', 'skipped')),
         coaching_attempts INTEGER NOT NULL DEFAULT 0,
+        analysis_attempts INTEGER NOT NULL DEFAULT 0,
         opponent_username TEXT,
         platform        TEXT DEFAULT 'chess.com',
         acpl            REAL
@@ -315,6 +316,16 @@ def _migrate(conn: sqlite3.Connection):
         # exactly what we want, since they were never actually retried.
         conn.execute(
             "ALTER TABLE games ADD COLUMN coaching_attempts INTEGER NOT NULL DEFAULT 0"
+        )
+        conn.commit()
+
+    if "analysis_attempts" not in game_cols:
+        # v1.29.0: bounded retry for games stuck at analysis_status='error'
+        # (the analysis-side twin of coaching_attempts). Existing rows default
+        # to 0, so games that failed under the old never-retry behaviour become
+        # eligible again on upgrade — intended, since they were never retried.
+        conn.execute(
+            "ALTER TABLE games ADD COLUMN analysis_attempts INTEGER NOT NULL DEFAULT 0"
         )
         conn.commit()
 
@@ -608,7 +619,12 @@ CREATE TABLE IF NOT EXISTS games (
     -- v1.28.0: consecutive failed coaching attempts. Bounds automatic retries
     -- of a game stuck at coaching_status='error' (see coach.MAX_COACHING_ATTEMPTS).
     -- Reset to 0 on success and whenever a human re-triggers coaching by hand.
-    coaching_attempts INTEGER NOT NULL DEFAULT 0
+    coaching_attempts INTEGER NOT NULL DEFAULT 0,
+    -- v1.29.0: consecutive failed ANALYSIS attempts. Bounds automatic retries
+    -- of a game stuck at analysis_status='error' (see
+    -- analyzer.MAX_ANALYSIS_ATTEMPTS) — the analysis-side twin of the v1.28.0
+    -- coaching retry. Reset to 0 on success / manual re-analyze.
+    analysis_attempts INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_games_player_id ON games(player_id);

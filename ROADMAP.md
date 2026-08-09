@@ -1,6 +1,6 @@
 # Arrakis Engine Roadmap
 
-*Updated 2026-08-09 — current release v1.28.1*
+*Updated 2026-08-09 — current release v1.29.0*
 
 This is the public-facing roadmap. The full release history is in
 [CHANGELOG.md](CHANGELOG.md); architectural details are in
@@ -157,6 +157,28 @@ provider.
   "Evan Leong") matched nothing and silently defaulted to White, inverting the
   result and recording the player as their own opponent. Names now match as bags
   of words, and an unmatched name **fails the import instead of guessing** a side.
+
+### Security & reliability review — critical batch (v1.29.0, 2026-08-09)
+Findings from an internal review (three parallel code surveys, each finding
+hand-verified against the live code before action):
+- **API binds loopback by default; wildcard CORS removed.** The unauthenticated
+  API bound all interfaces, so anything on the network could reach it, and the
+  dead `Access-Control-Allow-Origin: *` headers let any visited web page read
+  API responses. Now `127.0.0.1` only (opt into LAN with `--host 0.0.0.0`), and
+  the frontend reaches the API same-origin via the existing Next.js rewrite.
+- **Analysis errors recover.** `analysis_status='error'` was permanent — one
+  transient Stockfish failure stranded a game forever. It now retries up to 3×
+  (mirroring the v1.28.0 coaching fix), with a reset endpoint for exhausted
+  games.
+- **No more leaked Stockfish processes.** `analyze_game` releases its engine and
+  DB connection on every path, so a mid-run crash can't leak a process or strand
+  a game in `analyzing`.
+- **Config writes are atomic.** Concurrent settings saves can no longer lose an
+  update or leave `config.yaml` momentarily empty.
+
+The review's remaining (lower-severity) findings — lock-hardening, harvester
+rate-limit resilience, cross-platform date normalization, frontend polling-hook
+cleanup — are catalogued for a later pass.
 
 ### Pipeline reliability (v1.28.0, 2026-08-09)
 - **Failed coaching now retries, and is visible.** A game whose coaching failed

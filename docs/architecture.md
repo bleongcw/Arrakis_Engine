@@ -1,6 +1,6 @@
 # Arrakis Engine — Architecture
 
-*Last updated: 2026-08-09 — corresponds to v1.28.1*
+*Last updated: 2026-08-09 — corresponds to v1.29.0*
 
 This document describes the technical architecture of Arrakis Engine: how the pieces fit together, what runs where, and the design decisions behind them. It is aimed at contributors and developers reading the codebase. For end-user / setup docs, see [README.md](../README.md). For changelog, see [CHANGELOG.md](../CHANGELOG.md).
 
@@ -231,6 +231,10 @@ Multi-opponent Hunter Mode. A `tournament` is a player-scoped, named roster (`to
 ### `dashboard_server.py` — REST API
 **Multi-threaded** Python `ThreadingHTTPServer` (v1.22.3 — was single-threaded, which let one lock-waiting request freeze every poll and reset the frontend's connections). Each request opens its own SQLite connection. WAL mode + 30s busy timeout; returns **503** ("database is busy") gracefully when the analyzer is holding the write lock — the frontend `fetchJSON` retries 503 with backoff (v1.22.5) so a transient blip during analysis doesn't crash the page.
 
+**Binds loopback, no CORS** (v1.29.0). The server binds `127.0.0.1` by default — there is **no authentication** on any route, so binding `0.0.0.0` would expose `PUT /api/settings/api-keys` and the `stockfish_path`→`popen_uci` exec path to the LAN. `--host 0.0.0.0` opts into that deliberately. The old wildcard `Access-Control-Allow-Origin: *` headers were removed: the frontend calls `/api` **same-origin** through the Next.js rewrite (`next.config.ts`), so CORS was never needed for the app — its only effect was letting any web page the user visited read API responses cross-origin.
+
+Settings writes to `config.yaml` go through an atomic helper (`_write_config_atomic`: temp file + `os.replace`) under a shared `_CONFIG_LOCK` (v1.29.0), so two concurrent settings PUTs can't lose an update and a reader never sees a truncated file.
+
 | Method | Endpoint | Purpose |
 |---|---|---|
 | GET | `/api/players` | List active players with tier + stats |
@@ -253,6 +257,7 @@ Multi-opponent Hunter Mode. A `tournament` is a player-scoped, named roster (`to
 | POST | `/api/import-pgn` | (v1.24.0) Import a raw PGN → analyzed game; (v1.25.0) competition mode for OTB tournament PGNs |
 | POST | `/api/games/export` | (v1.24.0) `{ids, annotated}` → raw or annotated PGN file |
 | POST | `/api/pipeline/{harvest,analyze,patterns,coach,run-all,cancel}` | Trigger / cancel pipeline steps |
+| POST | `/api/pipeline/reset-analysis-errors` | (v1.29.0) Re-arm games stuck at analysis error (attempts ≥ cap) |
 | POST | `/api/pipeline/hunt-scan` | (v1.20.0) Opponent Deep Scan (background, single-task lock) |
 | POST | `/api/pipeline/tournament-prep` | (v1.21.0) Warm a roster's prep (background) |
 | POST | `/api/schedule/{toggle,interval}` | Scheduler control |
@@ -277,7 +282,7 @@ Single-file SQLite. Schema migrations run via `init_db()` at startup — column 
 | Table | Key fields |
 |---|---|
 | `players` | username (chess.com handle), **slug** (v1.16.1 — URL/API/CLI id, partial UNIQUE index), display_name, age, rating, fide_id, fide_rating (+ fide_rating_classical/rapid/blitz v1.26.0), lichess_username, is_active |
-| `games` | player_id, game_url, pgn, player_color, player_rating, opponent_rating, result, time_control, time_class, platform, acpl, opponent_username, analysis_status, coaching_status, **coaching_attempts** (v1.28.0 — consecutive coaching failures; bounds automatic retry), date_played |
+| `games` | player_id, game_url, pgn, player_color, player_rating, opponent_rating, result, time_control, time_class, platform, acpl, opponent_username, analysis_status, coaching_status, **coaching_attempts** (v1.28.0), **analysis_attempts** (v1.29.0 — consecutive analysis failures; bounds automatic retry), date_played |
 | `move_analysis` | game_id, move_number, side, move_played, best_move, eval_before_cp, eval_after_cp, swing_cp, win_prob_before, win_prob_after, classification, pv_line, **clock_seconds**, **motifs_json** (v1.14.0 — `{played, best, missed}`, NULL on non-critical moves) |
 | `game_coaching` | game_id, provider, narrative, key_lesson, practical_focus, coach_notes, player_feedback, critical_moments_json, opening_analysis_json, **coaching_meta_json** (v1.7.0; trajectory_* v1.8.0; motif_top_missed / motif_top_missed_phase v1.15.0/v1.16.0) |
 | `player_patterns` | player_id, period_start, period_end, stats_json (includes **motif_summary** v1.15.0 with per-phase splits v1.16.0), trend_summary, recent_form_review (legacy, superseded by journal_entries), updated_at |
@@ -295,7 +300,7 @@ Single-file SQLite. Schema migrations run via `init_db()` at startup — column 
 - **WAL mode** — concurrent reads while the analyzer holds a write lock.
 - **Coaching status is a separate column from analysis status** — a game can be analyzed but not yet coached, which the UI surfaces as a filterable state.
 - **"Nothing to do" is an outcome, not a failure** (v1.28.1) — a game abandoned before either side moved analyses to zero moves. Coaching it raised, so it landed in `'error'` and looked identical to a real breakage (and, post-v1.28.0, consumed retry attempts it could never satisfy). `coaching_status` gained `'skipped'`: `coach_game` detects zero `move_analysis` rows up front, resolves the game without an LLM call, and the selector — which only looks at `'pending'` and `'error'` — never sees it again. Detection is engine truth (no stored moves) rather than a platform-specific `Termination` string, so lichess and PGN imports are covered too.
-- **No status is terminal without an escape hatch** (v1.28.0) — `coaching_status='error'` was originally terminal, which meant a single transient API failure silently and permanently dropped a game from the pipeline. The replacement pairs a bounded automatic retry (`coaching_attempts` vs `MAX_COACHING_ATTEMPTS`) with an unbounded manual one (`POST /api/coach` resets the counter). A bounded retry alone would simply move the trap one level up: "exhausted" would become the new terminal state.
+- **No status is terminal without an escape hatch** (v1.28.0, extended v1.29.0) — `coaching_status='error'` was originally terminal, which meant a single transient API failure silently and permanently dropped a game from the pipeline. The replacement pairs a bounded automatic retry (`coaching_attempts` vs `MAX_COACHING_ATTEMPTS`) with an unbounded manual one (`POST /api/coach` resets the counter). A bounded retry alone would simply move the trap one level up: "exhausted" would become the new terminal state. v1.29.0 applies the identical pattern to `analysis_status='error'` (`analysis_attempts` vs `MAX_ANALYSIS_ATTEMPTS`, with `POST /api/pipeline/reset-analysis-errors` as the escape hatch) — the two statuses now behave the same way.
 - **`date_played` is full datetime, not just date** — needed so coaching runs in true chronological order across multiple games on the same day.
 - **`motifs_json` is sparse** — only critical moves (|cp_loss| ≥ 50) carry motif tags, so the column stays small. `rescan-motifs` backfills it from existing `move_analysis` rows without re-running Stockfish.
 

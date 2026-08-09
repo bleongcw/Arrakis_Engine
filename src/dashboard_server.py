@@ -31,6 +31,41 @@ logger = logging.getLogger(__name__)
 # Module-level scheduler manager, set by run_dashboard()
 _scheduler_manager = None
 
+# v1.29.0: serialize + atomically apply config.yaml writes.
+# ThreadingHTTPServer runs each request on its own thread, so two concurrent
+# settings PUTs used to do read-modify-write on config.yaml with no coordination
+# — a lost update, and an open("w") truncation window during which a concurrent
+# reader saw an empty file. This lock makes each RMW cycle exclusive, and
+# _write_config_atomic writes to a temp file + os.replace() so a reader (or a
+# crash) never sees a torn config.
+_CONFIG_LOCK = threading.Lock()
+
+
+def _write_config_atomic(config_path: Path, cfg: dict) -> None:
+    """Atomically persist `cfg` to `config_path` (temp file + os.replace).
+
+    Call while holding _CONFIG_LOCK. os.replace is atomic on POSIX, so a
+    concurrent reader sees either the old file or the new one, never a
+    half-written or truncated one.
+    """
+    import tempfile
+
+    directory = config_path.parent
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=".config.", suffix=".yaml.tmp", dir=str(directory)
+    )
+    try:
+        with os.fdopen(fd, "w") as f:
+            yaml.safe_dump(cfg, f, default_flow_style=False, sort_keys=False)
+        os.replace(tmp_name, config_path)
+    except BaseException:
+        # Don't leave a stray temp file behind on any failure.
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
+
 # ── Route registry (v1.22.0) ─────────────────────────────────────────
 # HTTP dispatch is table-driven so out-of-tree code (e.g. the commercial
 # Atreides PGN-import module) can register routes into the core dashboard
@@ -178,11 +213,14 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
         self._send_json({"error": "Not found"}, 404)
 
     def do_OPTIONS(self):
-        """Handle CORS preflight requests."""
+        """Respond to OPTIONS without advertising cross-origin access.
+
+        v1.29.0: the frontend reaches the API same-origin via the Next.js
+        `/api/:path*` rewrite (see next.config.ts), so no CORS is needed. The
+        old wildcard `Access-Control-Allow-Origin: *` only let arbitrary web
+        pages read API responses; it has been removed here and in _send_json.
+        """
         self.send_response(200)
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.send_header("Content-Length", "0")
         self.end_headers()
 
@@ -632,40 +670,43 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             return
 
         try:
-            with open(config_path, "r") as f:
-                file_config = yaml.safe_load(f) or {}
+            # v1.29.0: hold _CONFIG_LOCK across the whole read-modify-write so a
+            # concurrent settings PUT can't lose this update; the write itself is
+            # atomic (temp + os.replace). Early returns release the lock.
+            with _CONFIG_LOCK:
+                with open(config_path, "r") as f:
+                    file_config = yaml.safe_load(f) or {}
 
-            # Update stockfish settings
-            sf = file_config.setdefault("stockfish", {})
-            if "stockfish_path" in body:
-                path_val = body["stockfish_path"]
-                if path_val and not Path(path_val).is_file():
-                    self._send_json(
-                        {"error": f"Stockfish not found at: {path_val}", "field": "stockfish_path"},
-                        400,
-                    )
-                    return
-                sf["path"] = path_val
-            if "depth" in body:
-                sf["depth"] = max(1, min(30, int(body["depth"])))
-            if "threads" in body:
-                sf["threads"] = max(1, min(32, int(body["threads"])))
-            if "hash_mb" in body:
-                sf["hash_mb"] = max(64, min(4096, int(body["hash_mb"])))
-            if "move_time_limit" in body:
-                sf["move_time_limit"] = max(1.0, min(60.0, float(body["move_time_limit"])))
+                # Update stockfish settings
+                sf = file_config.setdefault("stockfish", {})
+                if "stockfish_path" in body:
+                    path_val = body["stockfish_path"]
+                    if path_val and not Path(path_val).is_file():
+                        self._send_json(
+                            {"error": f"Stockfish not found at: {path_val}", "field": "stockfish_path"},
+                            400,
+                        )
+                        return
+                    sf["path"] = path_val
+                if "depth" in body:
+                    sf["depth"] = max(1, min(30, int(body["depth"])))
+                if "threads" in body:
+                    sf["threads"] = max(1, min(32, int(body["threads"])))
+                if "hash_mb" in body:
+                    sf["hash_mb"] = max(64, min(4096, int(body["hash_mb"])))
+                if "move_time_limit" in body:
+                    sf["move_time_limit"] = max(1.0, min(60.0, float(body["move_time_limit"])))
 
-            # Update analysis settings
-            analysis = file_config.setdefault("analysis", {})
-            if "months_lookback" in body:
-                analysis["months_lookback"] = max(1, min(24, int(body["months_lookback"])))
+                # Update analysis settings
+                analysis = file_config.setdefault("analysis", {})
+                if "months_lookback" in body:
+                    analysis["months_lookback"] = max(1, min(24, int(body["months_lookback"])))
 
-            with open(config_path, "w") as f:
-                yaml.safe_dump(file_config, f, default_flow_style=False, sort_keys=False)
+                _write_config_atomic(config_path, file_config)
 
-            # Update in-memory config
-            self.config["stockfish"] = sf
-            self.config["analysis"] = analysis
+                # Update in-memory config
+                self.config["stockfish"] = sf
+                self.config["analysis"] = analysis
 
             self._send_json({"status": "saved"})
 
@@ -733,88 +774,92 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
         from src.llm_providers import VALID_PROVIDERS
 
         try:
-            with open(config_path, "r") as f:
-                file_config = yaml.safe_load(f) or {}
+            # v1.29.0: hold _CONFIG_LOCK across read-modify-write (lost-update
+            # safety); the write is atomic (temp + os.replace). Early returns
+            # release the lock.
+            with _CONFIG_LOCK:
+                with open(config_path, "r") as f:
+                    file_config = yaml.safe_load(f) or {}
 
-            coaching = file_config.setdefault("coaching", {})
+                coaching = file_config.setdefault("coaching", {})
 
-            if "default_provider" in body:
-                val = str(body["default_provider"]).lower()
-                if val not in VALID_PROVIDERS:
-                    self._send_json({"error": f"Invalid provider: {val}"}, 400)
-                    return
-                coaching["default_provider"] = val
+                if "default_provider" in body:
+                    val = str(body["default_provider"]).lower()
+                    if val not in VALID_PROVIDERS:
+                        self._send_json({"error": f"Invalid provider: {val}"}, 400)
+                        return
+                    coaching["default_provider"] = val
 
-            if "anthropic_model" in body:
-                coaching["anthropic_model"] = str(body["anthropic_model"]).strip()
+                if "anthropic_model" in body:
+                    coaching["anthropic_model"] = str(body["anthropic_model"]).strip()
 
-            if "openai_model" in body:
-                coaching["openai_model"] = str(body["openai_model"]).strip()
+                if "openai_model" in body:
+                    coaching["openai_model"] = str(body["openai_model"]).strip()
 
-            # Additional provider model fields
-            for key in ("gemini_model", "grok_model", "mistral_model",
-                        "deepseek_model", "qwen_model", "ollama_model",
-                        "ollama_base_url"):
-                if key in body:
-                    coaching[key] = str(body[key]).strip()
+                # Additional provider model fields
+                for key in ("gemini_model", "grok_model", "mistral_model",
+                            "deepseek_model", "qwen_model", "ollama_model",
+                            "ollama_base_url"):
+                    if key in body:
+                        coaching[key] = str(body[key]).strip()
 
-            if "reasoning_effort" in body:
-                val = str(body["reasoning_effort"]).lower()
-                VALID_EFFORT = {"low", "medium", "high", "xhigh", "max"}
-                if val not in VALID_EFFORT:
-                    self._send_json({"error": f"Invalid reasoning effort: {val}"}, 400)
-                    return
-                coaching["reasoning_effort"] = val
+                if "reasoning_effort" in body:
+                    val = str(body["reasoning_effort"]).lower()
+                    VALID_EFFORT = {"low", "medium", "high", "xhigh", "max"}
+                    if val not in VALID_EFFORT:
+                        self._send_json({"error": f"Invalid reasoning effort: {val}"}, 400)
+                        return
+                    coaching["reasoning_effort"] = val
 
-            if "tone" in body:
-                val = str(body["tone"]).lower()
-                if val not in VALID_TONES:
-                    self._send_json({"error": f"Invalid tone: {val}"}, 400)
-                    return
-                coaching["tone"] = val
+                if "tone" in body:
+                    val = str(body["tone"]).lower()
+                    if val not in VALID_TONES:
+                        self._send_json({"error": f"Invalid tone: {val}"}, 400)
+                        return
+                    coaching["tone"] = val
 
-            if "detail_level" in body:
-                val = str(body["detail_level"]).lower()
-                if val not in VALID_DETAIL:
-                    self._send_json({"error": f"Invalid detail level: {val}"}, 400)
-                    return
-                coaching["detail_level"] = val
+                if "detail_level" in body:
+                    val = str(body["detail_level"]).lower()
+                    if val not in VALID_DETAIL:
+                        self._send_json({"error": f"Invalid detail level: {val}"}, 400)
+                        return
+                    coaching["detail_level"] = val
 
-            if "focus_areas" in body:
-                areas = body["focus_areas"]
-                if not isinstance(areas, list):
-                    self._send_json({"error": "focus_areas must be a list"}, 400)
-                    return
-                invalid = set(areas) - VALID_FOCUS
-                if invalid:
-                    self._send_json({"error": f"Invalid focus areas: {invalid}"}, 400)
-                    return
-                coaching["focus_areas"] = areas
+                if "focus_areas" in body:
+                    areas = body["focus_areas"]
+                    if not isinstance(areas, list):
+                        self._send_json({"error": "focus_areas must be a list"}, 400)
+                        return
+                    invalid = set(areas) - VALID_FOCUS
+                    if invalid:
+                        self._send_json({"error": f"Invalid focus areas: {invalid}"}, 400)
+                        return
+                    coaching["focus_areas"] = areas
 
-            if "custom_instructions" in body:
-                text = str(body["custom_instructions"])[:2000]
-                coaching["custom_instructions"] = text
+                if "custom_instructions" in body:
+                    text = str(body["custom_instructions"])[:2000]
+                    coaching["custom_instructions"] = text
 
-            if "coaching_history_count" in body:
-                try:
-                    n = int(body["coaching_history_count"])
-                except (TypeError, ValueError):
-                    self._send_json(
-                        {"error": "coaching_history_count must be an integer"}, 400
-                    )
-                    return
-                if n < 1 or n > 20:
-                    self._send_json(
-                        {"error": "coaching_history_count must be between 1 and 20"},
-                        400,
-                    )
-                    return
-                coaching["coaching_history_count"] = n
+                if "coaching_history_count" in body:
+                    try:
+                        n = int(body["coaching_history_count"])
+                    except (TypeError, ValueError):
+                        self._send_json(
+                            {"error": "coaching_history_count must be an integer"}, 400
+                        )
+                        return
+                    if n < 1 or n > 20:
+                        self._send_json(
+                            {"error": "coaching_history_count must be between 1 and 20"},
+                            400,
+                        )
+                        return
+                    coaching["coaching_history_count"] = n
 
-            with open(config_path, "w") as f:
-                yaml.safe_dump(file_config, f, default_flow_style=False, sort_keys=False)
+                _write_config_atomic(config_path, file_config)
 
-            self.config["coaching"] = coaching
+                self.config["coaching"] = coaching
+
             self._send_json({"status": "saved"})
 
         except Exception as e:
@@ -885,6 +930,25 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
 
         threading.Thread(target=run, daemon=True).start()
         self._send_json({"status": "started", "message": "Harvesting games..."})
+
+    def _handle_reset_analysis_errors(self, body):
+        """v1.29.0: clear the failure counter on games the analysis batch has
+        given up on (analysis_status='error', attempts >= cap), so the next
+        analyze run picks them up again. The escape hatch that keeps the retry
+        cap from becoming a new terminal state — the analysis-side equivalent of
+        re-coaching a game by hand."""
+        from src.analyzer import MAX_ANALYSIS_ATTEMPTS
+        conn = self._get_conn()
+        try:
+            cur = conn.execute(
+                "UPDATE games SET analysis_attempts = 0 "
+                "WHERE analysis_status = 'error' AND analysis_attempts >= ?",
+                (MAX_ANALYSIS_ATTEMPTS,),
+            )
+            conn.commit()
+            self._send_json({"status": "reset", "games_reset": cur.rowcount})
+        finally:
+            conn.close()
 
     def _handle_pipeline_analyze(self, body):
         """Trigger Stockfish analysis on pending games."""
@@ -1204,7 +1268,6 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
-            self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(body)
         except (ConnectionResetError, BrokenPipeError) as e:
@@ -1735,12 +1798,21 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                 (MAX_COACHING_ATTEMPTS,),
             ).fetchone()["c"]
 
+            # v1.29.0: same split for analysis failures — retryable vs exhausted.
+            from src.analyzer import MAX_ANALYSIS_ATTEMPTS
+            analysis_exhausted = conn.execute(
+                "SELECT COUNT(*) AS c FROM games "
+                "WHERE analysis_status = 'error' AND analysis_attempts >= ?",
+                (MAX_ANALYSIS_ATTEMPTS,),
+            ).fetchone()["c"]
+
             return {
                 "total_games": total,
                 "analysis_pending": analysis_map.get("pending", 0),
                 "analyzing": analysis_map.get("analyzing", 0),
                 "analysis_complete": analysis_map.get("complete", 0),
                 "analysis_error": analysis_map.get("error", 0),
+                "analysis_error_exhausted": analysis_exhausted,
                 "coaching_pending": coaching_map.get("pending", 0),
                 "coaching_complete": coaching_map.get("complete", 0),
                 "coaching_error": coaching_map.get("error", 0),
@@ -2391,6 +2463,7 @@ register_route("POST", "/api/pipeline/patterns", lambda self, body: self._handle
 register_route("POST", "/api/pipeline/run-all", lambda self, body: self._handle_pipeline_run_all(body))
 register_route("POST", "/api/pipeline/coach", lambda self, body: self._handle_pipeline_coach(body))
 register_route("POST", "/api/pipeline/cancel", lambda self, body: self._handle_pipeline_cancel())
+register_route("POST", "/api/pipeline/reset-analysis-errors", lambda self, body: self._handle_reset_analysis_errors(body))
 register_route("POST", "/api/schedule/toggle", lambda self, body: self._handle_schedule_toggle(body))
 register_route("POST", "/api/schedule/interval", lambda self, body: self._handle_schedule_interval(body))
 register_route("POST", "/api/hunt/refresh", lambda self, body: self._handle_hunt_refresh(body))
@@ -2429,7 +2502,7 @@ register_regex_route(
 
 
 def run_dashboard(db_path: str, port: int = 8000, config: dict | None = None,
-                  api_only_banner: bool = True):
+                  api_only_banner: bool = True, host: str = "127.0.0.1"):
     """Start the live dashboard server.
 
     `api_only_banner` controls the startup banner:
@@ -2457,7 +2530,13 @@ def run_dashboard(db_path: str, port: int = 8000, config: dict | None = None,
     # ("socket hang up"). Each request opens its own SQLite connection, and the
     # pipeline lock is the cross-request coordinator, so per-thread handling is
     # safe. ThreadingHTTPServer sets daemon_threads=True, so Ctrl+C still exits.
-    with http.server.ThreadingHTTPServer(("", port), handler) as httpd:
+    #
+    # v1.29.0: bind loopback by default. The API has no authentication, so
+    # binding "" (0.0.0.0) exposed every endpoint — including PUT
+    # /api/settings/api-keys and the stockfish_path -> popen_uci exec path — to
+    # anyone on the LAN. `host` defaults to 127.0.0.1; pass --host 0.0.0.0 to
+    # opt into LAN access deliberately.
+    with http.server.ThreadingHTTPServer((host, port), handler) as httpd:
         if api_only_banner:
             sched_config = config.get("schedule", {})
             sched_status = "enabled" if sched_config.get("enabled") else "disabled"

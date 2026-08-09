@@ -30,6 +30,14 @@ from src.tiers import get_tier, classify_move as tier_classify_move, TierConfig
 # inaccuracy). Conservative — keeps motif data focused on moves that mattered.
 MOTIF_DETECTION_THRESHOLD_CP = 50
 
+# v1.29.0: how many consecutive failures a game may accumulate before the batch
+# stops retrying its analysis. The analysis-side twin of
+# coach.MAX_COACHING_ATTEMPTS. Before this, analysis_status='error' was terminal
+# — a single transient Stockfish hiccup stranded a game permanently (never
+# re-analyzed, never coachable, excluded from all patterns). A manual re-analyze
+# resets the counter, so the cap is never a dead end.
+MAX_ANALYSIS_ATTEMPTS = 3
+
 logger = logging.getLogger(__name__)
 
 
@@ -137,236 +145,252 @@ def analyze_game(game_id: int, pgn_text: str, player_color: str,
         logger.info("  Tier: %s %s (depth=%d, time=%.0fs, blunder>%dcp)",
                      tier.icon, tier.label, depth, move_time_limit, tier.blunder_cp)
     conn = init_db(db_path)
+    engine = None
+    # v1.29.0: everything below runs under try/finally so the Stockfish
+    # process and the DB connection are ALWAYS released - even on a mid-loop
+    # exception. Previously a raise leaked the engine (6 threads / 512MB) and
+    # a connection holding an open write transaction, which then made the
+    # caller's error-status UPDATE contend for the write lock and could
+    # strand the game in 'analyzing' limbo.
+    try:
 
-    # Mark as analyzing
-    conn.execute(
-        "UPDATE games SET analysis_status = 'analyzing' WHERE id = ?",
-        (game_id,),
-    )
-    conn.commit()
-
-    game = chess.pgn.read_game(io.StringIO(pgn_text))
-    if game is None:
+        # Mark as analyzing
         conn.execute(
-            "UPDATE games SET analysis_status = 'error' WHERE id = ?",
+            "UPDATE games SET analysis_status = 'analyzing' WHERE id = ?",
             (game_id,),
         )
         conn.commit()
-        conn.close()
-        return {"error": "Failed to parse PGN"}
 
-    engine = chess.engine.SimpleEngine.popen_uci(stockfish_path)
-    engine.configure({"Threads": threads, "Hash": hash_mb})
+        game = chess.pgn.read_game(io.StringIO(pgn_text))
+        if game is None:
+            conn.execute(
+                "UPDATE games SET analysis_status = 'error', "
+                "analysis_attempts = analysis_attempts + 1 WHERE id = ?",
+                (game_id,),
+            )
+            conn.commit()
+            return {"error": "Failed to parse PGN"}
 
-    board = game.board()
-    moves = list(game.mainline_moves())
-    total_moves = len(moves)
-    start_time = time.time()
+        engine = chess.engine.SimpleEngine.popen_uci(stockfish_path)
+        engine.configure({"Threads": threads, "Hash": hash_mb})
 
-    # Extract per-move clock data from PGN comments
-    clocks = extract_clocks_from_pgn(pgn_text)
+        board = game.board()
+        moves = list(game.mainline_moves())
+        total_moves = len(moves)
+        start_time = time.time()
 
-    # Skip games with no moves (abandoned, etc.)
-    if total_moves == 0:
-        logger.info("Game %d has no moves (abandoned/forfeit), marking complete", game_id)
-        engine.quit()
-        conn.execute(
-            "UPDATE games SET analysis_status = 'complete' WHERE id = ?",
-            (game_id,),
-        )
-        conn.commit()
-        conn.close()
-        return {"moves": 0, "blunders": 0, "mistakes": 0, "inaccuracies": 0, "skipped": True}
+        # Extract per-move clock data from PGN comments
+        clocks = extract_clocks_from_pgn(pgn_text)
 
-    logger.info("Analyzing game %d: %d moves at depth %d", game_id, total_moves, depth)
+        # Skip games with no moves (abandoned, etc.)
+        if total_moves == 0:
+            logger.info("Game %d has no moves (abandoned/forfeit), marking complete", game_id)
+            conn.execute(
+                "UPDATE games SET analysis_status = 'complete', "
+                "analysis_attempts = 0 WHERE id = ?",
+                (game_id,),
+            )
+            conn.commit()
+            return {"moves": 0, "blunders": 0, "mistakes": 0, "inaccuracies": 0, "skipped": True}
 
-    # Use both depth and time limit — whichever is reached first.
-    # This prevents hangs on complex endgame positions.
-    limit = chess.engine.Limit(depth=depth, time=move_time_limit)
+        logger.info("Analyzing game %d: %d moves at depth %d", game_id, total_moves, depth)
 
-    # Get initial position eval
-    info = engine.analyse(board, limit)
-    prev_cp = score_to_cp(info["score"], board.turn)
+        # Use both depth and time limit — whichever is reached first.
+        # This prevents hangs on complex endgame positions.
+        limit = chess.engine.Limit(depth=depth, time=move_time_limit)
 
-    stats = {"moves": 0, "blunders": 0, "mistakes": 0, "inaccuracies": 0}
-    player_cp_losses = []  # Track player's capped cp losses for ACPL
-
-    for i, move in enumerate(moves):
-        move_number = (i // 2) + 1
-        side = "white" if board.turn == chess.WHITE else "black"
-        move_san = board.san(move)
-
-        # v1.14.0: snapshot the position BEFORE the move for motif detection.
-        # Cheap copy; only needed for the per-move-loop's tail.
-        board_before = board.copy()
-
-        # Get best move before playing. `info` was set either by the
-        # initial pre-loop engine.analyse() (first iteration) or by the
-        # previous iteration's post-move analysis (which IS the pre-move
-        # analysis for THIS iteration).
-        best_info = info  # reuse previous analysis
-        # v1.16.2 fix: this MUST run after best_info is assigned. The
-        # original v1.14.0 ordering put this line before the assignment,
-        # which raised UnboundLocalError on the first iteration of every
-        # newly-analyzed game (`best_info` not yet defined). Symptom in
-        # production was "Failed to analyze game N: cannot access local
-        # variable 'best_info' where it is not associated with a value".
-        best_move_obj = best_info["pv"][0] if best_info.get("pv") else None
-        best_move_san = None
-        if best_info.get("pv"):
-            try:
-                best_move_san = board.san(best_info["pv"][0])
-            except (ValueError, IndexError):
-                pass
-
-        pv_line = None
-        if best_info.get("pv"):
-            try:
-                pv_board = board.copy()
-                pv_moves = []
-                for pv_move in best_info["pv"][:5]:
-                    pv_moves.append(pv_board.san(pv_move))
-                    pv_board.push(pv_move)
-                pv_line = " ".join(pv_moves)
-            except (ValueError, IndexError):
-                pass
-
-        eval_before_cp = prev_cp
-
-        # Play the move
-        board.push(move)
-
-        # Analyze the new position
+        # Get initial position eval
         info = engine.analyse(board, limit)
-        current_cp = score_to_cp(info["score"], board.turn)
+        prev_cp = score_to_cp(info["score"], board.turn)
 
-        eval_after_cp = current_cp
+        stats = {"moves": 0, "blunders": 0, "mistakes": 0, "inaccuracies": 0}
+        player_cp_losses = []  # Track player's capped cp losses for ACPL
 
-        # Cap evaluations at ±1000cp BEFORE computing loss (Lichess/Chess.com standard).
-        # This prevents mate scores and extreme positions from distorting ACPL.
-        capped_before = cap_eval(eval_before_cp or 0)
-        capped_after = cap_eval(eval_after_cp or 0)
+        for i, move in enumerate(moves):
+            move_number = (i // 2) + 1
+            side = "white" if board.turn == chess.WHITE else "black"
+            move_san = board.san(move)
 
-        # v1.7.1 fix: if the player chose the engine's #1 move (including
-        # checkmate-delivering moves like Qxf7#), there's no "loss" — playing
-        # the best available move can't be a mistake. Without this rule, mate-
-        # transition moves register as ~2000cp losses because Stockfish reports
-        # mate-encoded values (e.g. 29990 → -30000) that survive the per-eval
-        # cap but produce huge differences. Matches Lichess convention.
-        if move_san and best_move_san and move_san == best_move_san:
-            cp_loss = 0
-        else:
-            # Calculate centipawn loss from the moving side's perspective
-            if side == "white":
-                # White wants positive eval. Loss = before - after (from white POV)
-                cp_loss = max(0, capped_before - capped_after)
+            # v1.14.0: snapshot the position BEFORE the move for motif detection.
+            # Cheap copy; only needed for the per-move-loop's tail.
+            board_before = board.copy()
+
+            # Get best move before playing. `info` was set either by the
+            # initial pre-loop engine.analyse() (first iteration) or by the
+            # previous iteration's post-move analysis (which IS the pre-move
+            # analysis for THIS iteration).
+            best_info = info  # reuse previous analysis
+            # v1.16.2 fix: this MUST run after best_info is assigned. The
+            # original v1.14.0 ordering put this line before the assignment,
+            # which raised UnboundLocalError on the first iteration of every
+            # newly-analyzed game (`best_info` not yet defined). Symptom in
+            # production was "Failed to analyze game N: cannot access local
+            # variable 'best_info' where it is not associated with a value".
+            best_move_obj = best_info["pv"][0] if best_info.get("pv") else None
+            best_move_san = None
+            if best_info.get("pv"):
+                try:
+                    best_move_san = board.san(best_info["pv"][0])
+                except (ValueError, IndexError):
+                    pass
+
+            pv_line = None
+            if best_info.get("pv"):
+                try:
+                    pv_board = board.copy()
+                    pv_moves = []
+                    for pv_move in best_info["pv"][:5]:
+                        pv_moves.append(pv_board.san(pv_move))
+                        pv_board.push(pv_move)
+                    pv_line = " ".join(pv_moves)
+                except (ValueError, IndexError):
+                    pass
+
+            eval_before_cp = prev_cp
+
+            # Play the move
+            board.push(move)
+
+            # Analyze the new position
+            info = engine.analyse(board, limit)
+            current_cp = score_to_cp(info["score"], board.turn)
+
+            eval_after_cp = current_cp
+
+            # Cap evaluations at ±1000cp BEFORE computing loss (Lichess/Chess.com standard).
+            # This prevents mate scores and extreme positions from distorting ACPL.
+            capped_before = cap_eval(eval_before_cp or 0)
+            capped_after = cap_eval(eval_after_cp or 0)
+
+            # v1.7.1 fix: if the player chose the engine's #1 move (including
+            # checkmate-delivering moves like Qxf7#), there's no "loss" — playing
+            # the best available move can't be a mistake. Without this rule, mate-
+            # transition moves register as ~2000cp losses because Stockfish reports
+            # mate-encoded values (e.g. 29990 → -30000) that survive the per-eval
+            # cap but produce huge differences. Matches Lichess convention.
+            if move_san and best_move_san and move_san == best_move_san:
+                cp_loss = 0
             else:
-                # Black wants negative eval. Loss = after - before (from white POV)
-                # i.e., if eval goes from -100 to +50, black lost 150cp
-                cp_loss = max(0, capped_after - capped_before)
-            # Per-move loss cap (safety net) — any single move contributes at
-            # most EVAL_CAP cp to the ACPL average. Lichess convention.
-            cp_loss = min(cp_loss, EVAL_CAP)
+                # Calculate centipawn loss from the moving side's perspective
+                if side == "white":
+                    # White wants positive eval. Loss = before - after (from white POV)
+                    cp_loss = max(0, capped_before - capped_after)
+                else:
+                    # Black wants negative eval. Loss = after - before (from white POV)
+                    # i.e., if eval goes from -100 to +50, black lost 150cp
+                    cp_loss = max(0, capped_after - capped_before)
+                # Per-move loss cap (safety net) — any single move contributes at
+                # most EVAL_CAP cp to the ACPL average. Lichess convention.
+                cp_loss = min(cp_loss, EVAL_CAP)
 
-        swing_cp = cp_loss
-        classification = tier_classify_move(cp_loss, tier) if tier else classify_move(cp_loss)
+            swing_cp = cp_loss
+            classification = tier_classify_move(cp_loss, tier) if tier else classify_move(cp_loss)
 
-        win_prob_before = cp_to_win_prob(eval_before_cp or 0)
-        win_prob_after = cp_to_win_prob(eval_after_cp or 0)
+            win_prob_before = cp_to_win_prob(eval_before_cp or 0)
+            win_prob_after = cp_to_win_prob(eval_after_cp or 0)
 
-        # Adjust win prob to be from the moving side's perspective
-        if side == "black":
-            win_prob_before = 100.0 - win_prob_before
-            win_prob_after = 100.0 - win_prob_after
+            # Adjust win prob to be from the moving side's perspective
+            if side == "black":
+                win_prob_before = 100.0 - win_prob_before
+                win_prob_after = 100.0 - win_prob_after
 
-        # Get clock data for this move (index i = half-move index)
-        clock_secs = clocks[i] if i < len(clocks) else None
+            # Get clock data for this move (index i = half-move index)
+            clock_secs = clocks[i] if i < len(clocks) else None
 
-        # v1.14.0: tactical motif detection (gated on critical moves only).
-        # Runs the 8 detectors from src.motifs on BOTH the played move and
-        # the engine's best move when they differ. The "missed" list is the
-        # delta — themes the best move executed that the played move didn't.
-        # Persisted as JSON; NULL for non-critical moves (no motif analysis
-        # was attempted) so the column stays sparse.
-        motifs_json = None
-        if abs(cp_loss) >= MOTIF_DETECTION_THRESHOLD_CP:
-            # played_pv is the continuation Stockfish chose after our move
-            # (already available as `info["pv"]` since we just analyzed the
-            # post-move position above).
-            played_pv = list(info.get("pv") or [])
-            played_motifs = detect_motifs(board_before, move, played_pv)
-            if best_move_obj is not None and best_move_obj != move:
-                # best_pv from best_info["pv"] — first element IS best_move,
-                # rest is the engine's continuation.
-                best_pv = list(best_info.get("pv") or [])[1:]
-                best_motifs = detect_motifs(board_before, best_move_obj, best_pv)
-            else:
-                best_motifs = played_motifs
-            missed = [m for m in best_motifs if m not in played_motifs]
-            if played_motifs or best_motifs:
-                motifs_json = json.dumps({
-                    "played": played_motifs,
-                    "best": best_motifs,
-                    "missed": missed,
-                })
+            # v1.14.0: tactical motif detection (gated on critical moves only).
+            # Runs the 8 detectors from src.motifs on BOTH the played move and
+            # the engine's best move when they differ. The "missed" list is the
+            # delta — themes the best move executed that the played move didn't.
+            # Persisted as JSON; NULL for non-critical moves (no motif analysis
+            # was attempted) so the column stays sparse.
+            motifs_json = None
+            if abs(cp_loss) >= MOTIF_DETECTION_THRESHOLD_CP:
+                # played_pv is the continuation Stockfish chose after our move
+                # (already available as `info["pv"]` since we just analyzed the
+                # post-move position above).
+                played_pv = list(info.get("pv") or [])
+                played_motifs = detect_motifs(board_before, move, played_pv)
+                if best_move_obj is not None and best_move_obj != move:
+                    # best_pv from best_info["pv"] — first element IS best_move,
+                    # rest is the engine's continuation.
+                    best_pv = list(best_info.get("pv") or [])[1:]
+                    best_motifs = detect_motifs(board_before, best_move_obj, best_pv)
+                else:
+                    best_motifs = played_motifs
+                missed = [m for m in best_motifs if m not in played_motifs]
+                if played_motifs or best_motifs:
+                    motifs_json = json.dumps({
+                        "played": played_motifs,
+                        "best": best_motifs,
+                        "missed": missed,
+                    })
 
-        conn.execute(
-            """INSERT OR REPLACE INTO move_analysis
-            (game_id, move_number, side, move_played, best_move,
-             eval_before_cp, eval_after_cp, swing_cp,
-             win_prob_before, win_prob_after, classification, pv_line,
-             clock_seconds, motifs_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (game_id, move_number, side, move_san, best_move_san,
-             eval_before_cp, eval_after_cp, swing_cp,
-             win_prob_before, win_prob_after, classification, pv_line,
-             clock_secs, motifs_json),
-        )
-
-        stats["moves"] += 1
-        if side == player_color:
-            player_cp_losses.append(cp_loss)
-        if classification == "blunder":
-            stats["blunders"] += 1
-        elif classification == "mistake":
-            stats["mistakes"] += 1
-        elif classification == "inaccuracy":
-            stats["inaccuracies"] += 1
-
-        prev_cp = current_cp
-
-        # Progress logging every 10 moves
-        if (i + 1) % 10 == 0:
-            elapsed = time.time() - start_time
-            rate = (i + 1) / elapsed
-            eta = (total_moves - i - 1) / rate if rate > 0 else 0
-            logger.info(
-                "  Game %d: %d/%d moves (%.1f moves/sec, ETA %.0fs)",
-                game_id, i + 1, total_moves, rate, eta,
+            conn.execute(
+                """INSERT OR REPLACE INTO move_analysis
+                (game_id, move_number, side, move_played, best_move,
+                 eval_before_cp, eval_after_cp, swing_cp,
+                 win_prob_before, win_prob_after, classification, pv_line,
+                 clock_seconds, motifs_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (game_id, move_number, side, move_san, best_move_san,
+                 eval_before_cp, eval_after_cp, swing_cp,
+                 win_prob_before, win_prob_after, classification, pv_line,
+                 clock_secs, motifs_json),
             )
 
-    engine.quit()
+            stats["moves"] += 1
+            if side == player_color:
+                player_cp_losses.append(cp_loss)
+            if classification == "blunder":
+                stats["blunders"] += 1
+            elif classification == "mistake":
+                stats["mistakes"] += 1
+            elif classification == "inaccuracy":
+                stats["inaccuracies"] += 1
 
-    # Compute per-game ACPL (capped, player's side only)
-    game_acpl = round(sum(player_cp_losses) / len(player_cp_losses), 1) if player_cp_losses else 0
+            prev_cp = current_cp
 
-    # Mark as complete and store ACPL
-    conn.execute(
-        "UPDATE games SET analysis_status = 'complete', acpl = ? WHERE id = ?",
-        (game_acpl, game_id),
-    )
-    conn.commit()
+            # Progress logging every 10 moves
+            if (i + 1) % 10 == 0:
+                elapsed = time.time() - start_time
+                rate = (i + 1) / elapsed
+                eta = (total_moves - i - 1) / rate if rate > 0 else 0
+                logger.info(
+                    "  Game %d: %d/%d moves (%.1f moves/sec, ETA %.0fs)",
+                    game_id, i + 1, total_moves, rate, eta,
+                )
 
-    elapsed = time.time() - start_time
-    logger.info(
-        "Game %d analysis complete: %d moves in %.1fs (%.1f moves/sec). "
-        "ACPL: %.1f, Blunders: %d, Mistakes: %d, Inaccuracies: %d",
-        game_id, stats["moves"], elapsed, stats["moves"] / elapsed if elapsed > 0 else 0,
-        game_acpl, stats["blunders"], stats["mistakes"], stats["inaccuracies"],
-    )
+        # Compute per-game ACPL (player's side only)
+        game_acpl = round(sum(player_cp_losses) / len(player_cp_losses), 1) if player_cp_losses else 0
 
-    conn.close()
-    return stats
+        # Mark as complete and store ACPL; reset the failure counter (v1.29.0).
+        conn.execute(
+            "UPDATE games SET analysis_status = 'complete', acpl = ?, "
+            "analysis_attempts = 0 WHERE id = ?",
+            (game_acpl, game_id),
+        )
+        conn.commit()
+
+        elapsed = time.time() - start_time
+        logger.info(
+            "Game %d analysis complete: %d moves in %.1fs (%.1f moves/sec). "
+            "ACPL: %.1f, Blunders: %d, Mistakes: %d, Inaccuracies: %d",
+            game_id, stats["moves"], elapsed, stats["moves"] / elapsed if elapsed > 0 else 0,
+            game_acpl, stats["blunders"], stats["mistakes"], stats["inaccuracies"],
+        )
+
+        return stats
+    finally:
+        # v1.29.0: release engine + connection on every path. Closing the
+        # connection here also rolls back any uncommitted move_analysis
+        # writes from a failed run, so the caller's error-status UPDATE
+        # never contends with an open write lock.
+        if engine is not None:
+            try:
+                engine.quit()
+            except Exception:
+                logger.debug("engine.quit() failed during cleanup", exc_info=True)
+        conn.close()
 
 
 def analyze_pending(stockfish_path: str, depth: int = 22,
@@ -403,12 +427,19 @@ def analyze_pending(stockfish_path: str, depth: int = 22,
         conn.commit()
         logger.info("Reset %d interrupted games back to pending", stuck)
 
+    # v1.29.0: also retry games stranded at analysis_status='error', up to
+    # MAX_ANALYSIS_ATTEMPTS. Fresh 'pending' games sort ahead of retries so a
+    # backlog of failures can't starve new games. Mirrors coach_pending.
     pending = conn.execute(
         """SELECT g.id, g.pgn, g.player_color, g.player_id, g.player_rating,
                   p.rating as profile_rating
            FROM games g
            JOIN players p ON g.player_id = p.id
-           WHERE g.analysis_status = 'pending'"""
+           WHERE g.analysis_status = 'pending'
+              OR (g.analysis_status = 'error'
+                  AND g.analysis_attempts < ?)
+           ORDER BY (g.analysis_status = 'error'), g.id ASC""",
+        (MAX_ANALYSIS_ATTEMPTS,),
     ).fetchall()
     conn.close()
 
@@ -442,9 +473,13 @@ def analyze_pending(stockfish_path: str, depth: int = 22,
             )
         except Exception as e:
             logger.error("Failed to analyze game %d: %s", row["id"], e)
+            # v1.29.0: count the failed attempt so the retry is bounded. The
+            # analyze_game connection is already closed (its try/finally), so
+            # this UPDATE never contends with an open write lock.
             err_conn = init_db(db_path)
             err_conn.execute(
-                "UPDATE games SET analysis_status = 'error' WHERE id = ?",
+                "UPDATE games SET analysis_status = 'error', "
+                "analysis_attempts = analysis_attempts + 1 WHERE id = ?",
                 (row["id"],),
             )
             err_conn.commit()

@@ -202,3 +202,148 @@ class TestAnalyzePendingCancel:
         ).fetchone()[0]
         conn.close()
         assert pending == 3
+
+
+class TestAnalyzeGameResourceSafety:
+    """v1.29.0 (F3): analyze_game must release the Stockfish engine and the DB
+    connection on EVERY path, including a mid-run exception. Before this a raise
+    leaked the engine and a connection holding an open write transaction."""
+
+    def test_source_wraps_body_in_try_finally_with_engine_quit(self):
+        import inspect
+        from src.analyzer import analyze_game
+        src = inspect.getsource(analyze_game)
+        assert "engine = None" in src
+        # engine.quit() lives in a finally, guarded on engine is not None.
+        finally_idx = src.rindex("finally:")
+        assert "engine.quit()" in src[finally_idx:]
+        assert "if engine is not None:" in src[finally_idx:]
+        assert "conn.close()" in src[finally_idx:]
+
+    def test_engine_released_and_no_rows_left_on_exception(self, tmp_path):
+        from unittest.mock import patch
+        from src.analyzer import analyze_game
+        from src.models import init_db, ensure_player
+
+        db = str(tmp_path / "a.db")
+        conn = init_db(db)
+        pid = ensure_player(conn, "p", display_name="P", age=9, rating=1000)
+        conn.execute(
+            """INSERT INTO games
+            (player_id, game_url, pgn, player_color, result,
+             analysis_status, coaching_status)
+            VALUES (?, 'u1', '1. e4 e5 2. Nf3 *', 'white', 'win',
+                    'analyzing', 'pending')""",
+            (pid,),
+        )
+        conn.commit()
+        gid = conn.execute("SELECT id FROM games").fetchone()[0]
+        conn.close()
+
+        mock_engine = MagicMock()
+        mock_engine.analyse.side_effect = RuntimeError("engine died")
+
+        with patch("chess.engine.SimpleEngine.popen_uci", return_value=mock_engine):
+            with pytest.raises(RuntimeError):
+                analyze_game(
+                    game_id=gid,
+                    pgn_text="1. e4 e5 2. Nf3 *",
+                    player_color="white",
+                    stockfish_path="/fake/stockfish",
+                    db_path=db,
+                )
+
+        # Engine was quit despite the exception.
+        mock_engine.quit.assert_called_once()
+
+        # The failed run left no partial move rows (closing the conn rolled
+        # back the open write txn), so the caller's error UPDATE won't contend.
+        conn = init_db(db)
+        rows = conn.execute(
+            "SELECT COUNT(*) FROM move_analysis WHERE game_id = ?", (gid,)
+        ).fetchone()[0]
+        conn.close()
+        assert rows == 0
+
+
+class TestAnalysisErrorRecovery:
+    """v1.29.0 (F2): analysis_status='error' is no longer terminal — the batch
+    retries it up to MAX_ANALYSIS_ATTEMPTS, then a manual reset re-arms it."""
+
+    def _seed(self, db, rows):
+        """rows: (analysis_status, analysis_attempts). Returns ids."""
+        from src.models import init_db, ensure_player
+        conn = init_db(db)
+        pid = ensure_player(conn, "p", display_name="P", age=9, rating=1000)
+        ids = []
+        for i, (status, attempts) in enumerate(rows):
+            cur = conn.execute(
+                """INSERT INTO games
+                (player_id, game_url, pgn, player_color, result, date_played,
+                 analysis_status, analysis_attempts)
+                VALUES (?, ?, '1. e4 e5 *', 'white', 'win', '2026-01-0%d',
+                        ?, ?)""" % (i + 1),
+                (pid, f"u{i}", status, attempts),
+            )
+            ids.append(cur.lastrowid)
+        conn.commit()
+        conn.close()
+        return ids
+
+    def test_error_under_cap_is_retried(self, tmp_path):
+        from unittest.mock import patch
+        from src.analyzer import analyze_pending
+        db = str(tmp_path / "a.db")
+        ids = self._seed(db, [("error", 1)])
+        dummy = tmp_path / "sf"; dummy.write_text("")
+
+        with patch("src.analyzer.analyze_game") as mock_ag:
+            analyze_pending(str(dummy), db_path=db)
+        assert mock_ag.call_count == 1
+        assert mock_ag.call_args.kwargs["game_id"] == ids[0]
+
+    def test_error_at_cap_is_left_alone(self, tmp_path):
+        from unittest.mock import patch
+        from src.analyzer import analyze_pending, MAX_ANALYSIS_ATTEMPTS
+        db = str(tmp_path / "a.db")
+        self._seed(db, [("error", MAX_ANALYSIS_ATTEMPTS)])
+        dummy = tmp_path / "sf"; dummy.write_text("")
+
+        with patch("src.analyzer.analyze_game") as mock_ag:
+            analyze_pending(str(dummy), db_path=db)
+        assert mock_ag.call_count == 0
+
+    def test_pending_sorts_ahead_of_error_retries(self, tmp_path):
+        from unittest.mock import patch
+        from src.analyzer import analyze_pending
+        db = str(tmp_path / "a.db")
+        # error game seeded FIRST (lower id) so id-order alone would pick it
+        # first; the status ordering must still put pending ahead.
+        ids = self._seed(db, [("error", 1), ("pending", 0)])
+        dummy = tmp_path / "sf"; dummy.write_text("")
+
+        seen = []
+        with patch("src.analyzer.analyze_game",
+                   side_effect=lambda **kw: seen.append(kw["game_id"])):
+            analyze_pending(str(dummy), db_path=db)
+        assert seen == [ids[1], ids[0]]  # pending first, then the retry
+
+    def test_failure_increments_attempts(self, tmp_path):
+        from unittest.mock import patch
+        from src.analyzer import analyze_pending
+        from src.models import init_db
+        db = str(tmp_path / "a.db")
+        ids = self._seed(db, [("pending", 0)])
+        dummy = tmp_path / "sf"; dummy.write_text("")
+
+        with patch("src.analyzer.analyze_game", side_effect=RuntimeError("boom")):
+            analyze_pending(str(dummy), db_path=db)
+
+        conn = init_db(db)
+        row = conn.execute(
+            "SELECT analysis_status, analysis_attempts FROM games WHERE id = ?",
+            (ids[0],),
+        ).fetchone()
+        conn.close()
+        assert row["analysis_status"] == "error"
+        assert row["analysis_attempts"] == 1

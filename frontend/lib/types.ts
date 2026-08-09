@@ -656,6 +656,9 @@ export interface StatusResponse {
   analyzing: number;
   analysis_complete: number;
   analysis_error: number;
+  /** v1.29.0: analysis failures at/above the retry cap — need a manual
+   *  re-analyze; the rest retry on the next run. */
+  analysis_error_exhausted: number;
   coaching_pending: number;
   coaching_complete: number;
   coaching_error: number;

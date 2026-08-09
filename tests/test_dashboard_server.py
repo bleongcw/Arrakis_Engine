@@ -646,13 +646,36 @@ class TestTournamentAPI:
 
 
 class TestCorsHeaders:
-    def test_response_has_cors(self, live_server):
-        """API responses should include CORS headers."""
+    def test_response_has_no_wildcard_cors(self, live_server):
+        """v1.29.0: responses must NOT advertise wildcard CORS.
+
+        The frontend reaches the API same-origin via the Next.js /api rewrite,
+        so no CORS is needed. The old `Access-Control-Allow-Origin: *` only let
+        any web page the user visited read API responses (settings, keys hint,
+        game data) cross-origin. It has been removed."""
         url = live_server + "/api/players"
         req = urllib.request.Request(url)
         with urllib.request.urlopen(req) as resp:
             cors = resp.getheader("Access-Control-Allow-Origin")
-        assert cors == "*"
+        assert cors is None
+
+    def test_options_has_no_wildcard_cors(self, live_server):
+        url = live_server + "/api/players"
+        req = urllib.request.Request(url, method="OPTIONS")
+        with urllib.request.urlopen(req) as resp:
+            assert resp.status == 200
+            assert resp.getheader("Access-Control-Allow-Origin") is None
+
+
+def test_run_dashboard_defaults_to_loopback_host():
+    """v1.29.0: the bind host defaults to loopback, not 0.0.0.0.
+
+    Guards against a regression to `("", port)`, which exposed the
+    unauthenticated API to the LAN."""
+    import inspect
+    from src.dashboard_server import run_dashboard
+    sig = inspect.signature(run_dashboard)
+    assert sig.parameters["host"].default == "127.0.0.1"
 
 
 class TestDateRangeFilter:
@@ -699,6 +722,54 @@ class TestStatusCounts:
         data = api_get(live_server, "/api/status")
         assert data["coaching_error"] == 2
         assert data["coaching_error_exhausted"] == 1
+
+
+class TestAnalysisErrorRecoveryAPI:
+    """v1.29.0 (F2): /api/status splits analysis failures into retryable vs
+    exhausted, and a reset endpoint re-arms the exhausted ones."""
+
+    def test_status_reports_analysis_error_exhausted(self, live_server, db_with_data):
+        from src.analyzer import MAX_ANALYSIS_ATTEMPTS
+        conn = init_db(db_with_data)
+        ids = [r["id"] for r in conn.execute("SELECT id FROM games")]
+        conn.execute(
+            "UPDATE games SET analysis_status='error', analysis_attempts=1 "
+            "WHERE id = ?", (ids[0],),
+        )
+        conn.execute(
+            "UPDATE games SET analysis_status='error', analysis_attempts=? "
+            "WHERE id = ?", (MAX_ANALYSIS_ATTEMPTS, ids[1]),
+        )
+        conn.commit()
+        conn.close()
+
+        data = api_get(live_server, "/api/status")
+        assert data["analysis_error"] == 2
+        assert data["analysis_error_exhausted"] == 1
+
+    def test_reset_endpoint_rearms_exhausted_games(self, live_server, db_with_data):
+        from src.analyzer import MAX_ANALYSIS_ATTEMPTS
+        conn = init_db(db_with_data)
+        gid = conn.execute("SELECT id FROM games LIMIT 1").fetchone()["id"]
+        conn.execute(
+            "UPDATE games SET analysis_status='error', analysis_attempts=? "
+            "WHERE id = ?", (MAX_ANALYSIS_ATTEMPTS, gid),
+        )
+        conn.commit()
+        conn.close()
+
+        status, data = api_post(live_server, "/api/pipeline/reset-analysis-errors", {})
+        assert status == 200
+        assert data["games_reset"] == 1
+
+        conn = init_db(db_with_data)
+        attempts = conn.execute(
+            "SELECT analysis_attempts FROM games WHERE id = ?", (gid,)
+        ).fetchone()["analysis_attempts"]
+        conn.close()
+        # Re-armed: attempts back to 0 (status stays 'error' until re-analyzed,
+        # but the selector will now pick it up again).
+        assert attempts == 0
 
 
 class TestManualCoachResetsAttempts:
@@ -1152,3 +1223,56 @@ class TestCoachingSettingsAPI:
         )
         assert status == 400
         assert "reasoning effort" in data["error"].lower()
+
+
+class TestAtomicConfigWrites:
+    """v1.29.0: config.yaml settings writes must be serialized + atomic.
+
+    Before this, two concurrent settings PUTs did read-modify-write with no
+    coordination (lost update) and open("w") truncation (torn read)."""
+
+    def test_write_config_atomic_no_temp_left_and_replaces(self, tmp_path):
+        from src.dashboard_server import _write_config_atomic
+        from pathlib import Path
+        import yaml as _yaml
+
+        cfg_path = Path(tmp_path / "config.yaml")
+        cfg_path.write_text("coaching:\n  tone: balanced\n")
+        _write_config_atomic(cfg_path, {"coaching": {"tone": "technical"}})
+
+        # Content replaced, valid YAML, and no .config.*.yaml.tmp left behind.
+        assert _yaml.safe_load(cfg_path.read_text())["coaching"]["tone"] == "technical"
+        leftovers = list(tmp_path.glob(".config.*.yaml.tmp"))
+        assert leftovers == []
+
+    def test_concurrent_puts_do_not_lose_updates(
+        self, live_server, tmp_path, monkeypatch
+    ):
+        import threading
+        import yaml as _yaml
+
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "config.yaml").write_text("coaching: {}\n")
+
+        # Each concurrent PUT sets a DISTINCT model field. With the RMW lock,
+        # every field survives; an unsynchronized RMW would drop some as later
+        # writers overwrite a stale snapshot.
+        fields = [
+            "anthropic_model", "openai_model", "gemini_model",
+            "grok_model", "mistral_model", "deepseek_model",
+        ]
+        barrier = threading.Barrier(len(fields))
+
+        def put(field):
+            barrier.wait()  # maximize overlap
+            api_put(live_server, "/api/settings/coaching", {field: f"{field}-v"})
+
+        threads = [threading.Thread(target=put, args=(f,)) for f in fields]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        cfg = _yaml.safe_load((tmp_path / "config.yaml").read_text())
+        for f in fields:
+            assert cfg["coaching"].get(f) == f"{f}-v", f"lost update: {f}"

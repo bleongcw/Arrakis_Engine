@@ -478,9 +478,10 @@ def cmd_dashboard(args, config):
     """
     db_path = config["database"]["path"]
     port = args.port or 8000
+    host = getattr(args, "host", None) or "127.0.0.1"
 
     from src.dashboard_server import run_dashboard
-    run_dashboard(db_path=db_path, port=port, config=config)
+    run_dashboard(db_path=db_path, port=port, config=config, host=host)
 
 
 def cmd_serve(args, config):
@@ -543,6 +544,7 @@ def cmd_serve(args, config):
             "port": api_port,
             "config": config,
             "api_only_banner": False,   # we'll print the unified banner ourselves
+            "host": getattr(args, "host", None) or "127.0.0.1",
         },
         daemon=True,
         name="api-backend",
@@ -1017,6 +1019,10 @@ def main():
     # dashboard
     dashboard_parser = subparsers.add_parser("dashboard", help="Launch local dashboard server (API only)")
     dashboard_parser.add_argument("--port", type=int, default=8000, help="Port (default: 8000)")
+    dashboard_parser.add_argument("--host", default="127.0.0.1",
+                                  help="Bind address (default: 127.0.0.1 loopback; "
+                                       "pass 0.0.0.0 to allow LAN access — the API "
+                                       "has no authentication)")
 
     # serve (v1.5.0) — launches API + frontend together
     serve_parser = subparsers.add_parser(
@@ -1025,6 +1031,10 @@ def main():
     )
     serve_parser.add_argument("--port", type=int, default=8000,
                               help="API backend port (default: 8000)")
+    serve_parser.add_argument("--host", default="127.0.0.1",
+                              help="API bind address (default: 127.0.0.1 loopback; "
+                                   "pass 0.0.0.0 to allow LAN access — the API has "
+                                   "no authentication)")
     serve_parser.add_argument("--frontend-port", type=int, default=None,
                               help="Frontend port (default: Next.js picks 3000)")
     serve_parser.add_argument("--install", action="store_true",

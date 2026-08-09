@@ -5,7 +5,7 @@ Local Python app that pulls games from Chess.com and Lichess, runs Stockfish ana
 and uses reasoning LLMs to generate age-appropriate coaching insights with
 pattern tracking over time. Inspired by Eleanor, Evan, and Estella.
 
-Current release: **v1.28.1** (2026-08-09). See `CHANGELOG.md` for full history.
+Current release: **v1.29.0** (2026-08-09). See `CHANGELOG.md` for full history.
 
 ## Architecture
 - Python 3.11+, SQLite (WAL mode), local Stockfish on Apple Silicon
@@ -69,6 +69,17 @@ Current release: **v1.28.1** (2026-08-09). See `CHANGELOG.md` for full history.
   `coach.MAX_COACHING_ATTEMPTS` (3); success resets the counter, untried games
   are ordered ahead of retries, and `POST /api/coach` ("Coach Game") zeroes the
   counter so the cap never becomes a dead end
+- Analysis retry (v1.29.0): the analysis-side twin — `analysis_status='error'`
+  is no longer terminal. `analyze_pending` retries under
+  `analyzer.MAX_ANALYSIS_ATTEMPTS` (3) via `games.analysis_attempts`; success
+  resets it; `POST /api/pipeline/reset-analysis-errors` re-arms exhausted games.
+  `analyze_game` runs its engine + move loop under `try/finally` so the
+  Stockfish process and DB connection are always released (no leak / no
+  'analyzing' limbo on a mid-run crash).
+- Network binding (v1.29.0): the API binds `127.0.0.1` by default (no auth on
+  any route); `dashboard`/`serve --host 0.0.0.0` opts into LAN access. The old
+  wildcard CORS headers were removed — the frontend is same-origin via the
+  Next.js `/api` rewrite.
 - Hunter Mode (v1.4.4+): sliding window default 6 months, optional max games cap
 - Config via `config.yaml`, secrets via `.env`:
   - `ARRAKIS_ANTHROPIC_API_KEY`, `ARRAKIS_OPENAI_API_KEY`, `ARRAKIS_GOOGLE_API_KEY`

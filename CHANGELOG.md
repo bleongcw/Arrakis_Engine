@@ -4,6 +4,47 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.29.0] - 2026-08-09
+
+Internal security + correctness review — critical batch. The full review
+(including deferred items) is summarized in ROADMAP.
+
+### Security
+- **The API now binds loopback (`127.0.0.1`) by default, not `0.0.0.0`.** The
+  dashboard API has no authentication, so binding all interfaces exposed every
+  endpoint — including `PUT /api/settings/api-keys` and the `stockfish_path` →
+  `popen_uci` execution path — to anyone on the same network. New `--host` flag
+  on `dashboard`/`serve` opts into LAN access deliberately (`--host 0.0.0.0`).
+- **Removed the wildcard `Access-Control-Allow-Origin: *` headers.** They were
+  dead code — the frontend reaches the API same-origin through the Next.js
+  `/api` rewrite — and their only effect was letting any web page the user
+  visited read API responses (settings, masked key hints, game data)
+  cross-origin. Combined with the bind change, this closes the browser- and
+  LAN-driven attack surface entirely.
+
+### Fixed
+- **`analysis_status='error'` is no longer a permanent dead end.** A transient
+  Stockfish failure used to strand a game forever: never re-analyzed, never
+  coachable, excluded from all patterns. Analysis now retries a failed game up
+  to `MAX_ANALYSIS_ATTEMPTS` (3) — the analysis-side twin of the v1.28.0
+  coaching retry — with fresh games ordered ahead of retries. `/api/status`
+  reports `analysis_error_exhausted`, and `POST /api/pipeline/reset-analysis-errors`
+  re-arms exhausted games so the cap never becomes a new terminal state. New
+  `games.analysis_attempts` column (idempotent migration, default 0).
+- **`analyze_game` no longer leaks a Stockfish process or a DB connection on a
+  mid-run exception.** The engine + move loop now run under `try/finally`, so
+  `engine.quit()` and `conn.close()` happen on every path. Closing the
+  connection also rolls back a failed run's uncommitted move rows, so the
+  caller's error-status UPDATE never contends with an open write lock (which
+  could previously strand the game in `'analyzing'`).
+- **`config.yaml` settings writes are now serialized and atomic.** Two
+  concurrent settings PUTs under the threaded server could lose an update, and
+  the `open("w")` truncation window let a concurrent reader see an empty file
+  (silently falling back to default coaching config). Writes now go through a
+  temp-file + `os.replace()` helper under a shared lock.
+
+---
+
 ## [1.28.1] - 2026-08-09
 
 ### Fixed
