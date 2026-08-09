@@ -22,6 +22,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   This is the first way to correct a game's moves without deleting and
   re-importing (which would have minted a new game row and orphaned the old one).
 
+---
+
+## [1.31.0] - 2026-08-09
+
 Internal review — concurrency-core batch (the last cluster from the v1.29.0
 review). These prevent two pipeline tasks from running Stockfish concurrently
 against the same database.
