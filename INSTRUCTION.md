@@ -156,7 +156,8 @@ players:
 
 coaching:
   default_provider: openai                  # ← pick OpenAI (ChatGPT) as default
-  openai_model: gpt-5.5-pro-2026-04-23      # recommended reasoning model
+  openai_model: gpt-5.6-sol                 # recommended reasoning model (v1.27.3)
+  reasoning_effort: medium                  # low | medium | high | xhigh | max (v1.27.0)
   coaching_history_count: 5                 # how many recent games the coach "remembers"
   coaching_trajectory_enabled: true         # v1.8.0 — let the coach see player's 30-day trends
 ```
