@@ -1,6 +1,6 @@
 # Arrakis Engine — Architecture
 
-*Last updated: 2026-08-28 — corresponds to v1.32.1*
+*Last updated: 2026-08-28 — corresponds to v1.32.2*
 
 This document describes the technical architecture of Arrakis Engine: how the pieces fit together, what runs where, and the design decisions behind them. It is aimed at contributors and developers reading the codebase. For end-user / setup docs, see [README.md](../README.md). For changelog, see [CHANGELOG.md](../CHANGELOG.md).
 
@@ -114,6 +114,7 @@ The backend is intentionally dependency-light — `http.server` is enough for a 
 ### `coach.py` + `llm_providers.py` — LLM coaching layer
 - `llm_providers.py` is the unified abstraction for **8 providers**: Anthropic, OpenAI, Google, xAI, Mistral, DeepSeek, Qwen, and Ollama. Each provider is registered with its SDK type, default model, API key env var, and request shape. Current default reasoning models (v1.27.3): Claude Opus 5 (`claude-opus-5`), GPT-5.6 Sol (`gpt-5.6-sol`), Gemini 3.5 Flash (`gemini-3.5-flash`), Grok 4.5 (`grok-4.5`), Mistral Medium (`mistral-medium-latest`), DeepSeek V4 Pro (`deepseek-v4-pro`), Qwen 3.7 Max (`qwen3.7-max`), Ollama (`deepseek-r1:8b`).
 - **Configurable reasoning effort** (v1.27.0): a single `coaching.reasoning_effort` setting (`low` / `medium` / `high` / `xhigh` / `max`, default `medium` since v1.27.2) is clamped per-provider by `_effort_for(...)` and applied where the SDK exposes a granular knob — Claude (`output_config.effort`), ChatGPT (`reasoning.effort`), Mistral (`reasoning_effort`, capped at `high`). The other providers reason by default and ignore the setting.
+- **Failure reasons are persisted** (v1.32.2). The pipeline recorded only `coaching_status='error'`; the exception text went to the console and was lost on restart, so an intermittent failure could not be diagnosed after the fact — you could see *that* a game failed twice, never *why*. `_mark_game_error(game_id, db_path, error_msg)` now writes `games.coaching_error` + `coaching_error_at` (clamped to `MAX_ERROR_LEN`=500), the JSON-parse path records `"Invalid JSON from <model>: …"`, and a successful coach clears both so a stale message can't linger. `GET /api/status` exposes `last_coaching_error`; the game detail page renders it. Same principle as the harvester's honest `partial` status (v1.30.0): **a failure that doesn't record why is a failure you debug twice.**
 - **Explicit output budgets + truncation detection** (v1.32.1). Reasoning models spend output budget on thinking *before* emitting the answer, so a long coaching prompt can exhaust the cap mid-JSON. Claude has always sent `max_tokens: 16000`; the OpenAI Responses call sent **none** and inherited the API default — the asymmetry that made ChatGPT fail intermittently on long games while Claude did not. `_call_openai_responses` now sends `max_output_tokens = OPENAI_MAX_OUTPUT_TOKENS` (16000, matching Claude) **and inspects `response.status`**: an `incomplete` response still populates `output_text` with *partial* text, so returning it made `json.loads` fail downstream and `coach_game` mark the game permanently `error`. It instead raises `TruncatedResponseError` (naming `incomplete_details.reason`), and `coach_pending` classifies that as **retryable** — a short backoff like a rate limit — via `_is_truncated_response_error`, rather than the "don't retry" branch. The lesson encoded here: a resource limit must not reach the parser disguised as a malformed reply.
 - `coach.py` builds the prompt from Stockfish data + recent coaching history + the player's measured 30-day trajectory (v1.8.0), sends it through the provider abstraction, and stores the structured output in `game_coaching`.
 - **Reasoning models are required** — as a project convention, not a runtime gate. `resolve_model` / `call_provider` accept any model string; the requirement is upheld by the curated per-provider defaults and documentation, not an allowlist. Non-reasoning models produce shallow, generic coaching that misses tactics. See [`ROADMAP.md`](../ROADMAP.md) (root, not the gitignored one) for the full rationale.
@@ -286,7 +287,7 @@ Single-file SQLite. Schema migrations run via `init_db()` at startup — column 
 | Table | Key fields |
 |---|---|
 | `players` | username (chess.com handle), **slug** (v1.16.1 — URL/API/CLI id, partial UNIQUE index), display_name, age, rating, fide_id, fide_rating (+ fide_rating_classical/rapid/blitz v1.26.0), lichess_username, is_active |
-| `games` | player_id, game_url, pgn, player_color, player_rating, opponent_rating, result, time_control, time_class, platform, acpl, opponent_username, analysis_status, coaching_status, **coaching_attempts** (v1.28.0), **analysis_attempts** (v1.29.0 — consecutive analysis failures; bounds automatic retry), date_played |
+| `games` | player_id, game_url, pgn, player_color, player_rating, opponent_rating, result, time_control, time_class, platform, acpl, opponent_username, analysis_status, coaching_status, **coaching_attempts** (v1.28.0), **analysis_attempts** (v1.29.0 — consecutive analysis failures; bounds automatic retry), **coaching_error** / **coaching_error_at** (v1.32.2 — why the last coaching attempt failed + when; cleared on success), date_played |
 | `move_analysis` | game_id, move_number, side, move_played, best_move, eval_before_cp, eval_after_cp, swing_cp, win_prob_before, win_prob_after, classification, pv_line, **clock_seconds**, **motifs_json** (v1.14.0 — `{played, best, missed}`, NULL on non-critical moves) |
 | `game_coaching` | game_id, provider, narrative, key_lesson, practical_focus, coach_notes, player_feedback, critical_moments_json, opening_analysis_json, **coaching_meta_json** (v1.7.0; trajectory_* v1.8.0; motif_top_missed / motif_top_missed_phase v1.15.0/v1.16.0) |
 | `player_patterns` | player_id, period_start, period_end, stats_json (includes **motif_summary** v1.15.0 with per-phase splits v1.16.0), trend_summary, recent_form_review (legacy, superseded by journal_entries), updated_at |
@@ -372,7 +373,7 @@ The `ARRAKIS_` prefix avoids collisions with other tools that use the unprefixed
 
 ## 7. Testing
 
-**~1019 tests total** — 784 backend (pytest) + 235 frontend (Vitest). Counts as of v1.32.1; see CHANGELOG for per-release deltas. Backend integration (`-m integration`, Stockfish) and live (`-m live`, LLM key) tiers are excluded by default.
+**~1023 tests total** — 788 backend (pytest) + 235 frontend (Vitest). Counts as of v1.32.2; see CHANGELOG for per-release deltas. Backend integration (`-m integration`, Stockfish) and live (`-m live`, LLM key) tiers are excluded by default.
 
 ### Backend (`tests/`)
 

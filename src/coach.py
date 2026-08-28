@@ -1088,8 +1088,10 @@ def coach_game(game_id: int, provider: str | None = "claude",
             # v1.28.0: count the attempt here too — same rule as
             # _mark_game_error, which we can't call with this conn open.
             "UPDATE games SET coaching_status = 'error', "
-            "coaching_attempts = coaching_attempts + 1 WHERE id = ?",
-            (game_id,),
+            "coaching_attempts = coaching_attempts + 1, "
+            "coaching_error = ?, coaching_error_at = ? WHERE id = ?",
+            (_truncate_error(f"Invalid JSON from {used_model}: {e}"),
+             datetime.now().isoformat(timespec="seconds"), game_id),
         )
         conn.commit()
         conn.close()
@@ -1162,7 +1164,9 @@ def coach_game(game_id: int, provider: str | None = "claude",
     conn.execute(
         # v1.28.0: clear the failure counter — the cap counts CONSECUTIVE
         # failures, so a game that eventually succeeds starts clean.
-        "UPDATE games SET coaching_status = 'complete', coaching_attempts = 0 "
+        # v1.32.2: also clear the recorded failure reason.
+        "UPDATE games SET coaching_status = 'complete', coaching_attempts = 0, "
+        "coaching_error = NULL, coaching_error_at = NULL "
         "WHERE id = ?",
         (game_id,),
     )
@@ -1177,6 +1181,17 @@ def _is_rate_limit_error(e: Exception) -> bool:
     """Check if an exception is a rate limit (429) error."""
     msg = str(e).lower()
     return "429" in msg or "rate_limit" in msg or "rate limit" in msg
+
+
+MAX_ERROR_LEN = 500
+
+
+def _truncate_error(msg: str | None) -> str | None:
+    """Clamp a persisted error message to a sane length."""
+    if not msg:
+        return None
+    msg = str(msg).strip()
+    return msg if len(msg) <= MAX_ERROR_LEN else msg[:MAX_ERROR_LEN - 1] + "\u2026"
 
 
 def _is_auth_error(e: Exception) -> bool:
@@ -1315,6 +1330,7 @@ def coach_pending(provider: str = "claude", model: str | None = None,
         # ── Attempt coaching with retries ──
         success = False
         no_coaching_needed = False
+        error_msg = None          # v1.32.2: last failure reason, persisted below
         for attempt in range(1, max_retries_per_game + 1):
             try:
                 outcome = coach_game(game_id, provider=provider, model=model,
@@ -1398,7 +1414,7 @@ def coach_pending(provider: str = "claude", model: str | None = None,
                     result["aborted"] = True
                     result["abort_reason"] = f"Authentication error: {error_msg}"
                     logger.error("Auth error — aborting batch: %s", error_msg)
-                    _mark_game_error(game_id, db_path)
+                    _mark_game_error(game_id, db_path, error_msg)
                     return result
 
                 else:
@@ -1410,7 +1426,8 @@ def coach_pending(provider: str = "claude", model: str | None = None,
         if not success:
             result["errors"] += 1
             consecutive_failures += 1
-            _mark_game_error(game_id, db_path)
+            # v1.32.2: `error_msg` holds the last exception from the retry loop.
+            _mark_game_error(game_id, db_path, error_msg)
 
             # ── Consecutive failure circuit breaker ──
             if consecutive_failures >= max_consecutive_failures:
@@ -1460,19 +1477,28 @@ def coach_pending(provider: str = "claude", model: str | None = None,
     return result
 
 
-def _mark_game_error(game_id: int, db_path: str | None):
-    """Mark a game's coaching as failed and count the attempt.
+def _mark_game_error(game_id: int, db_path: str | None,
+                     error_msg: str | None = None):
+    """Mark a game's coaching as failed, count the attempt, and record WHY.
 
     v1.28.0: the increment is what bounds automatic retries — once
     `coaching_attempts` reaches `MAX_COACHING_ATTEMPTS`, `coach_pending`
     stops picking the game up. Kept in one place so the two callers can't
     drift apart on the counter.
+
+    v1.32.2: `error_msg` is persisted to `games.coaching_error` (+ timestamp).
+    Previously only the status was stored and the exception text went to the
+    console, so an intermittent failure was undiagnosable after a restart —
+    you could see THAT a game failed twice but never why. Truncated to
+    MAX_ERROR_LEN so a giant provider payload can't bloat the row.
     """
     err_conn = init_db(db_path)
     err_conn.execute(
         "UPDATE games SET coaching_status = 'error', "
-        "coaching_attempts = coaching_attempts + 1 WHERE id = ?",
-        (game_id,),
+        "coaching_attempts = coaching_attempts + 1, "
+        "coaching_error = ?, coaching_error_at = ? WHERE id = ?",
+        (_truncate_error(error_msg), datetime.now().isoformat(timespec="seconds"),
+         game_id),
     )
     err_conn.commit()
     err_conn.close()

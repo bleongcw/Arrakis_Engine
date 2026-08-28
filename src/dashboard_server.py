@@ -1958,6 +1958,18 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                 (MAX_COACHING_ATTEMPTS,),
             ).fetchone()["c"]
 
+            # v1.32.2: most recent coaching failure reason (message + when).
+            err_row = conn.execute(
+                "SELECT id, coaching_error, coaching_error_at FROM games "
+                "WHERE coaching_error IS NOT NULL "
+                "ORDER BY coaching_error_at DESC LIMIT 1"
+            ).fetchone()
+            last_err = (
+                {"game_id": err_row["id"], "error": err_row["coaching_error"],
+                 "at": err_row["coaching_error_at"]}
+                if err_row else None
+            )
+
             # v1.29.0: same split for analysis failures — retryable vs exhausted.
             from src.analyzer import MAX_ANALYSIS_ATTEMPTS
             analysis_exhausted = conn.execute(
@@ -1980,6 +1992,10 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                 # v1.28.1: analysed but nothing to coach (abandoned games).
                 # A resolved state — never counted as pending or failed.
                 "coaching_skipped": coaching_map.get("skipped", 0),
+                # v1.32.2: the most recent recorded failure reason, so a user
+                # can see WHY coaching failed without digging through console
+                # logs that vanish on restart.
+                "last_coaching_error": last_err,
             }
         finally:
             conn.close()

@@ -49,6 +49,10 @@ export interface GameListItem {
   /** "skipped" (v1.28.1): analysed, but nothing to coach — e.g. abandoned
    *  before a move was played. Resolved, not failed. */
   coaching_status: "pending" | "complete" | "error" | "skipped";
+  /** v1.32.2: why the last coaching attempt failed (+ when). Persisted so an
+   *  intermittent failure is diagnosable after a restart. Null when healthy. */
+  coaching_error?: string | null;
+  coaching_error_at?: string | null;
   platform: "chess.com" | "lichess" | "competition";
   username: string;
   display_name: string | null;

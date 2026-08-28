@@ -161,6 +161,9 @@ class TestMigrations:
         assert "coaching_attempts" in game_cols
         # v1.29.0: bounded analysis retry.
         assert "analysis_attempts" in game_cols
+        # v1.32.2: persisted coaching failure reason.
+        assert "coaching_error" in game_cols
+        assert "coaching_error_at" in game_cols
 
         # Check migrated columns on game_coaching
         coaching_cols = {r[1] for r in conn.execute("PRAGMA table_info(game_coaching)").fetchall()}
@@ -240,7 +243,9 @@ class TestMigrations:
                 platform        TEXT DEFAULT 'chess.com',
                 acpl            REAL,
                 coaching_attempts INTEGER NOT NULL DEFAULT 0,
-                analysis_attempts INTEGER NOT NULL DEFAULT 0
+                analysis_attempts INTEGER NOT NULL DEFAULT 0,
+                coaching_error    TEXT,
+                coaching_error_at TEXT
             );
             INSERT INTO games_legacy ({cols}) SELECT {cols} FROM games;
             DROP TABLE games;

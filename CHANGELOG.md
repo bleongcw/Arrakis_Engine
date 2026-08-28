@@ -4,6 +4,28 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.32.2] - 2026-08-28
+
+### Added
+- **Coaching failures now record WHY.** The pipeline stored only
+  `coaching_status='error'` — the exception text went to the console and was
+  lost on restart, so an intermittent failure (the ChatGPT errors that prompted
+  this) could not be diagnosed after the fact: you could see *that* a game
+  failed twice, never *why*. New `games.coaching_error` + `coaching_error_at`
+  columns (idempotent migration) persist the message and timestamp:
+  - `_mark_game_error(game_id, db_path, error_msg)` writes the reason at both
+    batch failure sites; the JSON-parse failure path records
+    `"Invalid JSON from <model>: …"`.
+  - Messages are clamped to `MAX_ERROR_LEN` (500) so a large provider payload
+    can't bloat the row.
+  - A successful coach **clears** the stored error, so a stale message can't
+    linger on a healthy game.
+  - `GET /api/status` gains `last_coaching_error` (`{game_id, error, at}`), and
+    the game detail page shows a "Coaching failed" card with the message and
+    the time of the last attempt.
+
+---
+
 ## [1.32.1] - 2026-08-28
 
 ### Fixed

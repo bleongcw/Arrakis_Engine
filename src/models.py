@@ -202,6 +202,8 @@ def _migrate_coaching_status_allows_skipped(conn: sqlite3.Connection):
             CHECK (coaching_status IN ('pending', 'complete', 'error', 'skipped')),
         coaching_attempts INTEGER NOT NULL DEFAULT 0,
         analysis_attempts INTEGER NOT NULL DEFAULT 0,
+        coaching_error    TEXT,
+        coaching_error_at TEXT,
         opponent_username TEXT,
         platform        TEXT DEFAULT 'chess.com',
         acpl            REAL
@@ -317,6 +319,12 @@ def _migrate(conn: sqlite3.Connection):
         conn.execute(
             "ALTER TABLE games ADD COLUMN coaching_attempts INTEGER NOT NULL DEFAULT 0"
         )
+        conn.commit()
+
+    if "coaching_error" not in game_cols:
+        # v1.32.2: persist the coaching failure reason (message + timestamp).
+        conn.execute("ALTER TABLE games ADD COLUMN coaching_error TEXT")
+        conn.execute("ALTER TABLE games ADD COLUMN coaching_error_at TEXT")
         conn.commit()
 
     if "analysis_attempts" not in game_cols:
@@ -624,7 +632,13 @@ CREATE TABLE IF NOT EXISTS games (
     -- of a game stuck at analysis_status='error' (see
     -- analyzer.MAX_ANALYSIS_ATTEMPTS) — the analysis-side twin of the v1.28.0
     -- coaching retry. Reset to 0 on success / manual re-analyze.
-    analysis_attempts INTEGER NOT NULL DEFAULT 0
+    analysis_attempts INTEGER NOT NULL DEFAULT 0,
+    -- v1.32.2: WHY the last coaching attempt failed, and when. Before this the
+    -- pipeline recorded only coaching_status='error' — the exception text went
+    -- to the console and was lost on restart, making an intermittent failure
+    -- impossible to diagnose after the fact. Cleared on success.
+    coaching_error    TEXT,
+    coaching_error_at TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_games_player_id ON games(player_id);

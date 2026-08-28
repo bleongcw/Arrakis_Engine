@@ -1,6 +1,6 @@
 # Arrakis Engine Roadmap
 
-*Updated 2026-08-28 — current release v1.32.1*
+*Updated 2026-08-28 — current release v1.32.2*
 
 This is the public-facing roadmap. The full release history is in
 [CHANGELOG.md](CHANGELOG.md); architectural details are in
@@ -157,6 +157,14 @@ provider.
   "Evan Leong") matched nothing and silently defaulted to White, inverting the
   result and recording the player as their own opponent. Names now match as bags
   of words, and an unmatched name **fails the import instead of guessing** a side.
+
+### Diagnosable coaching failures (v1.32.2, 2026-08-28)
+- **Coaching failures now say why.** Previously a failed game recorded only
+  "error" — the reason went to the terminal and vanished on restart, so an
+  intermittent failure was impossible to chase down after the fact. The reason
+  and timestamp are now stored with the game, shown on its detail page, and
+  reported by the status API. Cleared automatically once the game coaches
+  successfully.
 
 ### ChatGPT coaching reliability (v1.32.1, 2026-08-28)
 - **Fixed intermittent ChatGPT coaching failures on longer games.** GPT-5.6 Sol

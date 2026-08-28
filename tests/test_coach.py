@@ -524,6 +524,86 @@ class TestAbandonedGameIsSkipped:
         assert res["errors"] == 0             # and emphatically not an error
 
 
+class TestCoachingErrorPersistence:
+    """v1.32.2: WHY a coaching attempt failed must be persisted.
+
+    Before this the pipeline stored only coaching_status='error' — the
+    exception text went to the console and was lost on restart, so an
+    intermittent failure could not be diagnosed after the fact."""
+
+    def _seed(self, db_path, status="pending"):
+        conn = init_db(db_path)
+        pid = ensure_player(conn, "p", display_name="P", age=9, rating=1000)
+        cur = conn.execute(
+            """INSERT INTO games
+            (player_id, game_url, pgn, player_color, result,
+             analysis_status, coaching_status)
+            VALUES (?, 'u1', '1. e4 *', 'white', 'win', 'complete', ?)""",
+            (pid, status),
+        )
+        gid = cur.lastrowid
+        conn.commit()
+        conn.close()
+        return gid
+
+    def _row(self, db_path, gid):
+        conn = init_db(db_path)
+        r = conn.execute(
+            "SELECT coaching_status, coaching_attempts, coaching_error, "
+            "coaching_error_at FROM games WHERE id = ?", (gid,)
+        ).fetchone()
+        conn.close()
+        return r
+
+    def test_mark_game_error_records_reason_and_time(self, db_path):
+        from src.coach import _mark_game_error
+        gid = self._seed(db_path)
+        _mark_game_error(gid, db_path, "RateLimitError: 429 tokens per min")
+
+        r = self._row(db_path, gid)
+        assert r["coaching_status"] == "error"
+        assert r["coaching_attempts"] == 1
+        assert "429" in r["coaching_error"]
+        assert r["coaching_error_at"]          # timestamp recorded
+
+    def test_long_error_is_truncated(self, db_path):
+        from src.coach import _mark_game_error, MAX_ERROR_LEN
+        gid = self._seed(db_path)
+        _mark_game_error(gid, db_path, "x" * 5000)
+        stored = self._row(db_path, gid)["coaching_error"]
+        assert len(stored) <= MAX_ERROR_LEN
+
+    @patch("src.coach.coach_game")
+    def test_batch_failure_persists_the_exception_text(self, mock_coach, db_path):
+        gid = self._seed(db_path)
+        mock_coach.side_effect = RuntimeError("provider exploded: teapot")
+        coach_pending(provider="openai", db_path=db_path)
+
+        r = self._row(db_path, gid)
+        assert r["coaching_status"] == "error"
+        assert "teapot" in r["coaching_error"]
+
+    @patch("src.coach.call_provider")
+    def test_success_clears_a_previous_error(self, mock_provider, db_path,
+                                             game_with_analysis):
+        # A game that failed before, then succeeds, must not keep a stale
+        # error message hanging off the row.
+        from src.coach import _mark_game_error
+        _mark_game_error(game_with_analysis, db_path, "earlier failure")
+        assert self._row(db_path, game_with_analysis)["coaching_error"]
+
+        mock_provider.return_value = json.dumps({
+            "narrative": "n", "key_lesson": "k", "practical_focus": "p",
+            "critical_moments": [], "coach_notes": "c",
+        })
+        coach_game(game_with_analysis, provider="claude", db_path=db_path)
+
+        r = self._row(db_path, game_with_analysis)
+        assert r["coaching_status"] == "complete"
+        assert r["coaching_error"] is None
+        assert r["coaching_error_at"] is None
+
+
 class TestTruncatedResponseRetry:
     """v1.32.1: a truncated (output-capped) reply is transient — retry it,
     don't burn the game's budget marking it errored.

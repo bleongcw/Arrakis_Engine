@@ -431,6 +431,26 @@ function GameDetailView({
           </CardContent>
         </Card>
       )}
+      {game.coaching_status === "error" && game.coaching_error && (
+        <Card className="mb-4 border-red-500/50 bg-red-500/5">
+          <CardContent className="py-4">
+            <p className="text-sm font-medium text-red-600 dark:text-red-400">
+              Coaching failed
+            </p>
+            <p className="text-xs text-muted-foreground mt-1 font-mono break-words">
+              {game.coaching_error}
+            </p>
+            {game.coaching_error_at && (
+              <p className="text-xs text-muted-foreground mt-1">
+                Last attempt: {game.coaching_error_at.replace("T", " ")}
+              </p>
+            )}
+            <p className="text-xs text-muted-foreground mt-2">
+              Use a Coach Game button above to retry.
+            </p>
+          </CardContent>
+        </Card>
+      )}
       {game.analysis_status === "pending" && (
         <Card className="mb-4 border-blue-500/50 bg-blue-500/5">
           <CardContent className="py-4 text-center">
