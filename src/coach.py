@@ -1185,6 +1185,19 @@ def _is_auth_error(e: Exception) -> bool:
     return "401" in msg or "403" in msg or "invalid api key" in msg or "not set" in msg
 
 
+def _is_truncated_response_error(e: Exception) -> bool:
+    """v1.32.1: the model hit its output cap before finishing the answer.
+
+    Transient and worth retrying — a reasoning model that burned its budget on
+    thinking this time may well fit the answer next time. Before this, the
+    truncated text reached json.loads and surfaced as a JSONDecodeError, which
+    coach_game marks as a hard 'error' — spending the game's retry budget on a
+    condition that isn't a permanent failure.
+    """
+    from src.llm_providers import TruncatedResponseError
+    return isinstance(e, TruncatedResponseError)
+
+
 def coach_pending(provider: str = "claude", model: str | None = None,
                   db_path: str | None = None, limit: int = 0,
                   config: dict | None = None,
@@ -1346,6 +1359,27 @@ def coach_pending(provider: str = "claude", model: str | None = None,
                     # Increase delay for all subsequent games in this batch
                     current_delay = min(current_delay + 10, 60)
                     # Interruptible backoff sleep
+                    if cancel_event:
+                        cancel_event.wait(backoff)
+                        if cancel_event.is_set():
+                            result["skipped"] = total_pending - i
+                            result["aborted"] = True
+                            result["abort_reason"] = "Cancelled by user"
+                            return result
+                    else:
+                        time.sleep(backoff)
+                    continue  # Retry
+
+                elif _is_truncated_response_error(e):
+                    # ── Truncated answer: retry with a short backoff ──
+                    # v1.32.1: not a permanent failure, so don't fall through to
+                    # the "don't retry" branch that marks the game errored.
+                    backoff = min(5 * attempt, 20)
+                    logger.warning(
+                        "Truncated response on game %d (attempt %d/%d): %s. "
+                        "Retrying in %ds...",
+                        game_id, attempt, max_retries_per_game, error_msg, backoff,
+                    )
                     if cancel_event:
                         cancel_event.wait(backoff)
                         if cancel_event.is_set():

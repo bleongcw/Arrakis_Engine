@@ -24,6 +24,26 @@ load_dotenv(override=True)
 
 logger = logging.getLogger(__name__)
 
+
+class TruncatedResponseError(RuntimeError):
+    """The provider stopped before finishing its answer (hit an output cap).
+
+    v1.32.1: raised instead of silently returning a half-written response.
+    Reasoning models spend output budget on thinking before emitting the
+    answer, so a long coaching prompt could exhaust the cap mid-JSON. The
+    OpenAI Responses API reports this as `status='incomplete'` with an
+    `incomplete_details.reason`, but `output_text` still contains the partial
+    text — which parsed as invalid JSON downstream and was misdiagnosed as a
+    permanent "bad model reply" instead of a retryable resource limit.
+    """
+
+
+# v1.32.1: explicit output budget for the OpenAI Responses API. Without it the
+# call inherited the API default, and a long game's coaching object could be
+# truncated mid-JSON. Matches the Claude path's `max_tokens` so both providers
+# have comparable room for reasoning + a full structured answer.
+OPENAI_MAX_OUTPUT_TOKENS = 16000
+
 # ---------------------------------------------------------------------------
 # Provider Registry
 # ---------------------------------------------------------------------------
@@ -234,11 +254,26 @@ def _call_openai_responses(prompt: str, model: str, api_key: str,
         "model": model,
         "instructions": "You are an expert chess coach. Respond only with valid JSON.",
         "input": prompt,
+        # v1.32.1: without an explicit cap the API default applied, and a long
+        # game's coaching JSON could be cut off mid-string.
+        "max_output_tokens": OPENAI_MAX_OUTPUT_TOKENS,
     }
     if effort:
         kwargs["reasoning"] = {"effort": effort}
 
     response = client.responses.create(**kwargs)
+
+    # v1.32.1: a truncated response still populates `output_text` with partial
+    # text. Returning it made json.loads fail downstream, which coach_game
+    # treated as a permanent parse error. Detect it here and raise something
+    # the caller can recognise as retryable.
+    if getattr(response, "status", None) == "incomplete":
+        details = getattr(response, "incomplete_details", None)
+        reason = getattr(details, "reason", None) or "unknown"
+        raise TruncatedResponseError(
+            f"{model} response incomplete (reason: {reason}); "
+            f"max_output_tokens={OPENAI_MAX_OUTPUT_TOKENS}"
+        )
 
     return response.output_text
 

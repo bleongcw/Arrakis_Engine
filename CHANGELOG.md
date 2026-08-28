@@ -4,6 +4,41 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.32.1] - 2026-08-28
+
+### Fixed
+- **ChatGPT coaching failed intermittently on longer games.** GPT-5.6 Sol is a
+  reasoning model: it spends output budget on thinking *before* emitting the
+  answer. `_call_openai_responses` set **no** `max_output_tokens` (the Claude
+  path has always set `max_tokens: 16000`), so a long coaching prompt could
+  exhaust the API's default cap mid-JSON. The API reports this as
+  `status='incomplete'` with `incomplete_details.reason='max_output_tokens'` —
+  but `output_text` still contains the **partial** text, and the call returned
+  it as though it were a complete answer. `json.loads` then failed, and
+  `coach_game` treats a `JSONDecodeError` as a hard failure: it marked the game
+  `error` and consumed a retry attempt. Claude was unaffected purely because of
+  its explicit token budget.
+
+  Three changes:
+  - `max_output_tokens` is now set explicitly (`OPENAI_MAX_OUTPUT_TOKENS =
+    16000`), matching the Claude path's budget.
+  - `_call_openai_responses` checks `response.status` and raises the new
+    `TruncatedResponseError` (naming the reason) instead of silently returning
+    a half-written answer.
+  - `coach_pending` treats truncation as **retryable** (short backoff, like a
+    rate limit) rather than falling through to the "don't retry" branch that
+    marks the game errored — a model that overran its budget once may well fit
+    the answer on the next attempt.
+
+- **Three harvester tests had date-rotted.** `TestHarvestPlayer` hardcoded a
+  `2026/03` archive URL, which fell outside the rolling 6-month lookback as real
+  time advanced (the cutoff carries a time-of-day, so a month-boundary archive
+  at 00:00 lands just outside). They now build the URL relative to the current
+  month — the same fix v1.30.0 applied to `test_filters_old_archives`, extended
+  to its siblings.
+
+---
+
 ## [1.32.0] - 2026-08-09
 
 ### Added

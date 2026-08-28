@@ -5,7 +5,7 @@ Local Python app that pulls games from Chess.com and Lichess, runs Stockfish ana
 and uses reasoning LLMs to generate age-appropriate coaching insights with
 pattern tracking over time. Inspired by Eleanor, Evan, and Estella.
 
-Current release: **v1.32.0** (2026-08-09). See `CHANGELOG.md` for full history.
+Current release: **v1.32.1** (2026-08-28). See `CHANGELOG.md` for full history.
 
 ## Architecture
 - Python 3.11+, SQLite (WAL mode), local Stockfish on Apple Silicon
@@ -61,6 +61,13 @@ Current release: **v1.32.0** (2026-08-09). See `CHANGELOG.md` for full history.
   ChatGPT (`reasoning.effort`), Mistral (`reasoning_effort`, capped at high);
   clamped per provider by `_effort_for` in `src/llm_providers.py`
 - Coaching history depth (v1.3.0+): default 5 recent games, configurable 1-20
+- Output budget (v1.32.1): both reasoning providers get an explicit cap —
+  Claude `max_tokens: 16000`, OpenAI `max_output_tokens:
+  OPENAI_MAX_OUTPUT_TOKENS` (16000). OpenAI previously had **none**, so a long
+  prompt could exhaust the API default mid-JSON; `_call_openai_responses` now
+  checks `response.status` and raises `TruncatedResponseError` instead of
+  returning partial text, and `coach_pending` treats that as **retryable**
+  (like a rate limit) rather than a hard error
 - Coaching statuses: `pending` | `complete` | `error` | `skipped` (v1.28.1 —
   analysed but nothing to coach, e.g. a game abandoned before a move; detected
   as zero `move_analysis` rows, marked without an LLM call, never re-selected)
@@ -191,7 +198,7 @@ ArrakisEngine/
 │   └── screenshots/           # Architecture diagram + UI screenshots
 ├── data/
 │   └── chess_coach.db         # SQLite database (auto-created, gitignored)
-├── tests/                     # Backend pytest suite (779 tests across 3 tiers)
+├── tests/                     # Backend pytest suite (784 tests across 3 tiers)
 └── reports/                   # Generated coach reports (gitignored)
 ```
 
@@ -332,7 +339,7 @@ harvest + report).
 
 ## Testing
 
-**~1014 tests total** — 779 backend (pytest, three tiers via `pyproject.toml`
+**~1019 tests total** — 784 backend (pytest, three tiers via `pyproject.toml`
 markers) + 235 frontend (Vitest). Integration (`-m integration`, needs Stockfish)
 and live (`-m live`, needs an LLM key) tiers are excluded by default.
 

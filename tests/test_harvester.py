@@ -230,13 +230,25 @@ class TestLichessExtractDate:
 
 # ── Integration Tests ────────────────────────────────────────────────
 
+def _recent_archive_url(user="testplayer1"):
+    """A chess.com archive URL for the CURRENT month.
+
+    v1.32.1: these fixtures used to hardcode `2026/03`, which silently rotted
+    out of the default 6-month lookback as real time advanced (the cutoff
+    carries a time-of-day, so a month-boundary archive at 00:00 falls just
+    outside). Build it relative to now so the tests can't expire.
+    """
+    from datetime import datetime
+    now = datetime.now()
+    return (f"https://api.chess.com/pub/player/{user}/games/"
+            f"{now.year}/{now.month:02d}")
+
+
 class TestHarvestPlayer:
     @patch("src.harvester._chesscom_get_archive_urls")
     @patch("src.harvester._chesscom_fetch_archive")
     def test_stores_chesscom_games(self, mock_fetch, mock_archives, db_path):
-        mock_archives.return_value = [
-            "https://api.chess.com/pub/player/testplayer1/games/2026/03"
-        ]
+        mock_archives.return_value = [_recent_archive_url()]
         mock_fetch.return_value = [SAMPLE_CHESSCOM_GAME]
 
         stats = harvest_player("testplayer1", db_path=db_path, months=6)
@@ -253,9 +265,7 @@ class TestHarvestPlayer:
     @patch("src.harvester._chesscom_get_archive_urls")
     @patch("src.harvester._chesscom_fetch_archive")
     def test_deduplicates(self, mock_fetch, mock_archives, db_path):
-        mock_archives.return_value = [
-            "https://api.chess.com/pub/player/testplayer1/games/2026/03"
-        ]
+        mock_archives.return_value = [_recent_archive_url()]
         mock_fetch.return_value = [SAMPLE_CHESSCOM_GAME]
 
         harvest_player("testplayer1", db_path=db_path, months=6)
@@ -266,9 +276,7 @@ class TestHarvestPlayer:
     @patch("src.harvester._chesscom_get_archive_urls")
     @patch("src.harvester._chesscom_fetch_archive")
     def test_platform_filter_chesscom_only(self, mock_fetch, mock_archives, db_path):
-        mock_archives.return_value = [
-            "https://api.chess.com/pub/player/testplayer1/games/2026/03"
-        ]
+        mock_archives.return_value = [_recent_archive_url()]
         mock_fetch.return_value = [SAMPLE_CHESSCOM_GAME]
 
         stats = harvest_player(

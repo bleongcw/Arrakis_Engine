@@ -524,6 +524,51 @@ class TestAbandonedGameIsSkipped:
         assert res["errors"] == 0             # and emphatically not an error
 
 
+class TestTruncatedResponseRetry:
+    """v1.32.1: a truncated (output-capped) reply is transient — retry it,
+    don't burn the game's budget marking it errored.
+
+    coach_pending only ever retried rate-limit errors; everything else broke
+    out immediately and got marked 'error'. A reasoning model that ran out of
+    output budget mid-JSON therefore looked like a permanent bad reply."""
+
+    def test_classifier_recognises_truncation_only(self):
+        from src.coach import _is_truncated_response_error
+        from src.llm_providers import TruncatedResponseError
+        assert _is_truncated_response_error(
+            TruncatedResponseError("incomplete (reason: max_output_tokens)")
+        ) is True
+        assert _is_truncated_response_error(ValueError("something else")) is False
+
+    @patch("src.coach.time.sleep")          # don't actually back off
+    @patch("src.coach.coach_game")
+    def test_truncation_is_retried_then_succeeds(self, mock_coach, _sleep, db_path):
+        from src.llm_providers import TruncatedResponseError
+        conn = init_db(db_path)
+        pid = ensure_player(conn, "p", display_name="P", age=9, rating=1000)
+        conn.execute(
+            """INSERT INTO games
+            (player_id, game_url, pgn, player_color, result,
+             analysis_status, coaching_status)
+            VALUES (?, 'u1', '1. e4 *', 'white', 'win', 'complete', 'pending')""",
+            (pid,),
+        )
+        conn.commit()
+        conn.close()
+
+        # Truncated once, then a clean answer.
+        mock_coach.side_effect = [
+            TruncatedResponseError("gpt-5.6-sol response incomplete "
+                                   "(reason: max_output_tokens)"),
+            {"narrative": "ok"},
+        ]
+        res = coach_pending(provider="openai", db_path=db_path)
+
+        assert mock_coach.call_count == 2      # retried rather than giving up
+        assert res["coached"] == 1
+        assert res["errors"] == 0
+
+
 class TestCoachPendingPlayerFilter:
     """v1.28.0 — `--player` is the SLUG (v1.16.4). coach_pending resolved it
     against `username`, so a slug matched nothing and the filter silently

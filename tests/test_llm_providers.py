@@ -286,6 +286,47 @@ class TestReasoningEffort:
             _call_openai_responses("prompt", "gpt-5.6-sol", "key", effort="xhigh")
         assert client.responses.create.call_args.kwargs["reasoning"] == {"effort": "xhigh"}
 
+    # ── v1.32.1: truncated-response handling ─────────────────────────
+    #
+    # Reasoning models spend output budget on thinking before answering, so a
+    # long coaching prompt could exhaust the (previously unset) output cap and
+    # return PARTIAL JSON in `output_text`. That parsed as invalid JSON
+    # downstream and was misdiagnosed as a permanent bad reply.
+
+    def test_openai_responses_sets_max_output_tokens(self):
+        from src.llm_providers import OPENAI_MAX_OUTPUT_TOKENS
+        client = MagicMock()
+        client.responses.create.return_value.output_text = "ok"
+        client.responses.create.return_value.status = "completed"
+        with patch("openai.OpenAI", return_value=client):
+            _call_openai_responses("prompt", "gpt-5.6-sol", "key")
+        kwargs = client.responses.create.call_args.kwargs
+        assert kwargs["max_output_tokens"] == OPENAI_MAX_OUTPUT_TOKENS
+
+    def test_openai_incomplete_response_raises_with_reason(self):
+        from src.llm_providers import TruncatedResponseError
+        client = MagicMock()
+        resp = client.responses.create.return_value
+        resp.status = "incomplete"
+        resp.incomplete_details.reason = "max_output_tokens"
+        # A truncated response still carries partial text — the bug was
+        # returning it as if it were a complete answer.
+        resp.output_text = '{"narrative": "half a sen'
+
+        with patch("openai.OpenAI", return_value=client):
+            with pytest.raises(TruncatedResponseError) as exc:
+                _call_openai_responses("prompt", "gpt-5.6-sol", "key")
+        assert "max_output_tokens" in str(exc.value)
+
+    def test_openai_completed_response_returns_text(self):
+        client = MagicMock()
+        resp = client.responses.create.return_value
+        resp.status = "completed"
+        resp.output_text = '{"ok": true}'
+        with patch("openai.OpenAI", return_value=client):
+            out = _call_openai_responses("prompt", "gpt-5.6-sol", "key")
+        assert out == '{"ok": true}'
+
     def test_call_provider_claude_applies_config_effort(self):
         """End-to-end dispatch: coaching_config.reasoning_effort reaches the call."""
         client = self._fake_anthropic()
