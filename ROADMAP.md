@@ -158,6 +158,15 @@ provider.
   result and recording the player as their own opponent. Names now match as bags
   of words, and an unmatched name **fails the import instead of guessing** a side.
 
+### ChatGPT coaching reliability (v1.32.1, 2026-08-28)
+- **Fixed intermittent ChatGPT coaching failures on longer games.** GPT-5.6 Sol
+  spends output budget on reasoning before it answers, and the OpenAI call set
+  no output cap (Claude's always did) — so a long game's coaching JSON could be
+  cut off mid-sentence. The truncated text was then treated as a malformed
+  reply and the game was marked failed. ChatGPT now gets the same 16k output
+  budget as Claude, a cut-off answer is detected explicitly instead of being
+  half-parsed, and it's **retried** rather than counted as a permanent error.
+
 ### Fix a game's moves (v1.32.0, 2026-08-09)
 - **Replace PGN** — an "Edit moves" control on the game detail page corrects a
   scoresheet transcription error: paste the fixed PGN, it re-validates (pointing
