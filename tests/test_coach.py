@@ -111,6 +111,44 @@ class TestParseLlmResponse:
         with pytest.raises(json.JSONDecodeError):
             _parse_llm_response("not json at all")
 
+    # ── v1.32.3: conservative repair of near-valid JSON ──
+    # Both cases below are real failures observed in production (games 1413
+    # and 1409) after v1.32.2 made the reason visible.
+
+    def test_repairs_trailing_comma(self):
+        """Game 1413: 'Illegal trailing comma before end of object'."""
+        result = _parse_llm_response('{"narrative": "x", "key_lesson": "y",}')
+        assert result["key_lesson"] == "y"
+
+    def test_repairs_trailing_comma_in_array(self):
+        result = _parse_llm_response('{"critical_moments": [1, 2,], "a": "b"}')
+        assert result["critical_moments"] == [1, 2]
+
+    def test_strips_prose_around_object(self):
+        result = _parse_llm_response(
+            'Here is the analysis:\n{"narrative": "x"}\nHope that helps!'
+        )
+        assert result["narrative"] == "x"
+
+    def test_tolerates_literal_newlines_in_strings(self):
+        """`player_feedback` is a multi-section markdown document — models
+        sometimes emit its newlines raw instead of escaping them."""
+        result = _parse_llm_response(
+            '{"player_feedback": "## Opening\nYou played well.\n\n## Endgame\nGood."}'
+        )
+        assert "## Endgame" in result["player_feedback"]
+
+    def test_missing_comma_escalates_rather_than_guessing(self):
+        """Game 1409: a *missing* comma has no single correct repair, so the
+        parser must refuse rather than invent one — the caller re-asks."""
+        from src.coach import MalformedResponseError
+        with pytest.raises(MalformedResponseError) as exc:
+            _parse_llm_response('{"narrative": "x"\n "key_lesson": "y"}')
+        # Stays a JSONDecodeError so existing handlers keep working.
+        assert isinstance(exc.value, json.JSONDecodeError)
+        # …and quotes the offending text so the UI card is self-diagnosing.
+        assert "key_lesson" in exc.value.excerpt
+
 
 class TestCoachGame:
     def test_raises_on_missing_game(self, db_path):
@@ -647,6 +685,88 @@ class TestTruncatedResponseRetry:
         assert mock_coach.call_count == 2      # retried rather than giving up
         assert res["coached"] == 1
         assert res["errors"] == 0
+
+
+class TestMalformedJsonRetry:
+    """v1.32.3: malformed JSON is transient for the same reason truncation is —
+    LLM output is non-deterministic, so a model that dropped a comma this time
+    will very likely emit clean JSON on a re-ask.
+
+    Before this, a JSONDecodeError fell into coach_pending's "don't retry"
+    branch and stranded the game at 'error'. That is exactly how games 1409
+    and 1413 failed once v1.32.2 made the reason visible."""
+
+    def test_classifier_recognises_malformed_json_only(self):
+        from src.coach import _is_malformed_response_error
+        assert _is_malformed_response_error(
+            json.JSONDecodeError("Expecting ',' delimiter", '{"a": 1}', 4)
+        ) is True
+        assert _is_malformed_response_error(ValueError("something else")) is False
+
+    @patch("src.coach.time.sleep")          # don't actually back off
+    @patch("src.coach.coach_game")
+    def test_malformed_json_is_retried_then_succeeds(self, mock_coach, _sleep,
+                                                     db_path):
+        conn = init_db(db_path)
+        pid = ensure_player(conn, "p", display_name="P", age=9, rating=1000)
+        conn.execute(
+            """INSERT INTO games
+            (player_id, game_url, pgn, player_color, result,
+             analysis_status, coaching_status)
+            VALUES (?, 'u1', '1. e4 *', 'white', 'win', 'complete', 'pending')""",
+            (pid,),
+        )
+        conn.commit()
+        conn.close()
+
+        # Mangled once, then a clean answer.
+        mock_coach.side_effect = [
+            json.JSONDecodeError("Expecting ',' delimiter", '{"a": 1 "b": 2}', 8),
+            {"narrative": "ok"},
+        ]
+        res = coach_pending(provider="claude", db_path=db_path)
+
+        assert mock_coach.call_count == 2      # retried rather than giving up
+        assert res["coached"] == 1
+        assert res["errors"] == 0
+
+    @patch("src.coach.time.sleep")
+    @patch("src.coach.coach_game")
+    def test_persisted_error_quotes_the_offending_text(self, mock_coach, _sleep,
+                                                       db_path):
+        """When every retry fails, the reason must name the bad text so the
+        game-detail card is diagnosable without re-running the game."""
+        conn = init_db(db_path)
+        pid = ensure_player(conn, "p", display_name="P", age=9, rating=1000)
+        conn.execute(
+            """INSERT INTO games
+            (player_id, game_url, pgn, player_color, result,
+             analysis_status, coaching_status)
+            VALUES (?, 'u2', '1. e4 *', 'white', 'win', 'complete', 'pending')""",
+            (pid,),
+        )
+        conn.commit()
+        conn.close()
+
+        from src.coach import MalformedResponseError
+        bad = '{"narrative": "x"\n "key_lesson": "y"}'
+        err = MalformedResponseError(
+            json.JSONDecodeError("Expecting ',' delimiter", bad, 18),
+            excerpt=bad,
+        )
+        mock_coach.side_effect = err
+
+        res = coach_pending(provider="claude", db_path=db_path)
+        assert res["errors"] == 1
+
+        conn = init_db(db_path)
+        row = conn.execute(
+            "SELECT coaching_status, coaching_error FROM games WHERE game_url = 'u2'"
+        ).fetchone()
+        conn.close()
+        assert row["coaching_status"] == "error"
+        assert "near:" in row["coaching_error"]
+        assert "key_lesson" in row["coaching_error"]
 
 
 class TestCoachPendingPlayerFilter:

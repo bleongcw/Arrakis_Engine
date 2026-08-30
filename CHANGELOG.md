@@ -4,6 +4,45 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.32.3] - 2026-08-30
+
+### Fixed
+- **Coaching failed when the model emitted *nearly* valid JSON.** With v1.32.2
+  recording failure reasons, two games surfaced the real cause — neither was
+  truncation (v1.32.1) nor rate limiting:
+  - game 1413: `Illegal trailing comma before end of object`
+  - game 1409: `Expecting ',' delimiter` — a **missing** comma between members
+
+  The coaching prompt asks the model to embed a five-section markdown document
+  inside the `player_feedback` string, which is the most fragile JSON construct
+  there is. `_parse_llm_response` only stripped code fences and `<think>` tags
+  before a bare `json.loads`, so a single stray comma discarded an otherwise
+  good multi-kilobyte response. Worse, `coach_pending` retried only rate limits
+  and truncation — a `JSONDecodeError` fell into the "don't retry" branch and
+  stranded the game at `error`, even though LLM output is non-deterministic and
+  a re-ask would very likely have succeeded. Three changes:
+  - **Conservative repair.** `_parse_llm_response` now drops prose the model
+    wrapped either side of the object, tolerates literal newlines/tabs inside
+    strings (`strict=False`), and removes trailing commas before a closing
+    brace/bracket. Only unambiguous repairs — a *missing* comma has no single
+    correct fix, so the parser refuses to guess.
+  - **Re-ask instead of giving up.** Anything still broken raises the new
+    `MalformedResponseError`, which `coach_pending` now retries with the same
+    short backoff as a truncated reply. It subclasses `json.JSONDecodeError`,
+    so existing handlers keep working unchanged.
+  - **Self-diagnosing errors.** The persisted `coaching_error` now quotes the
+    text either side of the offending offset (`… — near: …`), so the game
+    detail card shows the actual bad output without re-running the game.
+
+### Notes
+- Backend tests 788 → **796** (repair cases, missing-comma escalation, retry
+  classification, and excerpt persistence).
+- The manual **Coach Game** button still makes a single attempt — the repair
+  applies, but a malformed reply there needs a second click. Batch coaching
+  (`run-all`, scheduler, `coach`) retries automatically.
+
+---
+
 ## [1.32.2] - 2026-08-28
 
 ### Added

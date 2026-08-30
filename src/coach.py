@@ -10,6 +10,7 @@ using reasoning LLMs (Claude, ChatGPT, Gemini, Grok, Mistral, DeepSeek, Qwen, Ol
 
 import json
 import logging
+import re
 import time
 from datetime import datetime
 
@@ -514,10 +515,54 @@ def _maybe_refresh_patterns(conn, player_id: int,
                        player_id, e)
 
 
-def _parse_llm_response(text: str) -> dict:
-    """Parse JSON from LLM response, handling markdown fences and thinking tags."""
-    import re
+# v1.32.3: a comma before a closing brace/bracket is the most common way a
+# model mangles JSON, and it has exactly one correct repair.
+_TRAILING_COMMA_RE = re.compile(r",(\s*[}\]])")
 
+# How much text either side of the offending offset to quote back in the error.
+JSON_EXCERPT_WIDTH = 60
+
+
+class MalformedResponseError(json.JSONDecodeError):
+    """The model's reply wasn't valid JSON, even after safe repairs.
+
+    Subclasses JSONDecodeError so existing `except json.JSONDecodeError`
+    handlers keep working unchanged. Carries `excerpt` — the text either side
+    of the offending offset — so a failure is diagnosable from the persisted
+    error alone, without having to re-run the game to see the raw response.
+    """
+
+    def __init__(self, err: json.JSONDecodeError, excerpt: str):
+        super().__init__(err.msg, err.doc, err.pos)
+        self.excerpt = excerpt
+
+
+def _json_excerpt(doc: str, pos: int, width: int = JSON_EXCERPT_WIDTH) -> str:
+    """Quote the text around a JSON error offset, newlines made visible."""
+    start = max(0, pos - width)
+    end = min(len(doc), pos + width)
+    snippet = doc[start:end].replace("\n", "\\n")
+    return f"{'…' if start else ''}{snippet}{'…' if end < len(doc) else ''}"
+
+
+def _parse_llm_response(text: str) -> dict:
+    """Parse JSON from an LLM response, tolerating how models mangle it.
+
+    The coaching prompt asks the model to embed a five-section markdown
+    document inside the `player_feedback` string — the most fragile JSON
+    construct there is. Before v1.32.3 a single stray comma discarded an
+    otherwise-good multi-kilobyte response and burned the game's retry budget.
+
+    Repairs are deliberately conservative — only unambiguous ones:
+      * strip <think> blocks and markdown fences (pre-v1.32.3 behaviour)
+      * drop any prose the model wrapped either side of the object
+      * tolerate literal newlines/tabs inside strings (strict=False)
+      * remove trailing commas before a closing brace/bracket
+
+    Anything still broken — notably a *missing* comma, which cannot be placed
+    without guessing what the model meant — raises MalformedResponseError so
+    the caller can re-ask rather than silently accept a mangled answer.
+    """
     text = text.strip()
     # Strip <think>...</think> blocks from reasoning models (DeepSeek-R1, Qwen3)
     text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
@@ -526,7 +571,19 @@ def _parse_llm_response(text: str) -> dict:
         lines = text.split("\n")
         lines = [l for l in lines if not l.strip().startswith("```")]
         text = "\n".join(lines)
-    return json.loads(text)
+
+    # Models sometimes wrap the object in a sentence ("Here's the analysis:").
+    start, end = text.find("{"), text.rfind("}")
+    if start != -1 and end > start:
+        text = text[start:end + 1]
+
+    last_err = None
+    for candidate in (text, _TRAILING_COMMA_RE.sub(r"\1", text)):
+        try:
+            return json.loads(candidate, strict=False)
+        except json.JSONDecodeError as e:
+            last_err = e
+    raise MalformedResponseError(last_err, _json_excerpt(last_err.doc, last_err.pos))
 
 
 def _estimate_tokens(text: str) -> int:
@@ -1084,13 +1141,18 @@ def coach_game(game_id: int, provider: str | None = "claude",
     except json.JSONDecodeError as e:
         logger.error("Failed to parse LLM response for game %d: %s", game_id, e)
         logger.debug("Raw response: %s", raw[:500])
+        # v1.32.3: quote the offending text into the persisted reason.
+        excerpt = getattr(e, "excerpt", None)
+        detail = f"Invalid JSON from {used_model}: {e}"
+        if excerpt:
+            detail += f" — near: {excerpt}"
         conn.execute(
             # v1.28.0: count the attempt here too — same rule as
             # _mark_game_error, which we can't call with this conn open.
             "UPDATE games SET coaching_status = 'error', "
             "coaching_attempts = coaching_attempts + 1, "
             "coaching_error = ?, coaching_error_at = ? WHERE id = ?",
-            (_truncate_error(f"Invalid JSON from {used_model}: {e}"),
+            (_truncate_error(detail),
              datetime.now().isoformat(timespec="seconds"), game_id),
         )
         conn.commit()
@@ -1211,6 +1273,18 @@ def _is_truncated_response_error(e: Exception) -> bool:
     """
     from src.llm_providers import TruncatedResponseError
     return isinstance(e, TruncatedResponseError)
+
+
+def _is_malformed_response_error(e: Exception) -> bool:
+    """v1.32.3: the model's reply wasn't valid JSON even after safe repairs.
+
+    Also transient, and for the same reason as truncation: LLM output is
+    non-deterministic, so the model that dropped a comma this time will very
+    likely emit clean JSON on a re-ask. Before this, a JSONDecodeError fell
+    into the "don't retry" branch and stranded the game at 'error' — which is
+    how games 1409/1413 failed after v1.32.2 made the reason visible.
+    """
+    return isinstance(e, json.JSONDecodeError)
 
 
 def coach_pending(provider: str = "claude", model: str | None = None,
@@ -1363,6 +1437,11 @@ def coach_pending(provider: str = "claude", model: str | None = None,
 
             except Exception as e:
                 error_msg = str(e)
+                # v1.32.3: quote the offending text so the persisted reason is
+                # self-diagnosing, matching the direct coach_game path.
+                excerpt = getattr(e, "excerpt", None)
+                if excerpt:
+                    error_msg = f"{error_msg} — near: {excerpt}"
 
                 if _is_rate_limit_error(e):
                     # ── Rate limit: exponential backoff ──
@@ -1386,15 +1465,17 @@ def coach_pending(provider: str = "claude", model: str | None = None,
                         time.sleep(backoff)
                     continue  # Retry
 
-                elif _is_truncated_response_error(e):
-                    # ── Truncated answer: retry with a short backoff ──
-                    # v1.32.1: not a permanent failure, so don't fall through to
-                    # the "don't retry" branch that marks the game errored.
+                elif _is_truncated_response_error(e) or _is_malformed_response_error(e):
+                    # ── Unusable answer: retry with a short backoff ──
+                    # v1.32.1 (truncated) and v1.32.3 (malformed JSON): neither
+                    # is a permanent failure, so don't fall through to the
+                    # "don't retry" branch that marks the game errored.
+                    kind = ("Truncated response" if _is_truncated_response_error(e)
+                            else "Malformed JSON")
                     backoff = min(5 * attempt, 20)
                     logger.warning(
-                        "Truncated response on game %d (attempt %d/%d): %s. "
-                        "Retrying in %ds...",
-                        game_id, attempt, max_retries_per_game, error_msg, backoff,
+                        "%s on game %d (attempt %d/%d): %s. Retrying in %ds...",
+                        kind, game_id, attempt, max_retries_per_game, error_msg, backoff,
                     )
                     if cancel_event:
                         cancel_event.wait(backoff)

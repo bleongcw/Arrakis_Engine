@@ -5,7 +5,7 @@ Local Python app that pulls games from Chess.com and Lichess, runs Stockfish ana
 and uses reasoning LLMs to generate age-appropriate coaching insights with
 pattern tracking over time. Inspired by Eleanor, Evan, and Estella.
 
-Current release: **v1.32.2** (2026-08-28). See `CHANGELOG.md` for full history.
+Current release: **v1.32.3** (2026-08-30). See `CHANGELOG.md` for full history.
 
 ## Architecture
 - Python 3.11+, SQLite (WAL mode), local Stockfish on Apple Silicon
@@ -82,6 +82,14 @@ Current release: **v1.32.2** (2026-08-28). See `CHANGELOG.md` for full history.
   the status was stored and the exception text died with the console, making
   intermittent failures undiagnosable. Surfaced via `GET /api/status`
   (`last_coaching_error`) and a "Coaching failed" card on the game detail page.
+- Malformed-JSON tolerance (v1.32.3): `_parse_llm_response` repairs only
+  *unambiguous* damage (prose around the object, literal newlines via
+  `strict=False`, trailing commas) — the coaching prompt embeds a five-section
+  markdown document inside a JSON string, which models mangle routinely.
+  Anything still broken (e.g. a *missing* comma) raises `MalformedResponseError`
+  — a `json.JSONDecodeError` subclass, so existing handlers are unaffected —
+  which `coach_pending` retries like a truncated reply. The persisted error
+  quotes the offending text (`… — near: …`).
 - Analysis retry (v1.29.0): the analysis-side twin — `analysis_status='error'`
   is no longer terminal. `analyze_pending` retries under
   `analyzer.MAX_ANALYSIS_ATTEMPTS` (3) via `games.analysis_attempts`; success
@@ -345,7 +353,7 @@ harvest + report).
 
 ## Testing
 
-**~1023 tests total** — 788 backend (pytest, three tiers via `pyproject.toml`
+**~1031 tests total** — 796 backend (pytest, three tiers via `pyproject.toml`
 markers) + 235 frontend (Vitest). Integration (`-m integration`, needs Stockfish)
 and live (`-m live`, needs an LLM key) tiers are excluded by default.
 

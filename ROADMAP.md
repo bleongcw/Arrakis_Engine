@@ -1,6 +1,6 @@
 # Arrakis Engine Roadmap
 
-*Updated 2026-08-28 — current release v1.32.2*
+*Updated 2026-08-30 — current release v1.32.3*
 
 This is the public-facing roadmap. The full release history is in
 [CHANGELOG.md](CHANGELOG.md); architectural details are in
@@ -157,6 +157,16 @@ provider.
   "Evan Leong") matched nothing and silently defaulted to White, inverting the
   result and recording the player as their own opponent. Names now match as bags
   of words, and an unmatched name **fails the import instead of guessing** a side.
+
+### Coaching survives sloppy JSON (v1.32.3, 2026-08-30)
+- **A stray comma no longer throws away a coaching report.** Coaching asks the
+  model to hand-write a full markdown report inside a machine-readable
+  envelope, and models occasionally slip — an extra comma, a stray sentence
+  around the answer. Any slip used to discard the whole report and mark the
+  game failed. Harmless slips are now repaired automatically, and a genuinely
+  garbled answer is simply **asked for again** instead of giving up. When it
+  still fails, the error now quotes the offending text so the game's page shows
+  exactly what went wrong.
 
 ### Diagnosable coaching failures (v1.32.2, 2026-08-28)
 - **Coaching failures now say why.** Previously a failed game recorded only
