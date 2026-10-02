@@ -90,6 +90,12 @@ Current release: **v1.33.0** (2026-10-02). See `CHANGELOG.md` for full history.
   — a `json.JSONDecodeError` subclass, so existing handlers are unaffected —
   which `coach_pending` retries like a truncated reply. The persisted error
   quotes the offending text (`… — near: …`).
+- Claude refusals (v1.33.0): Opus 5.5 runs broader safety classifiers; a decline
+  is an HTTP 200 with `stop_reason: "refusal"` and no text. `_call_anthropic`
+  raises `<model> declined the request (category: …)` so it lands in
+  `games.coaching_error` instead of the opaque "No text content". No automatic
+  fallback model — Anthropic's server-side `fallbacks` needs a newer
+  `anthropic` SDK than the pinned 0.89.0.
 - Analysis retry (v1.29.0): the analysis-side twin — `analysis_status='error'`
   is no longer terminal. `analyze_pending` retries under
   `analyzer.MAX_ANALYSIS_ATTEMPTS` (3) via `games.analysis_attempts`; success
