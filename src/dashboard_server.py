@@ -683,8 +683,8 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             },
             "coaching": {
                 "default_provider": coaching.get("default_provider", "claude"),
-                "anthropic_model": coaching.get("anthropic_model", "claude-opus-5"),
-                "openai_model": coaching.get("openai_model", "gpt-5.6-sol"),
+                "anthropic_model": coaching.get("anthropic_model", "claude-opus-5-5"),
+                "openai_model": coaching.get("openai_model", "gpt-6-sol"),
                 "gemini_model": coaching.get("gemini_model", "gemini-3.5-flash"),
                 "grok_model": coaching.get("grok_model", "grok-4.5"),
                 "mistral_model": coaching.get("mistral_model", "mistral-medium-latest"),

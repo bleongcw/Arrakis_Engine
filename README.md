@@ -377,8 +377,8 @@ analysis:
 
 coaching:
   default_provider: claude            # claude | openai | gemini | grok | mistral | deepseek | qwen | ollama
-  anthropic_model: claude-opus-5
-  openai_model: gpt-5.6-sol
+  anthropic_model: claude-opus-5-5
+  openai_model: gpt-6-sol
   gemini_model: gemini-3.5-flash        # optional — requires ARRAKIS_GOOGLE_API_KEY
   grok_model: grok-4.5                  # optional — requires ARRAKIS_XAI_API_KEY
   mistral_model: mistral-medium-latest # optional — requires ARRAKIS_MISTRAL_API_KEY
@@ -480,9 +480,9 @@ python main.py coach --limit 5
 python main.py coach --provider openai --limit 5
 ```
 
-> **LLM Cost Warning:** Each coaching call sends a detailed prompt (~3,000–7,000 tokens) and receives a structured response (~2,000–4,000 tokens). At current API pricing, coaching a single game costs approximately **$0.03–0.10 with Claude** and **$0.02–0.08 with GPT-5.6**. For a backlog of 400+ games, this can add up to **$15–40 or more**. Start with `--limit 5` to verify quality and estimate your costs before running large batches. **Ollama is free** — it runs locally with no API costs.
+> **LLM Cost Warning:** Each coaching call sends a detailed prompt (~3,000–7,000 tokens) and receives a structured response (~2,000–4,000 tokens). At current API pricing, coaching a single game costs approximately **$0.03–0.10 with Claude** and **$0.02–0.08 with ChatGPT**. For a backlog of 400+ games, this can add up to **$15–40 or more**. Start with `--limit 5` to verify quality and estimate your costs before running large batches. **Ollama is free** — it runs locally with no API costs.
 
-> **Rate limits:** Cloud providers have tokens-per-minute caps (e.g., OpenAI's `gpt-5.6-sol` at ~10,000 TPM on free tiers). Use `--limit 5` per batch to avoid 429 errors. Claude typically has higher throughput — `--limit 10-20` is safe. Ollama has no rate limits but is slower (~30–90s per game depending on model size).
+> **Rate limits:** Cloud providers have tokens-per-minute caps (e.g., OpenAI's `gpt-6-sol` at ~10,000 TPM on free tiers). Use `--limit 5` per batch to avoid 429 errors. Claude typically has higher throughput — `--limit 10-20` is safe. Ollama has no rate limits but is slower (~30–90s per game depending on model size).
 
 > **Dashboard coaching:** You can also coach individual games directly from the dashboard — select any provider from the dropdown on a game's detail page and click **Coach Game**. The pipeline panel also supports all 8 providers with Cloud/Local grouping. Results auto-refresh when complete.
 
@@ -627,8 +627,8 @@ Chess coaching demands multi-step reasoning at every level:
 
 | Provider | Model | API Identifier | Notes |
 |---|---|---|---|
-| Anthropic | Claude Opus 5 | `claude-opus-5` | Extended thinking, excellent coaching tone |
-| OpenAI | GPT-5.6 Sol | `gpt-5.6-sol` | Strong reasoning via Responses API |
+| Anthropic | Claude Opus 5.5 | `claude-opus-5-5` | Extended thinking, excellent coaching tone |
+| OpenAI | GPT-6 Sol | `gpt-6-sol` | Strong reasoning via Responses API |
 | Google | Gemini 3.5 Flash | `gemini-3.5-flash` | Long context, strong reasoning |
 | xAI | Grok 4.5 | `grok-4.5` | OpenAI-compatible API |
 | Mistral | Mistral Medium | `mistral-medium-latest` | European alternative |
@@ -671,7 +671,7 @@ The depth is configurable via the `coaching_history_count` setting (in `config.y
 
 **When to increase it.** If a player has 50+ coached games and you find the coach repeating itself or missing recurring issues that span more than 5 games, raise the depth to 10. If you're running a deep retrospective (end of month, end of season), 15–20 gives the AI enough context to surface long-arc patterns.
 
-**Local model warning.** Ollama with `deepseek-r1:8b` has a smaller context window. Settings above 10 may cause prompt truncation or degraded coaching quality. Use 5 for local Ollama, 10–20 for Claude / Gemini / GPT-5.6.
+**Local model warning.** Ollama with `deepseek-r1:8b` has a smaller context window. Settings above 10 may cause prompt truncation or degraded coaching quality. Use 5 for local Ollama, 10–20 for Claude / Gemini / GPT-6.
 
 ### Pattern Tracking
 
@@ -946,7 +946,7 @@ Arrakis_Engine/
 
 ## Running Tests
 
-**~1031 tests total** — 796 backend (pytest) + 235 frontend (Vitest). Backend tests are organized into three tiers using pytest markers; integration (`-m integration`, Stockfish) and live (`-m live`, LLM key) tiers are excluded by default. Frontend tests run in a few seconds and cover the chess + chart + motif helper libraries, the `use-chess-navigation` hook, and the component suites.
+**~1032 tests total** — 797 backend (pytest) + 235 frontend (Vitest). Backend tests are organized into three tiers using pytest markers; integration (`-m integration`, Stockfish) and live (`-m live`, LLM key) tiers are excluded by default. Frontend tests run in a few seconds and cover the chess + chart + motif helper libraries, the `use-chess-navigation` hook, and the component suites.
 
 ### Commands
 
@@ -971,7 +971,7 @@ cd frontend && npx next build      # type-check
 
 ### Test Coverage by Module
 
-**Unit tests** (796 backend tests — all mocked, no external dependencies):
+**Unit tests** (797 backend tests — all mocked, no external dependencies):
 
 | File | Tests | Coverage |
 |------|-------|---------|

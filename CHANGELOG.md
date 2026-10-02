@@ -4,6 +4,51 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.33.0] - 2026-10-02
+
+### Changed
+- **Claude coaching model → Opus 5.5 (`claude-opus-5-5`)**, from `claude-opus-5`.
+  The request shape is unchanged — `_call_anthropic` already sent adaptive
+  thinking, never disabled it, never forced a tool, and never used
+  `budget_tokens`, which are exactly the things Opus 5.5 rejects. Two points
+  worth knowing: Opus 5.5's API-default effort is `medium` (Opus 5's was
+  `high`), but `call_provider` always passes the configured
+  `coaching.reasoning_effort`, so depth doesn't depend on that default; and
+  list pricing drops to $4 / $20 per MTok (from $5 / $25).
+- **ChatGPT coaching model → GPT-6 Sol (`gpt-6-sol`)**, from `gpt-5.6-sol`.
+  Same Responses API call (`reasoning.effort`, `max_output_tokens`, the
+  v1.32.1 truncation check).
+- Both IDs were confirmed against the providers' live model lists and
+  smoke-tested through `call_provider`. Defaults updated in
+  `PROVIDER_REGISTRY`, the settings API fallbacks, the Settings form, and
+  `config.yaml.example`. **An existing `config.yaml` pins its own
+  `anthropic_model` / `openai_model` and overrides the defaults — update it
+  (or the Settings page) to move an existing install.**
+
+### Added
+- **Claude refusals are named.** Opus 5.5 runs broader safety classifiers; a
+  decline arrives as HTTP 200 with `stop_reason: "refusal"` and no text, which
+  previously surfaced as the opaque `No text content in Claude response`.
+  `_call_anthropic` now raises `<model> declined the request (category: …)`,
+  which lands in `games.coaching_error` like any other failure reason.
+
+### Fixed
+- **Date-rotted Hunter Mode tests.** Four `test_hunter.py` tests hardcoded
+  April 2026 game dates, which aged out of the opponent-cache's 6-month
+  sliding window and made the cache come back empty (a fifth,
+  `test_max_games_cap_prunes_excess`, was days from the same fate). The
+  accumulating-cache tests now use dates relative to today. Test-only change —
+  `src/hunter.py` is untouched.
+
+### Notes
+- Backend tests 796 → **797**. Existing coaching rows keep the model that
+  produced them (`claude:claude-opus-5`, `openai:gpt-5.6-sol`) — history is
+  not rewritten.
+- Not done: Anthropic's server-side refusal **fallback** (`fallbacks`), which
+  needs a newer `anthropic` SDK than the pinned 0.89.0.
+
+---
+
 ## [1.32.3] - 2026-08-30
 
 ### Fixed

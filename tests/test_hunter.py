@@ -4,6 +4,7 @@ Mocks the chess.com / lichess HTTP calls; verifies the profile
 computation, cache hit/miss/TTL, and platform validation.
 """
 import json
+from datetime import date, timedelta
 from unittest.mock import patch
 
 import pytest
@@ -258,6 +259,14 @@ class MockResp:
 # ── v1.4.4: accumulating cache + representative games ────────────────────
 
 
+# The opponent_games cache prunes anything older than the sliding window
+# (default 6 months), so tests that accumulate games must use dates relative
+# to today — hardcoded ones silently age out and the cache comes back empty.
+# Last month's YYYY-MM: always in the past, always inside the window, and
+# valid for every day-of-month these tests use (01–10).
+_RECENT_MONTH = (date.today().replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
+
+
 def _enriched_g(
     game_url: str,
     color: str,
@@ -292,7 +301,7 @@ class TestAccumulateOpponentGames:
         from src.hunter import accumulate_opponent_games
         mock_fetch.return_value = [
             _enriched_g(f"https://chess.com/g/{i}", "white", "loss",
-                        date=f"2026-04-{i+1:02d}")
+                        date=f"{_RECENT_MONTH}-{i+1:02d}")
             for i in range(3)
         ]
         out = accumulate_opponent_games("OpX", "chess.com", db_path)
@@ -306,7 +315,7 @@ class TestAccumulateOpponentGames:
         # First batch: games 0, 1, 2
         mock_fetch.return_value = [
             _enriched_g(f"https://chess.com/g/{i}", "white", "loss",
-                        date=f"2026-04-{i+1:02d}")
+                        date=f"{_RECENT_MONTH}-{i+1:02d}")
             for i in range(3)
         ]
         accumulate_opponent_games("OpX", "chess.com", db_path)
@@ -314,7 +323,7 @@ class TestAccumulateOpponentGames:
         # Second batch: games 1, 2, 3, 4 (1 and 2 are dups; 3 and 4 are new)
         mock_fetch.return_value = [
             _enriched_g(f"https://chess.com/g/{i}", "white", "loss",
-                        date=f"2026-04-{i+1:02d}")
+                        date=f"{_RECENT_MONTH}-{i+1:02d}")
             for i in range(1, 5)
         ]
         out = accumulate_opponent_games("OpX", "chess.com", db_path)
@@ -330,7 +339,7 @@ class TestAccumulateOpponentGames:
             _enriched_g("https://chess.com/g/old", "white", "loss",
                         date="2025-01-01"),
             _enriched_g("https://chess.com/g/new", "white", "loss",
-                        date="2026-04-01"),
+                        date=f"{_RECENT_MONTH}-01"),
         ]
         out = accumulate_opponent_games("OpX", "chess.com", db_path,
                                          lookback_months=6)
@@ -344,7 +353,7 @@ class TestAccumulateOpponentGames:
         from src.hunter import accumulate_opponent_games
         mock_fetch.return_value = [
             _enriched_g(f"https://chess.com/g/{i}", "white", "loss",
-                        date=f"2026-04-{i+1:02d}")
+                        date=f"{_RECENT_MONTH}-{i+1:02d}")
             for i in range(10)
         ]
         out = accumulate_opponent_games("OpX", "chess.com", db_path,
@@ -450,7 +459,7 @@ class TestAccumulatedGamesInMeta:
         from src.hunter import get_or_fetch_profile
         mock_fetch.return_value = [
             _enriched_g(f"https://chess.com/g/{i}", "white", "loss",
-                        date=f"2026-04-{i+1:02d}")
+                        date=f"{_RECENT_MONTH}-{i+1:02d}")
             for i in range(5)
         ]
         profile = get_or_fetch_profile("OpX", "chess.com", db_path)

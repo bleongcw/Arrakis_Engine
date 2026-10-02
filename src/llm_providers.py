@@ -52,7 +52,7 @@ PROVIDER_REGISTRY = {
     "claude": {
         "display_name": "Claude",
         "sdk_type": "anthropic",
-        "default_model": "claude-opus-5",
+        "default_model": "claude-opus-5-5",
         "env_var": "ARRAKIS_ANTHROPIC_API_KEY",
         "base_url": None,
         "default_timeout": 300.0,  # Opus with extended thinking needs more time
@@ -63,10 +63,10 @@ PROVIDER_REGISTRY = {
     "openai": {
         "display_name": "ChatGPT",
         "sdk_type": "openai_responses",
-        "default_model": "gpt-5.6-sol",
+        "default_model": "gpt-6-sol",
         "env_var": "ARRAKIS_OPENAI_API_KEY",
         "base_url": None,
-        "default_timeout": 600.0,  # Reasoning model (gpt-5.6 Sol); a ~6200-token coaching prompt with trajectory injection runs 2-5 minutes, and longer at high/xhigh effort — keep generous headroom
+        "default_timeout": 600.0,  # Reasoning model (GPT-6 Sol); a ~6200-token coaching prompt with trajectory injection runs 2-5 minutes, and longer at high/xhigh effort — keep generous headroom
         "config_model_key": "openai_model",
         "group": "cloud",
         "color": "#059669",
@@ -211,10 +211,11 @@ def _call_anthropic(prompt: str, model: str, api_key: str,
     """Call Anthropic Claude API with adaptive thinking.
 
     `effort` (e.g. "medium"/"max") sets `output_config.effort` — the reasoning-depth
-    control on Opus 5 (thinking is on by default there; `thinking={"type":"adaptive"}`
-    stays valid and equivalent). We never disable thinking, so Opus 5's
-    "disabled thinking forbidden at xhigh/max" restriction never applies.
-    `budget_tokens` is removed on Opus 4.7+/5, so effort is the depth control.
+    control on Opus 5.5 (thinking is always on there; `thinking={"type":"adaptive"}`
+    is equivalent to omitting it, and disabling it or sending `budget_tokens`
+    returns a 400). Opus 5.5's API default effort is `medium`, one level below
+    Opus 5's `high` — `call_provider` always passes the configured effort, so
+    the depth never silently depends on that default.
     """
     import anthropic
 
@@ -231,6 +232,14 @@ def _call_anthropic(prompt: str, model: str, api_key: str,
 
     response = client.messages.create(**kwargs)
 
+    # v1.33.0: Opus 5.5 runs broader safety classifiers. A decline is an HTTP
+    # 200 with stop_reason "refusal" and no usable text — name it, rather than
+    # letting it surface as "No text content".
+    if getattr(response, "stop_reason", None) == "refusal":
+        details = getattr(response, "stop_details", None)
+        category = getattr(details, "category", None) or "unspecified"
+        raise RuntimeError(f"{model} declined the request (category: {category})")
+
     # Extract text from response (skip thinking blocks)
     for block in response.content:
         if block.type == "text":
@@ -243,7 +252,7 @@ def _call_openai_responses(prompt: str, model: str, api_key: str,
                            timeout: float = 120.0, effort: str | None = None) -> str:
     """Call OpenAI Responses API (for ChatGPT reasoning models).
 
-    `effort` (e.g. "xhigh") sets `reasoning.effort` — GPT-5.6 Sol's reasoning
+    `effort` (e.g. "xhigh") sets `reasoning.effort` — GPT-6 Sol's reasoning
     depth control.
     """
     from openai import OpenAI

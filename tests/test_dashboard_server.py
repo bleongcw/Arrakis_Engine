@@ -343,7 +343,7 @@ class TestJournalAPI:
             """INSERT INTO journal_entries
             (player_id, kind, platform, body, refs_json, provider, created_at)
             VALUES (?, 'review', 'chess.com', 'A review.', '[1,2]',
-                    'openai:gpt-5.6-sol', datetime('now'))""",
+                    'openai:gpt-6-sol', datetime('now'))""",
             (pid,),
         )
         conn.commit()
@@ -356,7 +356,7 @@ class TestJournalAPI:
         assert e["platform"] == "chess.com"
         assert e["body"] == "A review."
         assert e["refs"] == [1, 2]  # decoded from JSON
-        assert e["provider"] == "openai:gpt-5.6-sol"
+        assert e["provider"] == "openai:gpt-6-sol"
         assert data["platform_counts"] == {"chess.com": 1}
 
     def test_platform_filter_scopes_results(self, live_server, db_with_data):
@@ -1389,8 +1389,8 @@ class TestCoachingSettingsAPI:
 
     def test_get_returns_new_model_defaults(self, live_server):
         c = api_get(live_server, "/api/settings")["coaching"]
-        assert c["anthropic_model"] == "claude-opus-5"
-        assert c["openai_model"] == "gpt-5.6-sol"
+        assert c["anthropic_model"] == "claude-opus-5-5"
+        assert c["openai_model"] == "gpt-6-sol"
         assert c["reasoning_effort"] == "medium"
 
     def test_put_persists_reasoning_effort(self, live_server, tmp_path, monkeypatch):

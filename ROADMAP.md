@@ -1,6 +1,6 @@
 # Arrakis Engine Roadmap
 
-*Updated 2026-08-30 — current release v1.32.3*
+*Updated 2026-10-02 — current release v1.33.0*
 
 This is the public-facing roadmap. The full release history is in
 [CHANGELOG.md](CHANGELOG.md); architectural details are in
@@ -158,6 +158,11 @@ provider.
   result and recording the player as their own opponent. Names now match as bags
   of words, and an unmatched name **fails the import instead of guessing** a side.
 
+### Newer coaching models (v1.33.0, 2026-10-02)
+- **Claude → Opus 5.5 and ChatGPT → GPT-6 Sol.** The two main coaching models
+  move to their current flagships. Claude also gets cheaper per game. If Claude
+  ever declines a request, the game's page now says so plainly.
+
 ### Coaching survives sloppy JSON (v1.32.3, 2026-08-30)
 - **A stray comma no longer throws away a coaching report.** Coaching asks the
   model to hand-write a full markdown report inside a machine-readable
@@ -280,8 +285,8 @@ Non-reasoning models produce shallow, generic feedback.
 
 | Provider | Model | Type | Status |
 |---|---|---|---|
-| Anthropic | `claude-opus-5` | Cloud / Reasoning | Active |
-| OpenAI | `gpt-5.6-sol` | Cloud / Reasoning | Active |
+| Anthropic | `claude-opus-5-5` | Cloud / Reasoning | Active |
+| OpenAI | `gpt-6-sol` | Cloud / Reasoning | Active |
 | Google | `gemini-3.5-flash` | Cloud / Reasoning | Active |
 | xAI | `grok-4.5` | Cloud / Reasoning | Active |
 | Mistral | `mistral-medium-latest` | Cloud / Reasoning | Active |

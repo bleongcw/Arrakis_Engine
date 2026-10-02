@@ -676,7 +676,7 @@ class TestTruncatedResponseRetry:
 
         # Truncated once, then a clean answer.
         mock_coach.side_effect = [
-            TruncatedResponseError("gpt-5.6-sol response incomplete "
+            TruncatedResponseError("gpt-6-sol response incomplete "
                                    "(reason: max_output_tokens)"),
             {"narrative": "ok"},
         ]
