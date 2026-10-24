@@ -182,6 +182,8 @@ ArrakisEngine/
 │   ├── patterns.py            # cross-game patterns + motif aggregation + trend summaries
 │   ├── journal.py             # v1.12.0 — Journal entry helpers (reviews + notes)
 │   ├── hunter.py              # v1.4.1+ Hunter Mode (opponent prep)
+│   ├── tournament.py          # v1.21.0 — Tournament Prep rosters + combined prep
+│   ├── pgn_io.py              # v1.24.0 — PGN parse/validate/ingest/export
 │   ├── models.py              # SQLite schema + idempotent migrations + _slugify
 │   ├── tiers.py               # Adaptive tier system (rating-based)
 │   ├── scheduler.py           # Auto-pipeline daemon
@@ -227,7 +229,7 @@ ArrakisEngine/
 │   └── screenshots/           # Architecture diagram + UI screenshots
 ├── data/
 │   └── chess_coach.db         # SQLite database (auto-created, gitignored)
-├── tests/                     # Backend pytest suite (788 tests across 3 tiers)
+├── tests/                     # Backend pytest suite (810 tests across 3 tiers)
 └── reports/                   # Generated coach reports (gitignored)
 ```
 
@@ -323,14 +325,20 @@ All `?player=X` params + path slugs resolve by **slug** (v1.16.4). Backend helpe
 - `/api/report?player=X&period=monthly|weekly` — structured report data
 - `/api/status`, `/api/pipeline/status`, `/api/settings`, `/api/schedule/status`
 - `/api/hunt/profile?opponent=X&platform=Y` — (v1.4.1+) opponent profile
+- `/api/tournaments?player=X`, `/api/tournament?id=N` — (v1.21.0) rosters + combined prep
 
 ### POST
 - `/api/players` — add player
 - `/api/coach` — trigger coaching for a single game
 - `/api/trend-summary` — LLM trend summary
 - `/api/journal/review` — generate Recent Form Review entry (v1.10.0)
+- `/api/recent-form-review` — (v1.9.0) the original Recent Form Review route, still served
 - `/api/journal/note` — create Parent Note (v1.12.0)
 - `/api/pipeline/{harvest,analyze,patterns,coach,run-all,cancel}` — pipeline triggers
+- `/api/pipeline/reset-analysis-errors` — (v1.29.0) re-arm games stuck at analysis error
+- `/api/pipeline/hunt-scan` (v1.20.0), `/api/pipeline/tournament-prep` (v1.21.0) —
+  background jobs under the single-task lock
+- `/api/tournament/{create,add-opponent,remove-opponent,delete}` — (v1.21.0) roster CRUD
 - `/api/schedule/{toggle,interval}` — scheduler control
 - `/api/hunt/refresh` — force opponent profile re-fetch (v1.4.1+)
 - `/api/import-pgn` — (v1.24.0) import a raw PGN → analyzed game; (v1.25.0)

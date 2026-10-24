@@ -255,12 +255,14 @@ Settings writes to `config.yaml` go through an atomic helper (`_write_config_ato
 | GET | `/api/settings` | Analysis config + API key status |
 | GET | `/api/schedule/status` | Scheduler state |
 | GET | `/api/hunt/profile?opponent=X&platform=Y` | (v1.4.1) Opponent profile from cache or live fetch |
-| GET | `/api/tournament*` | (v1.21.0) Tournament rosters + combined prep |
+| GET | `/api/tournaments`, `/api/tournament` | (v1.21.0) Tournament rosters + combined prep |
 | POST | `/api/players` | Add player |
 | POST | `/api/coach` | Trigger coaching for a game |
 | POST | `/api/trend-summary` | Generate AI trend summary |
 | POST | `/api/journal/review` | (v1.10.0) Generate a Recent Form Review entry |
 | POST | `/api/journal/note` | (v1.12.0) Create a Parent Note |
+| POST | `/api/recent-form-review` | (v1.9.0) Original Recent Form Review route, still served |
+| POST | `/api/tournament/{create,add-opponent,remove-opponent,delete}` | (v1.21.0) Tournament roster CRUD |
 | POST | `/api/import-pgn` | (v1.24.0) Import a raw PGN → analyzed game; (v1.25.0) competition mode for OTB tournament PGNs |
 | POST | `/api/games/export` | (v1.24.0) `{ids, annotated}` → raw or annotated PGN file |
 | POST | `/api/pipeline/{harvest,analyze,patterns,coach,run-all,cancel}` | Trigger / cancel pipeline steps |

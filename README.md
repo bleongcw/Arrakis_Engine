@@ -901,7 +901,7 @@ Arrakis_Engine/
 ├── docs/
 │   ├── architecture.md        # Tracked: contributor architecture reference
 │   └── screenshots/           # Architecture diagram and screenshots
-├── tests/                 # Backend test suite (788 tests across 3 tiers)
+├── tests/                 # Backend test suite (810 tests across 3 tiers)
 │   ├── conftest.py        # Shared fixtures (db, player, stockfish, llm)
 │   ├── test_models.py                # Schema, ensure_player, migrations, _slugify (v1.16.1)
 │   ├── test_harvester.py
@@ -953,7 +953,7 @@ Arrakis_Engine/
 ```bash
 # Unit tests only (default — fast, no external dependencies)
 python -m pytest tests/ -v
-# → 788 tests in ~30s, all mocked
+# → 810 tests in ~65s, all mocked
 
 # Stockfish integration tests (requires Stockfish binary)
 python -m pytest tests/ -m integration -v
@@ -975,18 +975,26 @@ cd frontend && npx next build      # type-check
 
 | File | Tests | Coverage |
 |------|-------|---------|
-| `test_models.py` | 16 | Schema init, player upsert, constraints, PGN opponent extraction, DB path creation, migrations |
-| `test_harvester.py` | 20 | Chess.com + Lichess parsing: player side, result, time control, date, game URL, deduplication, platform filtering |
-| `test_analyzer.py` | 19 | Win probability formula, move classification boundaries, eval capping (±1000cp), PovScore→centipawn conversion |
-| `test_coach.py` | 18 | Move formatting, smart truncation (short vs 80+ move games), critical moments, JSON parsing, Claude/OpenAI provider switching, batch limit, DB status transitions |
-| `test_patterns.py` | 38 | Game phase classification, results aggregation, rating performance, accuracy, consistency, danger zones, endgame conversion, comeback/collapse detection, opening ACPL, tactical misses, repertoire consistency, opening name extraction |
+| `test_models.py` | 41 | Schema init, player upsert, constraints, PGN opponent extraction, DB path creation, migrations |
+| `test_harvester.py` | 45 | Chess.com + Lichess parsing: player side, result, time control, date, game URL, deduplication incl. canonical Lichess URLs (v1.33.2), variant filtering (v1.33.1), platform filtering, request retry |
+| `test_analyzer.py` | 29 | Win probability formula, move classification boundaries, eval capping (±1000cp), PovScore→centipawn conversion |
+| `test_coach.py` | 88 | Move formatting, smart truncation (short vs 80+ move games), critical moments, JSON parsing + conservative repair and re-ask (v1.32.3), retry/attempt caps, persisted failure reasons, Claude/OpenAI provider switching, batch limit, DB status transitions |
+| `test_patterns.py` | 151 | Game phase classification, results aggregation, rating performance, accuracy, consistency, danger zones, endgame conversion, comeback/collapse detection, opening ACPL, tactical misses, repertoire consistency, opening name extraction |
 | `test_tiers.py` | 21 | Rating→tier boundary mapping (Beginner→Expert), tier-specific move thresholds, config validation |
 | `test_report.py` | 9 | Report generation (weekly/monthly), ACPL interpretation thresholds, time control tables, missing data handling |
-| `test_dashboard_server.py` | 42 | HTTP endpoints (players/games/status/patterns/hunt/tournament), filtering (result, time class, date range, player), CORS headers, 404 |
+| `test_dashboard_server.py` | 79 | HTTP endpoints (players/games/status/patterns/hunt/tournament), filtering (result, time class, date range, player), game edit endpoints (ratings/classification/PGN), concurrent settings writes, loopback bind, 404 |
 | `test_hunter.py` | 49 | Hunter Mode opponent profiles, cache/accumulation, Deep Scan aggregation + incremental skip (v1.20.0) |
 | `test_tournament.py` | 15 | Tournament Prep roster CRUD + combined opening/blind-spot analysis (v1.21.0) |
-| `test_llm_providers.py` | 52 | Provider registry validation (8 providers), thinking tag stripping, model resolution (explicit/config/default), provider dispatch (Anthropic/OpenAI/Google/Mistral/Ollama), API key detection, availability listing |
-| `test_scheduler.py` | 6 | 4-step pipeline execution (harvest→analyze→patterns→coach), player filter passthrough, cancel event propagation, provider passthrough, progress update verification (1/4–4/4), Stockfish validation |
+| `test_llm_providers.py` | 77 | Provider registry validation (8 providers), thinking tag stripping, model resolution (explicit/config/default), provider dispatch (Anthropic/OpenAI/Google/Mistral/Ollama), API key detection, availability listing |
+| `test_scheduler.py` | 10 | 4-step pipeline execution (harvest→analyze→patterns→coach), player filter passthrough, cancel event propagation, provider passthrough, progress update verification (1/4–4/4), Stockfish validation |
+| `test_motifs.py` | 42 | The 12 tactical-motif detectors (fork, pin, skewer, … zugzwang) incl. skewer calibration (v1.14.0/v1.17.0) |
+| `test_pgn_io.py` | 23 | PGN import (parse, legality validation, colour inference incl. FIDE names, ingest) and raw/annotated export (v1.24.0+) |
+| `test_trap_matcher.py` | 34 | Trap library loading and trap matching against played games (v1.4.0) |
+| `test_dev_runner.py` | 30 | `serve` orchestration: pnpm/corepack resolution, process-group start/stop, ready-line detection (v1.5.0) |
+| `test_main_cli.py` | 24 | CLI subcommand dispatch and slug resolution for `--player` |
+| `test_journal.py` | 22 | Journal entries: Parent Note CRUD, Recent Form Reviews (v1.10.0/v1.12.0) |
+| `test_loss_openings.py` | 11 | Self-Analysis loss-by-opening computations (v1.4.0) |
+| `test_pipeline_state.py` | 10 | Cross-process single-task pipeline lock: acquire, heartbeat, stale-lock takeover, holder fencing |
 
 **Stockfish integration tests** (9 tests — requires Stockfish binary):
 
