@@ -157,6 +157,25 @@ def _chesscom_determine_result(game: dict, username: str) -> str:
         return "draw"
 
 
+def _is_standard_chess(pgn_text: str, rules: str | None = None) -> bool:
+    """True only for standard chess — no variants, including Chess960.
+
+    v1.33.1: the harvester used to import every game type. Variant games
+    can't be coached: Three-check/Atomic/etc. parse into a python-chess
+    variant board that standard Stockfish rejects ("engine does not support
+    UCI_Variant"), stranding the game at analysis_status='error'; and even
+    where analysis runs (Chess960), opening and motif coaching assumes the
+    standard starting position.
+
+    `rules` is chess.com's per-game field ("chess" for standard). The PGN
+    `Variant` header covers Lichess, and chess.com as a second check.
+    """
+    if rules and rules.lower() != "chess":
+        return False
+    match = re.search(r'\[Variant\s+"([^"]+)"\]', pgn_text)
+    return match is None or match.group(1).strip().lower() == "standard"
+
+
 def harvest_chess_com(username: str, player_id: int, conn,
                       months: int = 6) -> dict:
     """Harvest games from Chess.com for a single player.
@@ -187,6 +206,10 @@ def harvest_chess_com(username: str, player_id: int, conn,
 
             if not game_url or not pgn_text:
                 stats["errors"] += 1
+                continue
+
+            if not _is_standard_chess(pgn_text, game.get("rules")):
+                stats["skipped"] += 1
                 continue
 
             existing = conn.execute(
@@ -388,6 +411,10 @@ def harvest_lichess(username: str, player_id: int, conn,
         game_url = _lichess_extract_game_url(pgn_text)
         if not game_url:
             stats["errors"] += 1
+            continue
+
+        if not _is_standard_chess(pgn_text):
+            stats["skipped"] += 1
             continue
 
         # Check for duplicate

@@ -152,7 +152,7 @@ After a few weeks of games, the Patterns page comes alive (see [Patterns screens
 
 ## Quick Start for Chess Parents
 
-A simplified path to get up and running. You'll need macOS or Linux, Python 3.11+, and Node.js 18+.
+A simplified path to get up and running. You'll need macOS or Linux, Python 3.11+, and Node.js 24 (LTS) with pnpm 10.
 
 ```bash
 # 1. Clone the repository
@@ -735,7 +735,7 @@ Combined analysis is cache-only (no Stockfish) and fast; the field blind-spots p
 
 ## Web Dashboard
 
-Built with Next.js 16, React 19, shadcn/ui, Tailwind CSS, and Recharts. Fully mobile-responsive (320px+). Requires Node.js 18+.
+Built with Next.js 16, React 19, shadcn/ui, Tailwind CSS, and Recharts. Fully mobile-responsive (320px+). Requires Node.js 24 (LTS).
 
 ```bash
 # Terminal 1: Start the Python API backend
@@ -946,7 +946,7 @@ Arrakis_Engine/
 
 ## Running Tests
 
-**~1032 tests total** — 797 backend (pytest) + 235 frontend (Vitest). Backend tests are organized into three tiers using pytest markers; integration (`-m integration`, Stockfish) and live (`-m live`, LLM key) tiers are excluded by default. Frontend tests run in a few seconds and cover the chess + chart + motif helper libraries, the `use-chess-navigation` hook, and the component suites.
+**~1040 tests total** — 805 backend (pytest) + 235 frontend (Vitest). Backend tests are organized into three tiers using pytest markers; integration (`-m integration`, Stockfish) and live (`-m live`, LLM key) tiers are excluded by default. Frontend tests run in a few seconds and cover the chess + chart + motif helper libraries, the `use-chess-navigation` hook, and the component suites.
 
 ### Commands
 
@@ -971,7 +971,7 @@ cd frontend && npx next build      # type-check
 
 ### Test Coverage by Module
 
-**Unit tests** (797 backend tests — all mocked, no external dependencies):
+**Unit tests** (805 backend tests — all mocked, no external dependencies):
 
 | File | Tests | Coverage |
 |------|-------|---------|

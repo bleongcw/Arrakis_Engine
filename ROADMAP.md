@@ -1,6 +1,6 @@
 # Arrakis Engine Roadmap
 
-*Updated 2026-10-02 — current release v1.33.0*
+*Updated 2026-10-24 — current release v1.33.1*
 
 This is the public-facing roadmap. The full release history is in
 [CHANGELOG.md](CHANGELOG.md); architectural details are in
@@ -157,6 +157,12 @@ provider.
   "Evan Leong") matched nothing and silently defaulted to White, inverting the
   result and recording the player as their own opponent. Names now match as bags
   of words, and an unmatched name **fails the import instead of guessing** a side.
+
+### Standard chess only (v1.33.1, 2026-10-24)
+- **Variant games are no longer imported.** Three-check, Chess960 and other
+  variants played on chess.com or Lichess are skipped at harvest time. They
+  can't be analysed or coached properly, and used to get stuck with a failed
+  analysis.
 
 ### Newer coaching models (v1.33.0, 2026-10-02)
 - **Claude → Opus 5.5 and ChatGPT → GPT-6 Sol.** The two main coaching models

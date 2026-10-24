@@ -1,6 +1,6 @@
 # Arrakis Engine — Architecture
 
-*Last updated: 2026-10-02 — corresponds to v1.33.0*
+*Last updated: 2026-10-24 — corresponds to v1.33.1*
 
 This document describes the technical architecture of Arrakis Engine: how the pieces fit together, what runs where, and the design decisions behind them. It is aimed at contributors and developers reading the codebase. For end-user / setup docs, see [README.md](../README.md). For changelog, see [CHANGELOG.md](../CHANGELOG.md).
 
@@ -77,6 +77,7 @@ The backend is intentionally dependency-light — `http.server` is enough for a 
 ### `harvester.py` — game ingestion
 - Pulls monthly archives from the chess.com public API and the Lichess `/api/games/user/{username}` endpoint.
 - Deduplicates against existing rows in `games` (keyed on `game_url`).
+- **Standard chess only** (v1.33.1). `_is_standard_chess(pgn_text, rules)` gates both platforms before the duplicate check — chess.com's per-game `rules` field plus the PGN `Variant` header (which is all Lichess provides). Every variant is counted as `skipped` and never stored: Three-check, Atomic and similar parse into a python-chess variant board that standard Stockfish rejects (`engine does not support UCI_Variant`), which stranded games at `analysis_status='error'`; Chess960 and Lichess "From Position" analyse without error but break the standard-starting-position assumption behind opening and motif coaching.
 - Extracts color, opponent, time control, ratings, and result from PGN headers.
 - Default lookback: 6 months (`months_lookback` in `config.yaml`).
 - Rate-limited with backoff to respect the public APIs.
@@ -375,7 +376,7 @@ The `ARRAKIS_` prefix avoids collisions with other tools that use the unprefixed
 
 ## 7. Testing
 
-**~1032 tests total** — 797 backend (pytest) + 235 frontend (Vitest). Counts as of v1.33.0; see CHANGELOG for per-release deltas. Backend integration (`-m integration`, Stockfish) and live (`-m live`, LLM key) tiers are excluded by default.
+**~1040 tests total** — 805 backend (pytest) + 235 frontend (Vitest). Counts as of v1.33.1; see CHANGELOG for per-release deltas. Backend integration (`-m integration`, Stockfish) and live (`-m live`, LLM key) tiers are excluded by default.
 
 ### Backend (`tests/`)
 

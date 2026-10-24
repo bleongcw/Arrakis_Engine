@@ -4,6 +4,34 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.33.1] - 2026-10-24
+
+### Fixed
+- **Variant games are no longer imported.** The harvester pulled every game
+  type from both platforms. Five Lichess **Three-check** games then failed
+  analysis three times each with `engine does not support UCI_Variant` — the
+  PGN's `Variant` header makes python-chess build a variant board that standard
+  Stockfish rejects — and sat at analysis ❌ / coaching ⏳ with no way to
+  recover. New `_is_standard_chess(pgn_text, rules)` in `src/harvester.py`
+  gates both `harvest_chess_com` (chess.com's `rules` field, plus the PGN
+  header) and `harvest_lichess` (PGN `Variant` header): anything that isn't
+  standard chess is counted as `skipped` and never stored. **Chess960 is
+  excluded too** — it analysed without error, but opening and motif coaching
+  assumes the standard starting position. Lichess "From Position" games are
+  also skipped, since Lichess labels them a variant.
+
+### Notes
+- Backend tests 797 → **805**.
+- The filter applies to the harvester only; the manual PGN import
+  (`/api/import-pgn`) is unchanged.
+- One-off data cleanup on the maintainer's database: the nine variant games
+  already stored (five Three-check, four Chess960) and two Lichess
+  "From Position" games were deleted along with their analysis and coaching.
+- README: the Node.js requirement said "18+", out of support and too old for
+  Next.js 16; it now says Node.js 24 (LTS), matching `INSTRUCTION.md` and CI.
+
+---
+
 ## [1.33.0] - 2026-10-02
 
 ### Changed

@@ -301,6 +301,67 @@ class TestHarvestPlayer:
             mock_lichess.assert_called_once()
 
 
+# ── v1.33.1: variants are not imported ───────────────────────────────
+
+
+class TestVariantsNotImported:
+    """Variant games can't be coached: Three-check and friends make
+    Stockfish fail with "engine does not support UCI_Variant" (five Lichess
+    games stuck at analysis 'error' this way), and Chess960 breaks the
+    standard-opening assumptions. The harvester must skip them all."""
+
+    def test_standard_and_headerless_pgn_are_standard(self):
+        from src.harvester import _is_standard_chess
+        assert _is_standard_chess(SAMPLE_LICHESS_PGN) is True
+        assert _is_standard_chess('[Variant "Standard"]\n\n1. e4 *') is True
+
+    @pytest.mark.parametrize("variant", ["Three-check", "Chess960", "Atomic",
+                                         "From Position"])
+    def test_variant_header_is_not_standard(self, variant):
+        from src.harvester import _is_standard_chess
+        assert _is_standard_chess(f'[Variant "{variant}"]\n\n1. e4 *') is False
+
+    def test_chesscom_rules_field_is_not_standard(self):
+        from src.harvester import _is_standard_chess
+        assert _is_standard_chess("1. e4 *", rules="chess960") is False
+        assert _is_standard_chess("1. e4 *", rules="chess") is True
+
+    @patch("src.harvester._chesscom_get_archive_urls")
+    @patch("src.harvester._chesscom_fetch_archive")
+    def test_chesscom_variant_game_is_skipped(self, mock_fetch, mock_archives,
+                                              db_path):
+        mock_archives.return_value = [_recent_archive_url()]
+        variant = {**SAMPLE_CHESSCOM_GAME, "rules": "chess960",
+                   "url": "https://www.chess.com/game/live/960"}
+        mock_fetch.return_value = [SAMPLE_CHESSCOM_GAME, variant]
+
+        stats = harvest_player("testplayer1", db_path=db_path, months=6)
+        assert stats["new"] == 1          # only the standard game
+        assert stats["skipped"] == 1
+
+    @patch("src.harvester.requests.get")
+    def test_lichess_variant_game_is_skipped(self, mock_get, db_path):
+        from src.harvester import harvest_lichess
+        from src.models import init_db, ensure_player
+        three_check = SAMPLE_LICHESS_PGN.replace(
+            '[Event "Rated Blitz game"]',
+            '[Event "casual variant:threeCheck game"]\n[Variant "Three-check"]',
+        ).replace("lichess.org/", "lichess.org/v")
+        mock_get.return_value.text = SAMPLE_LICHESS_PGN + "\n\n" + three_check
+        mock_get.return_value.raise_for_status.return_value = None
+
+        conn = init_db(db_path)
+        pid = ensure_player(conn, "testplayer1", display_name="T", age=9,
+                            rating=1000)
+        stats = harvest_lichess("evleong", pid, conn)
+        n = conn.execute("SELECT COUNT(*) FROM games").fetchone()[0]
+        conn.close()
+        assert stats["total"] == 2
+        assert stats["new"] == 1
+        assert stats["skipped"] == 1
+        assert n == 1
+
+
 # ── v1.30.0: outbound request resilience (_get_json_with_retry) ──────
 
 class TestGetJsonWithRetry:
