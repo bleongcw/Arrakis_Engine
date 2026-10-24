@@ -81,10 +81,18 @@ def live_server(db_with_data):
     # The fixture is function-scoped on a fixed port; back-to-back tests can
     # collide in TIME_WAIT before the previous socket is fully released. Retry
     # the bind briefly instead of erroring the test on a transient EADDRINUSE.
+    # v1.33.3: ThreadingHTTPServer, as in production (run_server). The old
+    # single-threaded HTTPServer served one request at a time, so the
+    # concurrent-PUT test couldn't exercise _CONFIG_LOCK at all, and its 6
+    # simultaneous connections overflowed the default listen backlog of 5 —
+    # one connect failed (EINVAL) and was misreported as a lost update.
+    class _TestServer(http.server.ThreadingHTTPServer):
+        request_queue_size = 32
+
     httpd = None
     for attempt in range(10):
         try:
-            httpd = http.server.HTTPServer(("127.0.0.1", port), handler)
+            httpd = _TestServer(("127.0.0.1", port), handler)
             break
         except OSError:
             if attempt == 9:
@@ -1453,10 +1461,16 @@ class TestAtomicConfigWrites:
             "grok_model", "mistral_model", "deepseek_model",
         ]
         barrier = threading.Barrier(len(fields))
+        outcomes = {}
 
         def put(field):
             barrier.wait()  # maximize overlap
-            api_put(live_server, "/api/settings/coaching", {field: f"{field}-v"})
+            try:
+                outcomes[field] = api_put(
+                    live_server, "/api/settings/coaching", {field: f"{field}-v"}
+                )[0]
+            except Exception as e:  # a thread's exception is otherwise swallowed
+                outcomes[field] = f"{type(e).__name__}: {e}"
 
         threads = [threading.Thread(target=put, args=(f,)) for f in fields]
         for t in threads:
@@ -1464,6 +1478,9 @@ class TestAtomicConfigWrites:
         for t in threads:
             t.join()
 
+        # Every request must have succeeded — otherwise a failed request would
+        # masquerade as a lost update in the check below.
+        assert outcomes == {f: 200 for f in fields}, outcomes
         cfg = _yaml.safe_load((tmp_path / "config.yaml").read_text())
         for f in fields:
             assert cfg["coaching"].get(f) == f"{f}-v", f"lost update: {f}"

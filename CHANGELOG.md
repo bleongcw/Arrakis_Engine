@@ -4,6 +4,26 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.33.3] - 2026-10-24
+
+### Fixed
+- **Flaky settings test, and a test that didn't test its lock.**
+  `test_concurrent_puts_do_not_lose_updates` failed intermittently in full
+  runs, reporting `lost update: …`. Recording each request's result showed the
+  real failure: one of the six simultaneous PUTs never connected
+  (`URLError: [Errno 22] Invalid argument`). The `live_server` fixture used
+  the single-threaded `HTTPServer`, which serves one request at a time and
+  queues at most 5 connections, so the sixth overflowed the listen backlog.
+  It also meant the test never exercised `_CONFIG_LOCK`, because requests could
+  not overlap. The fixture now uses `ThreadingHTTPServer`, matching
+  production's `run_server`, with a 32-connection backlog. The test also
+  asserts every PUT returned 200, so a failed request can no longer pass as a
+  lost update. Verified: 5 consecutive full-suite runs and 20 runs of the test
+  class all green, and with `_CONFIG_LOCK` temporarily removed the test now
+  fails 10 of 10 times. Test-only change.
+
+---
+
 ## [1.33.2] - 2026-10-24
 
 ### Fixed
