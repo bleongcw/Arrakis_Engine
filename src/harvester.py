@@ -353,11 +353,21 @@ def _lichess_extract_time_control(pgn_text: str) -> tuple[str | None, str | None
 
 
 def _lichess_extract_game_url(pgn_text: str) -> str | None:
-    """Extract the game URL from Lichess PGN [Site] header."""
-    site = _lichess_extract_header(pgn_text, "Site")
-    if site and "lichess.org" in site:
-        return site
-    return None
+    """Canonical Lichess game URL, `https://lichess.org/<game id>`.
+
+    v1.33.2: Lichess changed the PGN `Site` header from
+    `https://lichess.org/<id>` to `https://lichess.org/game/<id>`. `game_url`
+    is the dedup key for both the games table and the Hunter Mode cache, so
+    returning `Site` verbatim re-imported every recent game as new. Build the
+    URL from the game ID instead (the `GameId` header, else the ID in `Site`)
+    so every form of the link maps to the same key.
+    """
+    game_id = _lichess_extract_header(pgn_text, "GameId")
+    if not game_id:
+        site = _lichess_extract_header(pgn_text, "Site") or ""
+        match = re.search(r"lichess\.org/(?:game/)?([A-Za-z0-9]{8})", site)
+        game_id = match.group(1) if match else None
+    return f"https://lichess.org/{game_id}" if game_id else None
 
 
 def harvest_lichess(username: str, player_id: int, conn,

@@ -219,6 +219,41 @@ class TestLichessExtractGameUrl:
     def test_no_site_header(self):
         assert _lichess_extract_game_url("[Event \"test\"]\n1. e4 *") is None
 
+    # v1.33.2: Lichess moved Site to https://lichess.org/game/<id>, and
+    # game_url is the dedup key — 58 games were re-imported as duplicates.
+
+    @pytest.mark.parametrize("site", [
+        "https://lichess.org/WS7GBFCF",
+        "https://lichess.org/game/WS7GBFCF",
+        "https://lichess.org/WS7GBFCF/black",
+    ])
+    def test_every_site_form_maps_to_one_url(self, site):
+        pgn = f'[Site "{site}"]\n\n1. e4 *'
+        assert _lichess_extract_game_url(pgn) == "https://lichess.org/WS7GBFCF"
+
+    def test_game_id_header_wins(self):
+        pgn = '[Site "https://lichess.org/game/WS7GBFCF"]\n[GameId "WS7GBFCF"]\n\n1. e4 *'
+        assert _lichess_extract_game_url(pgn) == "https://lichess.org/WS7GBFCF"
+
+    @patch("src.harvester.requests.get")
+    def test_new_site_format_does_not_reimport(self, mock_get, db_path):
+        from src.harvester import harvest_lichess
+        from src.models import ensure_player
+        new_format = SAMPLE_LICHESS_PGN.replace(
+            "https://lichess.org/abcdef12", "https://lichess.org/game/abcdef12")
+        mock_get.return_value.raise_for_status.return_value = None
+        conn = init_db(db_path)
+        pid = ensure_player(conn, "testplayer1", display_name="T", age=9,
+                            rating=1000)
+        mock_get.return_value.text = SAMPLE_LICHESS_PGN
+        harvest_lichess("evleong", pid, conn)
+        mock_get.return_value.text = new_format
+        stats = harvest_lichess("evleong", pid, conn)
+        n = conn.execute("SELECT COUNT(*) FROM games").fetchone()[0]
+        conn.close()
+        assert stats["new"] == 0 and stats["skipped"] == 1
+        assert n == 1
+
 
 class TestLichessExtractDate:
     def test_utc_date(self):

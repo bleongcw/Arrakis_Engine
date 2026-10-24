@@ -4,6 +4,29 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.33.2] - 2026-10-24
+
+### Fixed
+- **Lichess games were re-imported as duplicates.** Lichess changed the PGN
+  `Site` header from `https://lichess.org/<id>` to
+  `https://lichess.org/game/<id>`. `_lichess_extract_game_url` returned `Site`
+  verbatim, and `game_url` is the harvester's dedup key, so every recent
+  Lichess game looked new and was stored a second time — 58 duplicates of
+  Estella's games, 23 of which were already re-coached before it was caught.
+  The URL is now built from the game ID (the `GameId` header, else the ID
+  parsed from `Site`), so every form of the link maps to one canonical
+  `https://lichess.org/<id>`. Hunter Mode shares the helper, so its opponent
+  cache is covered too.
+
+### Notes
+- Backend tests 805 → **810**.
+- One-off cleanup on the maintainer's database: the 58 duplicates were deleted
+  with their analysis and coaching (the originals were complete), and the
+  three genuinely new games imported in the new format had their links
+  normalised.
+
+---
+
 ## [1.33.1] - 2026-10-24
 
 ### Fixed

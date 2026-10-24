@@ -1,6 +1,6 @@
 # Arrakis Engine Roadmap
 
-*Updated 2026-10-24 — current release v1.33.1*
+*Updated 2026-10-24 — current release v1.33.2*
 
 This is the public-facing roadmap. The full release history is in
 [CHANGELOG.md](CHANGELOG.md); architectural details are in
@@ -157,6 +157,12 @@ provider.
   "Evan Leong") matched nothing and silently defaulted to White, inverting the
   result and recording the player as their own opponent. Names now match as bags
   of words, and an unmatched name **fails the import instead of guessing** a side.
+
+### No more duplicate Lichess games (v1.33.2, 2026-10-24)
+- **Fixed duplicate imports from Lichess.** Lichess changed the format of its
+  game links, which made Arrakis import recent games a second time. Games are
+  now recognised by their Lichess game ID whatever the link looks like, and
+  the duplicates were removed.
 
 ### Standard chess only (v1.33.1, 2026-10-24)
 - **Variant games are no longer imported.** Three-check, Chess960 and other

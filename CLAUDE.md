@@ -5,7 +5,7 @@ Local Python app that pulls games from Chess.com and Lichess, runs Stockfish ana
 and uses reasoning LLMs to generate age-appropriate coaching insights with
 pattern tracking over time. Inspired by Eleanor, Evan, and Estella.
 
-Current release: **v1.33.1** (2026-10-24). See `CHANGELOG.md` for full history.
+Current release: **v1.33.2** (2026-10-24). See `CHANGELOG.md` for full history.
 
 ## Architecture
 - Python 3.11+, SQLite (WAL mode), local Stockfish on Apple Silicon
@@ -95,6 +95,10 @@ Current release: **v1.33.1** (2026-10-24). See `CHANGELOG.md` for full history.
   via `harvester._is_standard_chess` (chess.com `rules` field + PGN `Variant`
   header). Variant boards make Stockfish fail with "engine does not support
   UCI_Variant", and coaching assumes the standard starting position.
+- Lichess game URLs (v1.33.2): `_lichess_extract_game_url` builds the
+  canonical `https://lichess.org/<id>` from the `GameId` header (else the ID in
+  `Site`) — never `Site` verbatim. `game_url` is the dedup key, and Lichess's
+  switch to `https://lichess.org/game/<id>` re-imported every recent game.
 - Claude refusals (v1.33.0): Opus 5.5 runs broader safety classifiers; a decline
   is an HTTP 200 with `stop_reason: "refusal"` and no text. `_call_anthropic`
   raises `<model> declined the request (category: …)` so it lands in
@@ -364,7 +368,7 @@ harvest + report).
 
 ## Testing
 
-**~1040 tests total** — 805 backend (pytest, three tiers via `pyproject.toml`
+**~1045 tests total** — 810 backend (pytest, three tiers via `pyproject.toml`
 markers) + 235 frontend (Vitest). Integration (`-m integration`, needs Stockfish)
 and live (`-m live`, needs an LLM key) tiers are excluded by default.
 
