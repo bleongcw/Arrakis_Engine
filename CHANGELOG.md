@@ -4,6 +4,50 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.34.0] - 2026-11-12
+
+### Changed
+- **Default models refreshed for five providers.** Each stays in the tier it
+  was already in and moves to the provider's current model:
+  - ChatGPT: `gpt-6-sol` → **`gpt-6.1-sol`** (GPT-6.1 Sol). Verified with a
+    live end-to-end coaching run.
+  - Gemini: `gemini-3.5-flash` → **`gemini-3.8-flash`**. Google now silently
+    routes 3.5 Flash requests to 3.6 Flash, so the old default was labelling
+    coaching with a model that didn't produce it.
+  - Grok: `grok-4.5` → **`grok-4.7`**.
+  - Mistral: `mistral-medium-latest` → **`mistral-large-4`**. Mistral Medium
+    3.5 was deprecated on 2026-10-31 (retires 2027-04-30) with Large 4 as the
+    named replacement; the default is now pinned rather than a `-latest` alias.
+    Large 4 accepts `reasoning_effort` `low`/`medium`/`high`, which matches the
+    existing clamp.
+  - Qwen: `qwen3.7-max` → **`qwen3.8-max`**.
+- **Unchanged:** Claude stays on `claude-opus-5-5` (still the current Opus;
+  re-verified with a live coaching run), DeepSeek on `deepseek-v4-pro` (still
+  the current Pro model) and Ollama on `deepseek-r1:8b`.
+- Defaults updated in `PROVIDER_REGISTRY`, the settings API fallbacks, the
+  Settings form and `config.yaml.example`. No request code changed.
+
+### Added
+- **"Choosing a model" guide in the README**: the default for each provider
+  with list prices, which defaults were verified live and which come from
+  vendor docs only, why the default is not always the provider's most
+  expensive model (Claude Fable 5.2, GPT-6 Astra, Gemini 4 Argon/Carbon and
+  Qwen 4 Max preview are listed as alternatives), how to change a model, and
+  what to do when upgrading an existing install.
+- The Settings page's Model Overrides hint now says that saved values take
+  priority over the built-in defaults and don't change on update.
+
+### Notes
+- **Existing installs are not changed by this release.** `config.yaml` pins
+  each provider's model and overrides the defaults; edit it or use the
+  Settings page to adopt the new models.
+- The Gemini, Grok, Mistral and Qwen identifiers come from each vendor's
+  official model list and were **not** exercised with a live request (no API
+  keys for those providers).
+- Stored coaching keeps the label of the model that wrote it.
+
+---
+
 ## [1.33.3] - 2026-10-24
 
 ### Fixed

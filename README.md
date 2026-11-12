@@ -378,12 +378,12 @@ analysis:
 coaching:
   default_provider: claude            # claude | openai | gemini | grok | mistral | deepseek | qwen | ollama
   anthropic_model: claude-opus-5-5
-  openai_model: gpt-6-sol
-  gemini_model: gemini-3.5-flash        # optional — requires ARRAKIS_GOOGLE_API_KEY
-  grok_model: grok-4.5                  # optional — requires ARRAKIS_XAI_API_KEY
-  mistral_model: mistral-medium-latest # optional — requires ARRAKIS_MISTRAL_API_KEY
-  deepseek_model: deepseek-v4-pro   # optional — requires ARRAKIS_DEEPSEEK_API_KEY
-  qwen_model: qwen3.7-max        # optional — requires ARRAKIS_QWEN_API_KEY
+  openai_model: gpt-6.1-sol
+  gemini_model: gemini-3.8-flash        # optional — requires ARRAKIS_GOOGLE_API_KEY
+  grok_model: grok-4.7                  # optional — requires ARRAKIS_XAI_API_KEY
+  mistral_model: mistral-large-4       # optional — requires ARRAKIS_MISTRAL_API_KEY
+  deepseek_model: deepseek-v4-pro       # optional — requires ARRAKIS_DEEPSEEK_API_KEY
+  qwen_model: qwen3.8-max               # optional — requires ARRAKIS_QWEN_API_KEY
   ollama_model: deepseek-r1:8b        # optional — requires `ollama serve` running
   ollama_base_url: http://localhost:11434
   reasoning_effort: medium            # low | medium | high | xhigh | max — applied to
@@ -482,7 +482,7 @@ python main.py coach --provider openai --limit 5
 
 > **LLM Cost Warning:** Each coaching call sends a detailed prompt (~3,000–7,000 tokens) and receives a structured response (~2,000–4,000 tokens). At current API pricing, coaching a single game costs approximately **$0.03–0.10 with Claude** and **$0.02–0.08 with ChatGPT**. For a backlog of 400+ games, this can add up to **$15–40 or more**. Start with `--limit 5` to verify quality and estimate your costs before running large batches. **Ollama is free** — it runs locally with no API costs.
 
-> **Rate limits:** Cloud providers have tokens-per-minute caps (e.g., OpenAI's `gpt-6-sol` at ~10,000 TPM on free tiers). Use `--limit 5` per batch to avoid 429 errors. Claude typically has higher throughput — `--limit 10-20` is safe. Ollama has no rate limits but is slower (~30–90s per game depending on model size).
+> **Rate limits:** Cloud providers have tokens-per-minute caps (e.g., OpenAI's `gpt-6.1-sol` at ~10,000 TPM on free tiers). Use `--limit 5` per batch to avoid 429 errors. Claude typically has higher throughput — `--limit 10-20` is safe. Ollama has no rate limits but is slower (~30–90s per game depending on model size).
 
 > **Dashboard coaching:** You can also coach individual games directly from the dashboard — select any provider from the dropdown on a game's detail page and click **Coach Game**. The pipeline panel also supports all 8 providers with Cloud/Local grouping. Results auto-refresh when complete.
 
@@ -623,18 +623,75 @@ Chess coaching demands multi-step reasoning at every level:
 | **Game type detection** | Must classify games into types (tactical battle, comeback, positional grind, opening disaster, etc.) and adjust coaching emphasis accordingly |
 | **Structured JSON output** | Must produce reliable, parseable JSON with all required fields — reasoning models are significantly more consistent at this than non-reasoning models |
 
-**Supported reasoning models (8 providers):**
+### Choosing a model
 
-| Provider | Model | API Identifier | Notes |
-|---|---|---|---|
-| Anthropic | Claude Opus 5.5 | `claude-opus-5-5` | Extended thinking, excellent coaching tone |
-| OpenAI | GPT-6 Sol | `gpt-6-sol` | Strong reasoning via Responses API |
-| Google | Gemini 3.5 Flash | `gemini-3.5-flash` | Long context, strong reasoning |
-| xAI | Grok 4.5 | `grok-4.5` | OpenAI-compatible API |
-| Mistral | Mistral Medium | `mistral-medium-latest` | European alternative |
-| DeepSeek | DeepSeek V4 Pro | `deepseek-v4-pro` | Strong reasoning, affordable |
-| Alibaba | Qwen 3.7 Max | `qwen3.7-max` | Large reasoning model |
-| Ollama (Local) | DeepSeek-R1 8B | `deepseek-r1:8b` | Free, runs locally, no API key |
+Arrakis ships with one recommended model per provider. You only need an API key
+for the provider you want to use; the rest can stay unconfigured.
+
+**Default models (v1.34.0, November 2026):**
+
+| Provider | Default model | API identifier | List price per 1M tokens (in / out) | Verified |
+|---|---|---|---|---|
+| Anthropic | Claude Opus 5.5 | `claude-opus-5-5` | $4 / $20 | Live coaching run |
+| OpenAI | GPT-6.1 Sol | `gpt-6.1-sol` | $2 / $10 | Live coaching run |
+| Google | Gemini 3.8 Flash | `gemini-3.8-flash` | $0.75 / $3.75 (intro price to 31 Dec 2026) | Vendor docs only |
+| xAI | Grok 4.7 | `grok-4.7` | $2 / $6 | Vendor docs only |
+| Mistral | Mistral Large 4 | `mistral-large-4` | $0.70 / $2.10 | Vendor docs only |
+| DeepSeek | DeepSeek V4 Pro | `deepseek-v4-pro` | see DeepSeek pricing (peak / off-peak) | Vendor docs only |
+| Alibaba | Qwen 3.8 Max | `qwen3.8-max` | see Model Studio pricing | Vendor docs only |
+| Ollama (local) | DeepSeek-R1 8B | `deepseek-r1:8b` | Free, runs on your machine | Not re-tested this release |
+
+"Live coaching run" means the model coached a real game end to end in this
+release and returned every field in the required format. "Vendor docs only"
+means the identifier was taken from that provider's official model list but no
+request was sent, because the maintainers have no key for it. If one of those
+fails for you, the game's page shows the provider's error message; set a model
+your account can use (below) and please open an issue.
+
+Prices are the providers' published list prices at release time and change
+often — check the provider's pricing page before a large run, and see the
+cost warning under [CLI Commands](#cli-commands) for per-game estimates.
+
+**How the defaults are chosen.** Each default is the provider's current model
+in the tier Arrakis has always used: a reasoning model that follows the
+structured coaching format reliably, at a price that suits coaching every game
+a child plays. It is deliberately *not* always the provider's most expensive
+model:
+
+| Provider | Also available | Why it isn't the default |
+|---|---|---|
+| Anthropic | Claude Fable 5.2 (`claude-fable-5-2`) | Most capable, but twice the price ($8 / $40), slower, and needs 30-day data retention on the Anthropic account |
+| OpenAI | GPT-6 Astra (`gpt-6-astra`) | OpenAI's flagship, five times the price of Sol ($10 / $50) |
+| Google | Gemini 4 Argon / Carbon (`gemini-4-argon`, `gemini-4-carbon`) | New reasoning flagships at $2 / $10 introductory pricing; the price after 30 Nov 2026 isn't published |
+| Alibaba | Qwen 4 Max preview (`qwen4-max-preview`) | Preview, and only available on Alibaba's Token Plan |
+
+Any of these can be used by entering its identifier as described next.
+
+**Changing a model.** Two ways, both take effect on the next coaching run:
+
+- **Settings page** → *Coaching* → *Model Overrides*: type the provider's API
+  identifier into its box and save.
+- **`config.yaml`** → set the provider's key under `coaching:` (for example
+  `openai_model: gpt-6-astra`) and restart `serve`.
+
+**Upgrading an existing install.** Your `config.yaml` records the model names
+it was created with, and those take priority over the new defaults — updating
+Arrakis does **not** change the models you already use. To move to the models
+above, edit the values in `config.yaml` or on the Settings page. Three older
+values are worth changing soon:
+
+- `gemini-3.5-flash` — Google now silently routes these requests to Gemini 3.6
+  Flash, so coaching is labelled with a model that didn't produce it.
+- `mistral-medium-latest` — Mistral Medium 3.5 was deprecated on 31 Oct 2026
+  and retires on 30 Apr 2027; Mistral names Large 4 as its replacement.
+- `gpt-6-sol` — still served, but no longer on OpenAI's current models list.
+
+Coaching already stored keeps the label of the model that wrote it
+(for example `openai:gpt-6-sol`); history is never rewritten.
+
+**Reasoning effort** (`coaching.reasoning_effort`, default `medium`) is passed
+to the providers that expose a depth setting — Claude, ChatGPT and Mistral
+(Mistral is capped at `high`). The others reason at their own default depth.
 
 See [ROADMAP.md](ROADMAP.md) for details on local model quality considerations.
 
@@ -671,7 +728,7 @@ The depth is configurable via the `coaching_history_count` setting (in `config.y
 
 **When to increase it.** If a player has 50+ coached games and you find the coach repeating itself or missing recurring issues that span more than 5 games, raise the depth to 10. If you're running a deep retrospective (end of month, end of season), 15–20 gives the AI enough context to surface long-arc patterns.
 
-**Local model warning.** Ollama with `deepseek-r1:8b` has a smaller context window. Settings above 10 may cause prompt truncation or degraded coaching quality. Use 5 for local Ollama, 10–20 for Claude / Gemini / GPT-6.
+**Local model warning.** Ollama with `deepseek-r1:8b` has a smaller context window. Settings above 10 may cause prompt truncation or degraded coaching quality. Use 5 for local Ollama, 10–20 for Claude / Gemini / ChatGPT.
 
 ### Pattern Tracking
 

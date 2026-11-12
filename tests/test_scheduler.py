@@ -247,7 +247,7 @@ class TestRunFullPipeline:
 
         mock_harvest.return_value = {"new": 0, "errors": 0}
         mock_analyze.return_value = 0
-        mock_resolve.return_value = "gpt-6-sol"
+        mock_resolve.return_value = "gpt-6.1-sol"
         mock_coach.return_value = {"coached": 0, "errors": 0, "skipped": 0}
 
         run_full_pipeline(_make_config(), "test.db", provider="openai")

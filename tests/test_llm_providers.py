@@ -59,7 +59,7 @@ class TestProviderRegistry:
         assert PROVIDER_REGISTRY[slug]["default_timeout"] > 0
 
     def test_openai_timeout_at_least_600s(self):
-        # v1.8.1 regression lock: gpt-6-sol is a deep-reasoning model and the
+        # v1.8.1 regression lock: gpt-6.1-sol is a deep-reasoning model and the
         # ~6200-token coaching prompt (history + trajectory injection) regularly
         # takes 2-5 minutes end-to-end. Live verification on Bernard's DB clocked
         # 5min02s on Evan's game 954. The 300s floor matches Claude/DeepSeek/Gemini
@@ -117,7 +117,7 @@ class TestResolveModel:
         assert result == "claude-opus-5-5"
 
     def test_default_model_used_when_config_key_missing(self):
-        result = resolve_model("claude", None, {"openai_model": "gpt-6-sol"})
+        result = resolve_model("claude", None, {"openai_model": "gpt-6.1-sol"})
         assert result == "claude-opus-5-5"
 
     def test_unknown_provider_raises(self):
@@ -294,7 +294,7 @@ class TestReasoningEffort:
         client = MagicMock()
         client.responses.create.return_value.output_text = "ok"
         with patch("openai.OpenAI", return_value=client):
-            _call_openai_responses("prompt", "gpt-6-sol", "key", effort="xhigh")
+            _call_openai_responses("prompt", "gpt-6.1-sol", "key", effort="xhigh")
         assert client.responses.create.call_args.kwargs["reasoning"] == {"effort": "xhigh"}
 
     # ── v1.32.1: truncated-response handling ─────────────────────────
@@ -310,7 +310,7 @@ class TestReasoningEffort:
         client.responses.create.return_value.output_text = "ok"
         client.responses.create.return_value.status = "completed"
         with patch("openai.OpenAI", return_value=client):
-            _call_openai_responses("prompt", "gpt-6-sol", "key")
+            _call_openai_responses("prompt", "gpt-6.1-sol", "key")
         kwargs = client.responses.create.call_args.kwargs
         assert kwargs["max_output_tokens"] == OPENAI_MAX_OUTPUT_TOKENS
 
@@ -326,7 +326,7 @@ class TestReasoningEffort:
 
         with patch("openai.OpenAI", return_value=client):
             with pytest.raises(TruncatedResponseError) as exc:
-                _call_openai_responses("prompt", "gpt-6-sol", "key")
+                _call_openai_responses("prompt", "gpt-6.1-sol", "key")
         assert "max_output_tokens" in str(exc.value)
 
     def test_openai_completed_response_returns_text(self):
@@ -335,7 +335,7 @@ class TestReasoningEffort:
         resp.status = "completed"
         resp.output_text = '{"ok": true}'
         with patch("openai.OpenAI", return_value=client):
-            out = _call_openai_responses("prompt", "gpt-6-sol", "key")
+            out = _call_openai_responses("prompt", "gpt-6.1-sol", "key")
         assert out == '{"ok": true}'
 
     def test_call_provider_claude_applies_config_effort(self):

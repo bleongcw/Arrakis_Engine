@@ -1,6 +1,6 @@
 # Arrakis Engine Roadmap
 
-*Updated 2026-10-24 — current release v1.33.3*
+*Updated 2026-11-12 — current release v1.34.0*
 
 This is the public-facing roadmap. The full release history is in
 [CHANGELOG.md](CHANGELOG.md); architectural details are in
@@ -158,6 +158,15 @@ provider.
   result and recording the player as their own opponent. Names now match as bags
   of words, and an unmatched name **fails the import instead of guessing** a side.
 
+### Refreshed models and a model guide (v1.34.0, 2026-11-12)
+- **Five providers move to their current models**: ChatGPT (GPT-6.1 Sol),
+  Gemini (3.8 Flash), Grok (4.7), Mistral (Large 4) and Qwen (3.8 Max). Claude,
+  DeepSeek and Ollama were already current.
+- **A plain-language model guide** in the README explains which model each
+  provider uses, what it costs, which pricier alternatives exist, and how to
+  switch. Existing installs keep the models they already use until changed in
+  Settings.
+
 ### No more duplicate Lichess games (v1.33.2, 2026-10-24)
 - **Fixed duplicate imports from Lichess.** Lichess changed the format of its
   game links, which made Arrakis import recent games a second time. Games are
@@ -298,12 +307,12 @@ Non-reasoning models produce shallow, generic feedback.
 | Provider | Model | Type | Status |
 |---|---|---|---|
 | Anthropic | `claude-opus-5-5` | Cloud / Reasoning | Active |
-| OpenAI | `gpt-6-sol` | Cloud / Reasoning | Active |
-| Google | `gemini-3.5-flash` | Cloud / Reasoning | Active |
-| xAI | `grok-4.5` | Cloud / Reasoning | Active |
-| Mistral | `mistral-medium-latest` | Cloud / Reasoning | Active |
+| OpenAI | `gpt-6.1-sol` | Cloud / Reasoning | Active |
+| Google | `gemini-3.8-flash` | Cloud / Reasoning | Active |
+| xAI | `grok-4.7` | Cloud / Reasoning | Active |
+| Mistral | `mistral-large-4` | Cloud / Reasoning | Active |
 | DeepSeek | `deepseek-v4-pro` | Cloud / Reasoning | Active |
-| Alibaba | `qwen3.7-max` | Cloud / Reasoning | Active |
+| Alibaba | `qwen3.8-max` | Cloud / Reasoning | Active |
 | Ollama | `deepseek-r1:8b` | Local / Reasoning | Active |
 
 All providers are available in the CLI (`--provider`), the dashboard pipeline

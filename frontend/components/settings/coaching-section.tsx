@@ -48,12 +48,12 @@ const ALL_FOCUS_AREAS = [
 const DEFAULTS: CoachingForm = {
   default_provider: "claude",
   anthropic_model: "claude-opus-5-5",
-  openai_model: "gpt-6-sol",
-  gemini_model: "gemini-3.5-flash",
-  grok_model: "grok-4.5",
-  mistral_model: "mistral-medium-latest",
+  openai_model: "gpt-6.1-sol",
+  gemini_model: "gemini-3.8-flash",
+  grok_model: "grok-4.7",
+  mistral_model: "mistral-large-4",
   deepseek_model: "deepseek-v4-pro",
-  qwen_model: "qwen3.7-max",
+  qwen_model: "qwen3.8-max",
   ollama_model: "deepseek-r1:8b",
   ollama_base_url: "http://localhost:11434",
   reasoning_effort: "medium",
@@ -66,12 +66,12 @@ const DEFAULTS: CoachingForm = {
 
 const MODEL_FIELDS: { key: keyof CoachingForm; label: string; placeholder: string }[] = [
   { key: "anthropic_model", label: "Claude Model", placeholder: "claude-opus-5-5" },
-  { key: "openai_model", label: "ChatGPT Model", placeholder: "gpt-6-sol" },
-  { key: "gemini_model", label: "Gemini Model", placeholder: "gemini-3.5-flash" },
-  { key: "grok_model", label: "Grok Model", placeholder: "grok-4.5" },
-  { key: "mistral_model", label: "Mistral Model", placeholder: "mistral-medium-latest" },
+  { key: "openai_model", label: "ChatGPT Model", placeholder: "gpt-6.1-sol" },
+  { key: "gemini_model", label: "Gemini Model", placeholder: "gemini-3.8-flash" },
+  { key: "grok_model", label: "Grok Model", placeholder: "grok-4.7" },
+  { key: "mistral_model", label: "Mistral Model", placeholder: "mistral-large-4" },
   { key: "deepseek_model", label: "DeepSeek Model", placeholder: "deepseek-v4-pro" },
-  { key: "qwen_model", label: "Qwen Model", placeholder: "qwen3.7-max" },
+  { key: "qwen_model", label: "Qwen Model", placeholder: "qwen3.8-max" },
   { key: "ollama_model", label: "Ollama Model", placeholder: "deepseek-r1:8b" },
 ];
 
@@ -303,7 +303,7 @@ export function CoachingSection() {
         <div className="space-y-2">
           <Label>Model Overrides</Label>
           <p className="text-xs text-muted-foreground mb-2">
-            Customize the model used for each provider. Leave as default unless you need a specific model version.
+            The model used for each provider, by its API identifier. These saved values take priority over Arrakis&apos;s built-in defaults, so they do not change when you update Arrakis. See &quot;Choosing a model&quot; in the README for the current recommendations.
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {MODEL_FIELDS.map(({ key, label, placeholder }) => (

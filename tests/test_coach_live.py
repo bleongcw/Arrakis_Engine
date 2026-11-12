@@ -188,7 +188,7 @@ class TestStructuredFeedbackCompliance:
         any future regression to a non-compliant model would fail loudly."""
         if not os.getenv("ARRAKIS_OPENAI_API_KEY"):
             pytest.skip("ARRAKIS_OPENAI_API_KEY not set")
-        model = "gpt-6-sol"
+        model = "gpt-6.1-sol"
         result = coach_game(
             analyzed_game, provider="openai", model=model, db_path=db_path,
         )
@@ -454,7 +454,7 @@ class TestTrendSummaryCompliance:
         from src.patterns import generate_trend_summary
 
         pid, db_path = trend_stats_borderline_db
-        model = "gpt-6-sol"
+        model = "gpt-6.1-sol"
         summary = generate_trend_summary(
             pid, db_path=db_path, provider="openai", model=model,
         )
@@ -492,7 +492,7 @@ class TestTrendSummaryCompliance:
         from src.patterns import generate_trend_summary
 
         pid, db_path = trend_stats_db
-        model = "gpt-6-sol"
+        model = "gpt-6.1-sol"
         summary = generate_trend_summary(
             pid, db_path=db_path, provider="openai", model=model,
         )
@@ -507,7 +507,7 @@ class TestTrendSummaryCompliance:
         synthetic stats blob exercises BOTH motif-citation (v1.15.0)
         AND phase-citation (v1.16.0).
 
-        Cost: ~$0.05 (one extra gpt-6-sol reasoning call per
+        Cost: ~$0.05 (one extra gpt-6.1-sol reasoning call per
         full live-test pass).
         """
         if not os.getenv("ARRAKIS_OPENAI_API_KEY"):
@@ -515,7 +515,7 @@ class TestTrendSummaryCompliance:
         from src.patterns import generate_trend_summary
 
         pid, db_path = trend_stats_db
-        model = "gpt-6-sol"
+        model = "gpt-6.1-sol"
         summary = generate_trend_summary(
             pid, db_path=db_path, provider="openai", model=model,
         )
@@ -592,7 +592,7 @@ class TestTrendSummaryCompliance:
 
         summary = generate_trend_summary(
             pid, db_path=db_path,
-            provider="openai", model="gpt-6-sol",
+            provider="openai", model="gpt-6.1-sol",
         )
         assert summary
         assert len(summary) > 400, (

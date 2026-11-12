@@ -63,10 +63,10 @@ PROVIDER_REGISTRY = {
     "openai": {
         "display_name": "ChatGPT",
         "sdk_type": "openai_responses",
-        "default_model": "gpt-6-sol",
+        "default_model": "gpt-6.1-sol",
         "env_var": "ARRAKIS_OPENAI_API_KEY",
         "base_url": None,
-        "default_timeout": 600.0,  # Reasoning model (GPT-6 Sol); a ~6200-token coaching prompt with trajectory injection runs 2-5 minutes, and longer at high/xhigh effort — keep generous headroom
+        "default_timeout": 600.0,  # Reasoning model (GPT-6.1 Sol); a ~6200-token coaching prompt with trajectory injection runs 2-5 minutes, and longer at high/xhigh effort — keep generous headroom
         "config_model_key": "openai_model",
         "group": "cloud",
         "color": "#059669",
@@ -74,7 +74,7 @@ PROVIDER_REGISTRY = {
     "gemini": {
         "display_name": "Gemini",
         "sdk_type": "google_genai",
-        "default_model": "gemini-3.5-flash",
+        "default_model": "gemini-3.8-flash",
         "env_var": "ARRAKIS_GOOGLE_API_KEY",
         "base_url": None,
         "default_timeout": 300.0,  # Reasoning model, needs more time
@@ -85,7 +85,7 @@ PROVIDER_REGISTRY = {
     "grok": {
         "display_name": "Grok",
         "sdk_type": "openai_chat",
-        "default_model": "grok-4.5",
+        "default_model": "grok-4.7",
         "env_var": "ARRAKIS_XAI_API_KEY",
         "base_url": "https://api.x.ai/v1",
         "default_timeout": 120.0,
@@ -96,7 +96,7 @@ PROVIDER_REGISTRY = {
     "mistral": {
         "display_name": "Mistral",
         "sdk_type": "mistral",
-        "default_model": "mistral-medium-latest",
+        "default_model": "mistral-large-4",
         "env_var": "ARRAKIS_MISTRAL_API_KEY",
         "base_url": None,
         "default_timeout": 120.0,
@@ -118,7 +118,7 @@ PROVIDER_REGISTRY = {
     "qwen": {
         "display_name": "Qwen",
         "sdk_type": "openai_chat",
-        "default_model": "qwen3.7-max",
+        "default_model": "qwen3.8-max",
         "env_var": "ARRAKIS_QWEN_API_KEY",
         "base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
         "default_timeout": 120.0,
@@ -252,7 +252,7 @@ def _call_openai_responses(prompt: str, model: str, api_key: str,
                            timeout: float = 120.0, effort: str | None = None) -> str:
     """Call OpenAI Responses API (for ChatGPT reasoning models).
 
-    `effort` (e.g. "xhigh") sets `reasoning.effort` — GPT-6 Sol's reasoning
+    `effort` (e.g. "xhigh") sets `reasoning.effort` — GPT-6.1 Sol's reasoning
     depth control.
     """
     from openai import OpenAI
