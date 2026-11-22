@@ -1,6 +1,6 @@
 # Arrakis Engine Roadmap
 
-*Updated 2026-11-22 — current release v1.34.1*
+*Updated 2026-11-22 — current release v1.34.2*
 
 This is the public-facing roadmap. The full release history is in
 [CHANGELOG.md](CHANGELOG.md); architectural details are in
@@ -163,6 +163,9 @@ provider.
   the games list and filter, game pages, Patterns, Reports and the import and
   edit forms — matching FIDE's name for long games. Existing games are
   unchanged underneath.
+- **v1.34.2:** the FIDE rating field in Settings is labelled "Standard" too,
+  and newly written AI reviews use "standard" (earlier reviews keep their
+  wording).
 
 ### Refreshed models and a model guide (v1.34.0, 2026-11-12)
 - **Five providers move to their current models**: ChatGPT (GPT-6.1 Sol),

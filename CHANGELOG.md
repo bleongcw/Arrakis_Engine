@@ -4,6 +4,27 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.34.2] - 2026-11-22
+
+### Changed
+- **FIDE rating label "Classical" → "Standard"** on the player form in
+  Settings (FIDE's own name for that rating), and the players list
+  abbreviation `C 1500` → `S 1500`. The column and API field remain
+  `fide_rating_classical`.
+- **New AI-written text says "standard".** The Recent Form Review prompt's
+  games table — the only place a time class reaches an AI prompt — now shows
+  the display name, so reviews written from now on match the dashboard.
+  Existing reviews and coaching are not rewritten.
+- The Python label now has one definition, `models.time_class_name`, shared
+  by `report.py` and the prompt (replacing v1.34.1's inline helper).
+
+### Notes
+- Backend tests 811 → **812**.
+- Opening names containing "Classical" (e.g. "Classical Variation") are
+  deliberately unchanged.
+
+---
+
 ## [1.34.1] - 2026-11-22
 
 ### Changed

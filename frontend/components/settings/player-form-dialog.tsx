@@ -179,7 +179,7 @@ export function PlayerFormDialog({
             <div className="grid grid-cols-3 gap-4">
               <div className="space-y-1">
                 <Label htmlFor="fide_classical" className="text-xs text-muted-foreground font-normal">
-                  Classical
+                  Standard
                 </Label>
                 <Input
                   id="fide_classical"

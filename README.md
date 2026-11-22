@@ -959,7 +959,7 @@ Arrakis_Engine/
 ├── docs/
 │   ├── architecture.md        # Tracked: contributor architecture reference
 │   └── screenshots/           # Architecture diagram and screenshots
-├── tests/                 # Backend test suite (811 tests across 3 tiers)
+├── tests/                 # Backend test suite (812 tests across 3 tiers)
 │   ├── conftest.py        # Shared fixtures (db, player, stockfish, llm)
 │   ├── test_models.py                # Schema, ensure_player, migrations, _slugify (v1.16.1)
 │   ├── test_harvester.py
@@ -991,7 +991,7 @@ Arrakis_Engine/
 
 | Table | Purpose |
 |---|---|
-| `players` | Player profiles (username = chess.com handle, **slug** = URL/API/CLI id (v1.16.1), display name, age, rating, FIDE ID + three FIDE ratings Classical/Rapid/Blitz (v1.26.0)) |
+| `players` | Player profiles (username = chess.com handle, **slug** = URL/API/CLI id (v1.16.1), display name, age, rating, FIDE ID + three FIDE ratings Standard/Rapid/Blitz (v1.26.0; "Standard" is stored as `fide_rating_classical`)) |
 | `games` | Game records with PGN, ratings, result, platform, ACPL, analysis/coaching status (coaching status is `pending`/`complete`/`error`/`skipped` — `skipped` = analysed but no moves to coach, v1.28.1) + `coaching_attempts` (v1.28.0) / `analysis_attempts` (v1.29.0) bounded-retry counters |
 | `move_analysis` | Per-move Stockfish evaluation (capped centipawn, win prob, classification, clock_seconds, **motifs_json** v1.14.0) |
 | `game_coaching` | LLM-generated coaching output per game (narrative, feedback, opening analysis, coaching_meta) |
@@ -1004,14 +1004,14 @@ Arrakis_Engine/
 
 ## Running Tests
 
-**~1049 tests total** — 811 backend (pytest) + 238 frontend (Vitest). Backend tests are organized into three tiers using pytest markers; integration (`-m integration`, Stockfish) and live (`-m live`, LLM key) tiers are excluded by default. Frontend tests run in a few seconds and cover the chess + chart + motif helper libraries, the `use-chess-navigation` hook, and the component suites.
+**~1050 tests total** — 812 backend (pytest) + 238 frontend (Vitest). Backend tests are organized into three tiers using pytest markers; integration (`-m integration`, Stockfish) and live (`-m live`, LLM key) tiers are excluded by default. Frontend tests run in a few seconds and cover the chess + chart + motif helper libraries, the `use-chess-navigation` hook, and the component suites.
 
 ### Commands
 
 ```bash
 # Unit tests only (default — fast, no external dependencies)
 python -m pytest tests/ -v
-# → 811 tests in ~65s, all mocked
+# → 812 tests in ~65s, all mocked
 
 # Stockfish integration tests (requires Stockfish binary)
 python -m pytest tests/ -m integration -v
@@ -1029,7 +1029,7 @@ cd frontend && npx next build      # type-check
 
 ### Test Coverage by Module
 
-**Unit tests** (811 backend tests — all mocked, no external dependencies):
+**Unit tests** (812 backend tests — all mocked, no external dependencies):
 
 | File | Tests | Coverage |
 |------|-------|---------|
@@ -1037,7 +1037,7 @@ cd frontend && npx next build      # type-check
 | `test_harvester.py` | 45 | Chess.com + Lichess parsing: player side, result, time control, date, game URL, deduplication incl. canonical Lichess URLs (v1.33.2), variant filtering (v1.33.1), platform filtering, request retry |
 | `test_analyzer.py` | 29 | Win probability formula, move classification boundaries, eval capping (±1000cp), PovScore→centipawn conversion |
 | `test_coach.py` | 88 | Move formatting, smart truncation (short vs 80+ move games), critical moments, JSON parsing + conservative repair and re-ask (v1.32.3), retry/attempt caps, persisted failure reasons, Claude/OpenAI provider switching, batch limit, DB status transitions |
-| `test_patterns.py` | 151 | Game phase classification, results aggregation, rating performance, accuracy, consistency, danger zones, endgame conversion, comeback/collapse detection, opening ACPL, tactical misses, repertoire consistency, opening name extraction |
+| `test_patterns.py` | 152 | Game phase classification, results aggregation, rating performance, accuracy, consistency, danger zones, endgame conversion, comeback/collapse detection, opening ACPL, tactical misses, repertoire consistency, opening name extraction |
 | `test_tiers.py` | 21 | Rating→tier boundary mapping (Beginner→Expert), tier-specific move thresholds, config validation |
 | `test_report.py` | 10 | Report generation (weekly/monthly), ACPL interpretation thresholds, time control tables, missing data handling |
 | `test_dashboard_server.py` | 79 | HTTP endpoints (players/games/status/patterns/hunt/tournament), filtering (result, time class, date range, player), game edit endpoints (ratings/classification/PGN), concurrent settings writes, loopback bind, 404 |

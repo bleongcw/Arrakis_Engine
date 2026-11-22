@@ -14,7 +14,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from src.models import init_db
+from src.models import init_db, time_class_name
 
 logger = logging.getLogger(__name__)
 
@@ -378,20 +378,15 @@ def generate_report(player_username: str, period: str = "weekly",
         report += "No games played in this period.\n"
         return _save_report(report, player_username, period, output_dir)
 
-    # v1.34.1: the stored 'classical' time class is shown as "standard" (FIDE's
-    # name for it), matching the dashboard. Only the label changes.
-    def _tc_name(tc):
-        return "standard" if tc == "classical" else tc
-
     # Build markdown tables from structured data
     tc_lines = ["| Time Control | Games | W | L | D | Win% |", "|---|---|---|---|---|---|"]
     for tc in data["time_class_stats"]:
-        tc_lines.append(f"| {_tc_name(tc['time_class'])} | {tc['games']} | {tc['wins']} | {tc['losses']} | {tc['draws']} | {tc['win_rate']}% |")
+        tc_lines.append(f"| {time_class_name(tc['time_class'])} | {tc['games']} | {tc['wins']} | {tc['losses']} | {tc['draws']} | {tc['win_rate']}% |")
 
     gl_lines = ["| Date | Color | Opp Rating | Result | ACPL | Time |", "|---|---|---|---|---|---|"]
     for g in data["game_list"]:
         emoji = {"win": "W", "loss": "L", "draw": "D"}[g["result"]]
-        gl_lines.append(f"| {g['date']} | {g['color']} | {g['opponent_rating'] or '?'} | **{emoji}** | {g['acpl'] or 'N/A'} | {_tc_name(g['time_class'])} |")
+        gl_lines.append(f"| {g['date']} | {g['color']} | {g['opponent_rating'] or '?'} | **{emoji}** | {g['acpl'] or 'N/A'} | {time_class_name(g['time_class'])} |")
 
     mq_lines = ["| Classification | Count | % |", "|---|---|---|"]
     for cls in ["excellent", "good", "inaccuracy", "mistake", "blunder"]:

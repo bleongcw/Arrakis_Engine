@@ -19,7 +19,7 @@ from pathlib import Path
 import chess.pgn
 import io
 
-from src.models import init_db
+from src.models import init_db, time_class_name
 
 logger = logging.getLogger(__name__)
 
@@ -2372,7 +2372,9 @@ def _build_recent_games_table(games: list[dict]) -> str:
         color = g.get("player_color", "?")
         result = g.get("result", "?")
         opening = (g.get("opening_name") or "—")[:40]
-        tc = g.get("time_class") or "?"
+        # v1.34.2: the AI sees the display name ("standard", not "classical")
+        # so new reviews use the same word as the dashboard.
+        tc = time_class_name(g.get("time_class")) or "?"
         lines.append(
             f"  - {date} | {color:>5} vs {opp:<20} | {result:<4} | "
             f"{tc:<6} | {opening}"

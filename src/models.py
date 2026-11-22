@@ -257,6 +257,17 @@ def _backfill_acpl(conn: sqlite3.Connection):
         print(f"  Backfilled ACPL for {updated} games (±1000cp capped)")
 
 
+def time_class_name(time_class: str | None) -> str | None:
+    """Display name for a stored `time_class`.
+
+    The long time control is stored as 'classical' (what Lichess and the PGN
+    importer produce) but shown as 'standard', FIDE's name for it (v1.34.1).
+    The stored value never changes; this is the Python twin of the frontend's
+    `lib/time-class.ts`.
+    """
+    return "standard" if time_class == "classical" else time_class
+
+
 def _slugify(text: str) -> str:
     """v1.16.1: convert a display name to a URL slug.
 

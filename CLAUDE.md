@@ -5,7 +5,7 @@ Local Python app that pulls games from Chess.com and Lichess, runs Stockfish ana
 and uses reasoning LLMs to generate age-appropriate coaching insights with
 pattern tracking over time. Inspired by Eleanor, Evan, and Estella.
 
-Current release: **v1.34.1** (2026-11-22). See `CHANGELOG.md` for full history.
+Current release: **v1.34.2** (2026-11-22). See `CHANGELOG.md` for full history.
 
 ## Architecture
 - Python 3.11+, SQLite (WAL mode), local Stockfish on Apple Silicon
@@ -45,7 +45,8 @@ Current release: **v1.34.1** (2026-11-22). See `CHANGELOG.md` for full history.
   Settings form. **FIDE ratings are FIDE-specific: they do NOT override the
   chess.com / lichess rating** (the primary rating stays the latest game /
   platform rating). The legacy single `fide_rating` column is kept and was
-  backfilled into Classical.
+  backfilled into `fide_rating_classical`. That rating is *labelled* "Standard"
+  in the UI (FIDE's own name, v1.34.2); the column name is unchanged.
 
 ## Key Configuration
 - Stockfish: depth 22, 6 threads, 512MB hash, path configured in `config.yaml`
@@ -230,7 +231,7 @@ ArrakisEngine/
 │   └── screenshots/           # Architecture diagram + UI screenshots
 ├── data/
 │   └── chess_coach.db         # SQLite database (auto-created, gitignored)
-├── tests/                     # Backend pytest suite (811 tests across 3 tiers)
+├── tests/                     # Backend pytest suite (812 tests across 3 tiers)
 └── reports/                   # Generated coach reports (gitignored)
 ```
 
@@ -377,7 +378,7 @@ harvest + report).
 
 ## Testing
 
-**~1049 tests total** — 811 backend (pytest, three tiers via `pyproject.toml`
+**~1050 tests total** — 812 backend (pytest, three tiers via `pyproject.toml`
 markers) + 238 frontend (Vitest). Integration (`-m integration`, needs Stockfish)
 and live (`-m live`, needs an LLM key) tiers are excluded by default.
 
@@ -424,14 +425,16 @@ module — `@patch("src.coach.coach_pending")` — not at the consuming module.
 - **`ARRAKIS_` prefix on env keys** — avoids collisions with other tools
 - **Time-control labels** (v1.34.1) — the stored `time_class` value `classical`
   is *displayed* as "Standard" (FIDE's name) via `frontend/lib/time-class.ts`
-  (`timeClassName` / `timeClassLabel`) and in `report.py`'s markdown. The stored
+  (`timeClassName` / `timeClassLabel`) and, on the Python side,
+  `models.time_class_name` (used by `report.py`'s markdown and, since v1.34.2,
+  the Recent Form Review prompt so new AI text says "standard"). The stored
   value, API value and filter key stay `classical`; never rename the data.
 - **Lichess deep link format** — `/analysis/standard/{FEN}`, not `?pgn=` (v1.4.5 lesson)
 - **Competition games never store the tournament name/venue** (v1.26.1) — the PGN
   `Event`/`Site` headers are stripped on import (and on reclassify-to-competition)
   so they can't leak via the API or PGN export. `strip_private_headers` in
   `src/pgn_io.py` is the single seam (import, reclassification, backfill all reuse it).
-- **FIDE ratings are FIDE-only** (v1.26.0) — three ratings (Classical/Rapid/Blitz),
+- **FIDE ratings are FIDE-only** (v1.26.0) — three ratings (Standard/Rapid/Blitz; the Standard one is stored in `fide_rating_classical`),
   shown as FIDE info; they never override the chess.com/lichess platform rating.
 - **Shared chess + motif helpers in `frontend/lib/`** — single source of truth to
   avoid the duplication that hid the v1.4.5 regressions.

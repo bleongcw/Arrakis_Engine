@@ -31,8 +31,8 @@ Thank you for your interest in contributing to ArrakisEngine! This document prov
 
 ### Running Tests
 
-**~1049 tests total**: 811 backend (pytest, three tiers via `pyproject.toml`
-markers) + 238 frontend (Vitest). Counts as of v1.34.1.
+**~1050 tests total**: 812 backend (pytest, three tiers via `pyproject.toml`
+markers) + 238 frontend (Vitest). Counts as of v1.34.2.
 
 **Backend (pytest):**
 

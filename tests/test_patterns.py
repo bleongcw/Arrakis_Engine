@@ -2277,6 +2277,19 @@ class TestRecentGamesTableFormatting:
         assert "Sicilian Defense" in out
         assert "rapid" in out
 
+    def test_classical_is_presented_to_the_ai_as_standard(self):
+        """v1.34.2: new AI-written reviews should say "standard", matching the
+        dashboard label; the stored value is untouched."""
+        games = [
+            {"date_played": "2026-11-22", "player_color": "white",
+             "opponent_username": "opp", "result": "win",
+             "opening_name": "Italian Game", "time_class": "classical"},
+        ]
+        out = _build_recent_games_table(games)
+        assert "standard" in out
+        assert "classical" not in out
+        assert games[0]["time_class"] == "classical"
+
     def test_long_opening_name_truncated(self):
         games = [
             {"date_played": "2026-05-24", "player_color": "white",

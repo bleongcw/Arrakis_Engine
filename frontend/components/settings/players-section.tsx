@@ -106,7 +106,7 @@ export function PlayersSection() {
                       FIDE:{" "}
                       {[
                         player.fide_rating_classical &&
-                          `C ${player.fide_rating_classical}`,
+                          `S ${player.fide_rating_classical}`,
                         player.fide_rating_rapid &&
                           `R ${player.fide_rating_rapid}`,
                         player.fide_rating_blitz &&
