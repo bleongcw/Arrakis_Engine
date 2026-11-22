@@ -124,7 +124,7 @@ export default function ImportPgnPage() {
                   onChange={(e) => setGameType(e.target.value as GameType)}
                   className="px-2 py-1.5 rounded-md border text-sm bg-background"
                 >
-                  <option value="classical">Classical</option>
+                  <option value="classical">Standard</option>
                   <option value="rapid">Rapid</option>
                   <option value="blitz">Blitz</option>
                 </select>

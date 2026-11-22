@@ -2,6 +2,7 @@
 
 import { cn } from "@/lib/utils";
 import type { GameDetail } from "@/lib/types";
+import { timeClassName } from "@/lib/time-class";
 
 interface ComparisonSummaryProps {
   game1: GameDetail;
@@ -139,8 +140,8 @@ export function ComparisonSummary({ game1, game2 }: ComparisonSummaryProps) {
     },
     {
       label: "Time Control",
-      v1: g1.time_class || "\u2014",
-      v2: g2.time_class || "\u2014",
+      v1: timeClassName(g1.time_class, "\u2014"),
+      v2: timeClassName(g2.time_class, "\u2014"),
     },
   ];
 

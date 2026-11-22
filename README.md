@@ -121,7 +121,7 @@ You don't need to understand Stockfish, centipawns, or LLMs to use Arrakis Engin
 
 Add your child's Chess.com or Lichess username to the config file. Arrakis fetches every game from the last 6 months automatically — rapid, blitz, bullet, and daily. It deduplicates, so you can run it as often as you like without worrying about double-counting.
 
-Games that aren't online — **over-the-board tournament games** played in person — can be brought in too: paste or upload their PGN on the Import page (a whole multi-game tournament file works). Turn on **"Over-the-board / competition game"**, pick the game type (Classical / Rapid / Blitz), and each game is analyzed and coached exactly like an online one, tagged with a 🏆 Competition badge. Ratings, the date/time, and the category are all editable per game afterwards — and if you mistyped a move off the scoresheet, **Edit moves** on the game's detail page lets you paste a corrected PGN, which re-validates the moves (pointing at the exact illegal move if any) and re-runs analysis and coaching in place (v1.32.0). The competition's name and venue are never stored, for privacy.
+Games that aren't online — **over-the-board tournament games** played in person — can be brought in too: paste or upload their PGN on the Import page (a whole multi-game tournament file works). Turn on **"Over-the-board / competition game"**, pick the game type (Standard / Rapid / Blitz), and each game is analyzed and coached exactly like an online one, tagged with a 🏆 Competition badge. Ratings, the date/time, and the category are all editable per game afterwards — and if you mistyped a move off the scoresheet, **Edit moves** on the game's detail page lets you paste a corrected PGN, which re-validates the moves (pointing at the exact illegal move if any) and re-runs analysis and coaching in place (v1.32.0). The competition's name and venue are never stored, for privacy.
 
 ### 2. See What Happened
 
@@ -948,6 +948,7 @@ Arrakis_Engine/
 │   ├── lib/                   # API client (api.ts), types (types.ts), providers (providers.ts), utils
 │   │   ├── chess/             # (v1.6.0) Shared chess helpers: parseMoveText, lichessAnalysisUrl, opening matching
 │   │   ├── motifs.ts          # (v1.15.0) Shared MOTIF_LABELS — 12 emoji+label pairs
+│   │   ├── time-class.ts      # (v1.34.1) Time-control display names ("classical" → Standard)
 │   │   ├── summary.ts         # (v1.14.1) parseTrendSummary — JSON-array tolerant
 │   │   └── chart-format.ts    # (v1.18.3) Date-axis helpers for the time-scale chart
 │   └── public/data/
@@ -958,7 +959,7 @@ Arrakis_Engine/
 ├── docs/
 │   ├── architecture.md        # Tracked: contributor architecture reference
 │   └── screenshots/           # Architecture diagram and screenshots
-├── tests/                 # Backend test suite (810 tests across 3 tiers)
+├── tests/                 # Backend test suite (811 tests across 3 tiers)
 │   ├── conftest.py        # Shared fixtures (db, player, stockfish, llm)
 │   ├── test_models.py                # Schema, ensure_player, migrations, _slugify (v1.16.1)
 │   ├── test_harvester.py
@@ -1003,14 +1004,14 @@ Arrakis_Engine/
 
 ## Running Tests
 
-**~1045 tests total** — 810 backend (pytest) + 235 frontend (Vitest). Backend tests are organized into three tiers using pytest markers; integration (`-m integration`, Stockfish) and live (`-m live`, LLM key) tiers are excluded by default. Frontend tests run in a few seconds and cover the chess + chart + motif helper libraries, the `use-chess-navigation` hook, and the component suites.
+**~1049 tests total** — 811 backend (pytest) + 238 frontend (Vitest). Backend tests are organized into three tiers using pytest markers; integration (`-m integration`, Stockfish) and live (`-m live`, LLM key) tiers are excluded by default. Frontend tests run in a few seconds and cover the chess + chart + motif helper libraries, the `use-chess-navigation` hook, and the component suites.
 
 ### Commands
 
 ```bash
 # Unit tests only (default — fast, no external dependencies)
 python -m pytest tests/ -v
-# → 810 tests in ~65s, all mocked
+# → 811 tests in ~65s, all mocked
 
 # Stockfish integration tests (requires Stockfish binary)
 python -m pytest tests/ -m integration -v
@@ -1022,13 +1023,13 @@ python -m pytest tests/ -m live -v
 
 # Frontend (Vitest)
 cd frontend && npx vitest run
-# → 235 tests in ~3s
+# → 238 tests in ~3s
 cd frontend && npx next build      # type-check
 ```
 
 ### Test Coverage by Module
 
-**Unit tests** (810 backend tests — all mocked, no external dependencies):
+**Unit tests** (811 backend tests — all mocked, no external dependencies):
 
 | File | Tests | Coverage |
 |------|-------|---------|
@@ -1038,7 +1039,7 @@ cd frontend && npx next build      # type-check
 | `test_coach.py` | 88 | Move formatting, smart truncation (short vs 80+ move games), critical moments, JSON parsing + conservative repair and re-ask (v1.32.3), retry/attempt caps, persisted failure reasons, Claude/OpenAI provider switching, batch limit, DB status transitions |
 | `test_patterns.py` | 151 | Game phase classification, results aggregation, rating performance, accuracy, consistency, danger zones, endgame conversion, comeback/collapse detection, opening ACPL, tactical misses, repertoire consistency, opening name extraction |
 | `test_tiers.py` | 21 | Rating→tier boundary mapping (Beginner→Expert), tier-specific move thresholds, config validation |
-| `test_report.py` | 9 | Report generation (weekly/monthly), ACPL interpretation thresholds, time control tables, missing data handling |
+| `test_report.py` | 10 | Report generation (weekly/monthly), ACPL interpretation thresholds, time control tables, missing data handling |
 | `test_dashboard_server.py` | 79 | HTTP endpoints (players/games/status/patterns/hunt/tournament), filtering (result, time class, date range, player), game edit endpoints (ratings/classification/PGN), concurrent settings writes, loopback bind, 404 |
 | `test_hunter.py` | 49 | Hunter Mode opponent profiles, cache/accumulation, Deep Scan aggregation + incremental skip (v1.20.0) |
 | `test_tournament.py` | 15 | Tournament Prep roster CRUD + combined opening/blind-spot analysis (v1.21.0) |
@@ -1079,7 +1080,7 @@ The `llm_provider` fixture checks for `ARRAKIS_ANTHROPIC_API_KEY` first, falls b
 
 ### Frontend tests (Vitest, v1.6.0+)
 
-**235 tests**, few-second full run. No external dependencies; jsdom + Testing Library + `@testing-library/jest-dom`. Covers the chess + chart-format + motif helper libraries, the `use-chess-navigation` hook, and the Patterns / Journal / game-detail / settings / layout component suites.
+**238 tests**, few-second full run. No external dependencies; jsdom + Testing Library + `@testing-library/jest-dom`. Covers the chess + chart-format + motif helper libraries, the `use-chess-navigation` hook, and the Patterns / Journal / game-detail / settings / layout component suites.
 
 ```bash
 cd frontend

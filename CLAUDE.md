@@ -5,7 +5,7 @@ Local Python app that pulls games from Chess.com and Lichess, runs Stockfish ana
 and uses reasoning LLMs to generate age-appropriate coaching insights with
 pattern tracking over time. Inspired by Eleanor, Evan, and Estella.
 
-Current release: **v1.34.0** (2026-11-12). See `CHANGELOG.md` for full history.
+Current release: **v1.34.1** (2026-11-22). See `CHANGELOG.md` for full history.
 
 ## Architecture
 - Python 3.11+, SQLite (WAL mode), local Stockfish on Apple Silicon
@@ -217,6 +217,7 @@ ArrakisEngine/
 │   ├── lib/                   # API client, types, providers metadata
 │   │   ├── chess/             # shared chess helpers (parseMoveText, lichess URL, openings)
 │   │   ├── motifs.ts          # v1.15.0 shared MOTIF_LABELS (12 emoji+label pairs)
+│   │   ├── time-class.ts      # v1.34.1 time-control display names ("classical" → Standard)
 │   │   ├── summary.ts         # parseTrendSummary (JSON-array tolerant, v1.14.1)
 │   │   └── chart-format.ts    # v1.18.3 date-axis helpers (time-scale chart)
 │   └── public/data/
@@ -229,7 +230,7 @@ ArrakisEngine/
 │   └── screenshots/           # Architecture diagram + UI screenshots
 ├── data/
 │   └── chess_coach.db         # SQLite database (auto-created, gitignored)
-├── tests/                     # Backend pytest suite (810 tests across 3 tiers)
+├── tests/                     # Backend pytest suite (811 tests across 3 tiers)
 └── reports/                   # Generated coach reports (gitignored)
 ```
 
@@ -376,8 +377,8 @@ harvest + report).
 
 ## Testing
 
-**~1045 tests total** — 810 backend (pytest, three tiers via `pyproject.toml`
-markers) + 235 frontend (Vitest). Integration (`-m integration`, needs Stockfish)
+**~1049 tests total** — 811 backend (pytest, three tiers via `pyproject.toml`
+markers) + 238 frontend (Vitest). Integration (`-m integration`, needs Stockfish)
 and live (`-m live`, needs an LLM key) tiers are excluded by default.
 
 ### Running Tests
@@ -385,7 +386,7 @@ and live (`-m live`, needs an LLM key) tiers are excluded by default.
 pytest                                  # default unit tier (~30s, no deps)
 pytest -m integration                   # Stockfish tests (requires binary)
 pytest -m live                          # LLM API tests (~$0.30)
-cd frontend && npx vitest run           # 235 frontend tests, ~3s
+cd frontend && npx vitest run           # 238 frontend tests, ~3s
 cd frontend && npx next build           # type-check
 ```
 
@@ -421,6 +422,10 @@ module — `@patch("src.coach.coach_pending")` — not at the consuming module.
   min-value SEE heuristic; specificity-ordered so the most distinctive label leads.
 - **Single-task pipeline lock** — across CLI + scheduler + dashboard
 - **`ARRAKIS_` prefix on env keys** — avoids collisions with other tools
+- **Time-control labels** (v1.34.1) — the stored `time_class` value `classical`
+  is *displayed* as "Standard" (FIDE's name) via `frontend/lib/time-class.ts`
+  (`timeClassName` / `timeClassLabel`) and in `report.py`'s markdown. The stored
+  value, API value and filter key stay `classical`; never rename the data.
 - **Lichess deep link format** — `/analysis/standard/{FEN}`, not `?pgn=` (v1.4.5 lesson)
 - **Competition games never store the tournament name/venue** (v1.26.1) — the PGN
   `Event`/`Site` headers are stripped on import (and on reclassify-to-competition)

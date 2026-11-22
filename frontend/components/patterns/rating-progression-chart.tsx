@@ -18,6 +18,7 @@ import {
   formatAxisTick,
   formatTooltipDate,
 } from "@/lib/chart-format";
+import { timeClassName, timeClassLabel } from "@/lib/time-class";
 
 interface RatingProgressionChartProps {
   games: GameListItem[];
@@ -216,7 +217,7 @@ function SinglePlatformChart({
       {chartData.length === 0 ? (
         <p className="text-sm text-muted-foreground text-center py-8">
           No rated games for {platformLabel}
-          {timeClass !== "all" ? ` (${timeClass})` : ""}.
+          {timeClass !== "all" ? ` (${timeClassName(timeClass)})` : ""}.
         </p>
       ) : (
         <ResponsiveContainer width="100%" height={250}>
@@ -448,7 +449,7 @@ export function RatingProgressionChart({ games }: RatingProgressionChartProps) {
                 : "bg-muted text-muted-foreground hover:bg-muted/80"
             }`}
           >
-            {tc.charAt(0).toUpperCase() + tc.slice(1)}
+            {timeClassLabel(tc)}
           </button>
         ))}
         {showAllTimeClassChip && (

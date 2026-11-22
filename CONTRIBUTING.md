@@ -31,8 +31,8 @@ Thank you for your interest in contributing to ArrakisEngine! This document prov
 
 ### Running Tests
 
-**~1045 tests total**: 810 backend (pytest, three tiers via `pyproject.toml`
-markers) + 235 frontend (Vitest). Counts as of v1.34.0.
+**~1049 tests total**: 811 backend (pytest, three tiers via `pyproject.toml`
+markers) + 238 frontend (Vitest). Counts as of v1.34.1.
 
 **Backend (pytest):**
 
@@ -68,7 +68,7 @@ pnpm test:run       # single-shot — what CI runs
 pnpm test           # watch mode while developing
 ```
 
-235 tests across 29 files, covering the shared chess, chart and motif helpers
+238 tests across 30 files, covering the shared chess, chart and motif helpers
 (`lib/`), the `use-chess-navigation` hook (including the v1.4.5 clock-comment
 leak guard), and the component suites (patterns, journal, hunter, tournament,
 game detail). Full run in a few seconds. CI runs `pnpm test:run`

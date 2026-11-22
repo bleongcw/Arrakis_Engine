@@ -1,6 +1,6 @@
 # Arrakis Engine Roadmap
 
-*Updated 2026-11-12 — current release v1.34.0*
+*Updated 2026-11-22 — current release v1.34.1*
 
 This is the public-facing roadmap. The full release history is in
 [CHANGELOG.md](CHANGELOG.md); architectural details are in
@@ -157,6 +157,12 @@ provider.
   "Evan Leong") matched nothing and silently defaulted to White, inverting the
   result and recording the player as their own opponent. Names now match as bags
   of words, and an unmatched name **fails the import instead of guessing** a side.
+
+### "Standard" time control (v1.34.1, 2026-11-22)
+- **"Classical" is now shown as "Standard"** wherever a time control appears —
+  the games list and filter, game pages, Patterns, Reports and the import and
+  edit forms — matching FIDE's name for long games. Existing games are
+  unchanged underneath.
 
 ### Refreshed models and a model guide (v1.34.0, 2026-11-12)
 - **Five providers move to their current models**: ChatGPT (GPT-6.1 Sol),

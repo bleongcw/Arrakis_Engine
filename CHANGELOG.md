@@ -4,6 +4,32 @@ All notable changes to ArrakisEngine will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.34.1] - 2026-11-22
+
+### Changed
+- **The "Classical" time control is now shown as "Standard"** (FIDE's name for
+  it) everywhere a time control is displayed: the games table and its Time
+  Controls filter, the game detail and compare pages, Patterns (Time Control
+  Performance, Rating Progression chips), Reports (chips, heading, both
+  tables), the import page's game-type picker, the game detail "Edit details"
+  picker, and the generated markdown report.
+- **Display only.** The stored `time_class` value, the API value and the
+  filter key remain `classical` (what Lichess and the PGN importer produce), so
+  no data is migrated and nothing changes for API consumers. New shared helper
+  `frontend/lib/time-class.ts` (`timeClassName` / `timeClassLabel`) is the
+  single source of the label.
+
+### Fixed
+- The Games page's Time Controls filter showed the raw stored value in its
+  closed state after a selection; it now shows the display name.
+
+### Notes
+- Backend tests 810 → **811**, frontend 235 → **238**.
+- Not renamed: the FIDE rating label "Classical" on the player form, and
+  opening names that contain "Classical" (e.g. "Classical Variation").
+
+---
+
 ## [1.34.0] - 2026-11-12
 
 ### Changed

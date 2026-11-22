@@ -1,6 +1,6 @@
 # Arrakis Engine — Architecture
 
-*Last updated: 2026-11-12 — corresponds to v1.34.0*
+*Last updated: 2026-11-22 — corresponds to v1.34.1*
 
 This document describes the technical architecture of Arrakis Engine: how the pieces fit together, what runs where, and the design decisions behind them. It is aimed at contributors and developers reading the codebase. For end-user / setup docs, see [README.md](../README.md). For changelog, see [CHANGELOG.md](../CHANGELOG.md).
 
@@ -180,7 +180,7 @@ Weekly / monthly markdown reports for coaches: game-by-game summaries, ACPL tren
 
 ### `pgn_io.py` — PGN import / export (v1.24.0+)
 The open, portable data layer: get a PGN into the system and back out. `parse_pgn` / `parse_pgn_multi` legality-validate a game (or a whole multi-game tournament file), map `Result` → win/loss/draw from the player's perspective, derive color (matching the player's chess.com/lichess handles **and display name** for OTB games), and synthesize a dedup `game_url` (`imported:<sha1>`). `ingest_game` writes a row with `analysis_status='pending'`, so an imported game flows through the exact same analyze → coach pipeline as a harvested one. `build_pgn` / `build_bulk_pgn` handle export (raw or annotated with `[%eval]` + classification NAGs).
-- **Competition games (v1.25.0):** `platform="competition"` + a chosen game type (Classical/Rapid/Blitz → `time_class`, since OTB PGNs carry no machine `TimeControl`). Auto-detected color per game; undecided (`Result "*"`) games are skipped, not fatal.
+- **Competition games (v1.25.0):** `platform="competition"` + a chosen game type (Standard/Rapid/Blitz → `time_class`; "Standard" is the display label for the stored value `classical`, v1.34.1, since OTB PGNs carry no machine `TimeControl`). Auto-detected color per game; undecided (`Result "*"`) games are skipped, not fatal.
 - **Privacy (v1.26.1):** `strip_private_headers` removes the `Event` (competition name) and `Site` (venue) headers before a competition game is stored — so they never reach the DB, API, or PGN export. The single seam reused by the import path, the reclassify-to-competition endpoint (v1.26.2), and one-off backfills.
 - The OCR capture/correction layer that produces a validated PGN is the commercial (Atreides) extension; it layers on top of this open `parse_pgn` / `ingest_game` seam.
 
@@ -378,7 +378,7 @@ The `ARRAKIS_` prefix avoids collisions with other tools that use the unprefixed
 
 ## 7. Testing
 
-**~1045 tests total** — 810 backend (pytest) + 235 frontend (Vitest). Counts as of v1.34.0; see CHANGELOG for per-release deltas. Backend integration (`-m integration`, Stockfish) and live (`-m live`, LLM key) tiers are excluded by default.
+**~1049 tests total** — 811 backend (pytest) + 238 frontend (Vitest). Counts as of v1.34.1; see CHANGELOG for per-release deltas. Backend integration (`-m integration`, Stockfish) and live (`-m live`, LLM key) tiers are excluded by default.
 
 ### Backend (`tests/`)
 

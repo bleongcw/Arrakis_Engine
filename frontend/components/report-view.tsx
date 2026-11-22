@@ -12,6 +12,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { ReportData } from "@/lib/types";
+import { timeClassName, timeClassLabel } from "@/lib/time-class";
 
 const RESULT_BADGE_COLORS: Record<string, string> = {
   win: "bg-emerald-500 text-white hover:bg-emerald-600",
@@ -84,7 +85,7 @@ export function ReportView({ data, timeClassFilter = "all", playerUsername }: Re
 
   // No games after filter
   if (totalGames === 0) {
-    const label = timeClassFilter === "all" ? "" : ` ${timeClassFilter}`;
+    const label = timeClassFilter === "all" ? "" : ` ${timeClassName(timeClassFilter)}`;
     return (
       <Card>
         <CardContent className="py-12 text-center text-muted-foreground">
@@ -94,15 +95,15 @@ export function ReportView({ data, timeClassFilter = "all", playerUsername }: Re
     );
   }
 
-  const timeClassLabel = timeClassFilter === "all"
+  const timeClassSuffix = timeClassFilter === "all"
     ? ""
-    : ` — ${timeClassFilter.charAt(0).toUpperCase() + timeClassFilter.slice(1)}`;
+    : ` — ${timeClassLabel(timeClassFilter)}`;
 
   return (
     <div className="space-y-6 report-content">
       {/* Header */}
       <div className="text-center space-y-1 print:mb-8">
-        <h2 className="text-2xl font-bold">Chess Coaching Report: {data.player_name}{timeClassLabel}</h2>
+        <h2 className="text-2xl font-bold">Chess Coaching Report: {data.player_name}{timeClassSuffix}</h2>
         <p className="text-muted-foreground">
           {data.period_start} to {data.period_end} &middot; Generated {data.generated_at}
         </p>
@@ -145,7 +146,7 @@ export function ReportView({ data, timeClassFilter = "all", playerUsername }: Re
               <TableBody>
                 {filteredTcStats.map((tc) => (
                   <TableRow key={tc.time_class}>
-                    <TableCell className="font-medium capitalize">{tc.time_class}</TableCell>
+                    <TableCell className="font-medium capitalize">{timeClassName(tc.time_class)}</TableCell>
                     <TableCell className="text-center">{tc.games}</TableCell>
                     <TableCell className="text-center">{tc.wins}</TableCell>
                     <TableCell className="text-center">{tc.losses}</TableCell>
@@ -191,7 +192,7 @@ export function ReportView({ data, timeClassFilter = "all", playerUsername }: Re
                       </Badge>
                     </TableCell>
                     <TableCell className="text-center hidden sm:table-cell">{g.acpl ?? "N/A"}</TableCell>
-                    <TableCell className="capitalize hidden md:table-cell">{g.time_class}</TableCell>
+                    <TableCell className="capitalize hidden md:table-cell">{timeClassName(g.time_class)}</TableCell>
                     <TableCell className="text-center">
                       {playerUsername && g.game_id ? (
                         <Link

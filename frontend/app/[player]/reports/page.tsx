@@ -8,6 +8,7 @@ import { ReportView } from "@/components/report-view";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { ReportData } from "@/lib/types";
+import { timeClassLabel } from "@/lib/time-class";
 
 // v1.24.2: the Reports time-class filter is DATA-DRIVEN — chips are derived
 // from the time classes actually present in the report (report.py already
@@ -41,7 +42,7 @@ export function buildTimeClassChips(report: ReportData): {
 
   const chips = present.map((k) => ({
     key: k,
-    label: CLASS_LABELS[k] ?? k.charAt(0).toUpperCase() + k.slice(1),
+    label: CLASS_LABELS[k] ?? timeClassLabel(k),
   }));
   chips.push({ key: "all", label: "All" });
 

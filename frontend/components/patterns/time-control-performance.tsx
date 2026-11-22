@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
+import { timeClassLabel } from "@/lib/time-class";
 
 interface TimeControlData {
   [key: string]: {
@@ -116,7 +117,7 @@ export function TimeControlPerformance({ data }: { data: TimeControlData }) {
                   }`}
                 >
                   <td className="py-2.5 font-medium">
-                    {TC_ICONS[tc] || ""} {tc.charAt(0).toUpperCase() + tc.slice(1)}
+                    {TC_ICONS[tc] || ""} {timeClassLabel(tc)}
                     {isBest && (
                       <span className="ml-2 text-[10px] text-green-600 dark:text-green-400 font-semibold">
                         BEST

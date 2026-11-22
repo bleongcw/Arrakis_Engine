@@ -13,6 +13,7 @@ import {
 import { cn } from "@/lib/utils";
 import { platformMeta } from "@/lib/platforms";
 import type { GameListItem } from "@/lib/types";
+import { timeClassName } from "@/lib/time-class";
 
 interface GamesTableProps {
   games: GameListItem[];
@@ -126,7 +127,7 @@ export function GamesTable({
               <TableCell className={cn("font-medium", RESULT_COLORS[g.result])}>
                 {g.result.toUpperCase()}
               </TableCell>
-              <TableCell className="hidden sm:table-cell">{g.time_class || "?"}</TableCell>
+              <TableCell className="hidden sm:table-cell">{timeClassName(g.time_class)}</TableCell>
               <TableCell className="text-center hidden md:table-cell" title={g.analysis_status}>
                 {STATUS_ICONS[g.analysis_status] || "\u23F3"}
               </TableCell>

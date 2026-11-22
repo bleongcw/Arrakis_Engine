@@ -12,6 +12,7 @@ import { ComparisonSummary } from "@/components/game-detail/comparison-summary";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { GameDetail } from "@/lib/types";
+import { timeClassName } from "@/lib/time-class";
 
 export default function ComparePage() {
   const params = useParams<{ player: string }>();
@@ -150,7 +151,7 @@ function GameColumn({
             </div>
           </div>
           <div className="text-center text-xs text-muted-foreground mt-1">
-            {game.time_class || "?"} &middot; {game.date_played || "?"}
+            {timeClassName(game.time_class)} &middot; {game.date_played || "?"}
           </div>
         </CardContent>
       </Card>

@@ -152,6 +152,22 @@ class TestTimeClassTable:
         assert "Time Control" in content
         assert "rapid" in content
 
+    def test_classical_time_class_is_shown_as_standard(self, db_with_games):
+        """v1.34.1: the stored 'classical' time class is labelled "standard"
+        in the report; the stored value itself is unchanged."""
+        from src.models import get_connection
+        db_path, tmp_path = db_with_games
+        conn = get_connection(db_path)
+        conn.execute("UPDATE games SET time_class = 'classical'")
+        conn.commit()
+        conn.close()
+        path = generate_report("testplayer", output_dir=str(tmp_path / "reports"),
+                               db_path=db_path)
+        with open(path) as f:
+            content = f.read()
+        assert "| standard |" in content
+        assert "classical" not in content
+
 
 class TestNoCoachingData:
     def test_report_handles_no_coaching(self, db_with_games):

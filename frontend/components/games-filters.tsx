@@ -8,6 +8,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { GameListItem } from "@/lib/types";
+import { timeClassName } from "@/lib/time-class";
 
 interface GamesFiltersProps {
   games: GameListItem[];
@@ -45,11 +46,14 @@ export function GamesFilters({ games, filters, onFilterChange }: GamesFiltersPro
       </Select>
 
       <Select value={filters.timeClass} onValueChange={(v) => onFilterChange("timeClass", v ?? "all")}>
-        <SelectTrigger className="w-[160px]"><SelectValue placeholder="All Time Controls" /></SelectTrigger>
+        <SelectTrigger className="w-[160px]">
+          {/* Show the display name: the closed trigger otherwise prints the raw value ("classical"). */}
+          <SelectValue placeholder="All Time Controls">{(v: string) => timeClassName(v)}</SelectValue>
+        </SelectTrigger>
         <SelectContent>
           <SelectItem value="all">All Time Controls</SelectItem>
           {timeClasses.map((tc) => (
-            <SelectItem key={tc} value={tc}>{tc}</SelectItem>
+            <SelectItem key={tc} value={tc}>{timeClassName(tc)}</SelectItem>
           ))}
         </SelectContent>
       </Select>

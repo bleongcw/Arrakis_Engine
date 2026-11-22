@@ -16,6 +16,7 @@ import { ExportPgnButton } from "@/components/export-pgn-button";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { GameDetail } from "@/lib/types";
+import { timeClassName } from "@/lib/time-class";
 
 export default function GameDetailPage() {
   const params = useParams<{ player: string; id: string }>();
@@ -270,7 +271,7 @@ function GameDetailView({
             </div>
           </div>
           <div className="text-center text-xs text-muted-foreground mt-1">
-            {game.time_class || "?"} &middot; {game.date_played || "?"}
+            {timeClassName(game.time_class)} &middot; {game.date_played || "?"}
             {game.platform && (
               <> &middot; {platformMeta(game.platform).icon} {platformMeta(game.platform).label}</>
             )}
@@ -297,7 +298,7 @@ function GameDetailView({
                   className="px-2 py-1 rounded border text-xs bg-background"
                 >
                   <option value="">unset</option>
-                  <option value="classical">Classical</option>
+                  <option value="classical">Standard</option>
                   <option value="rapid">Rapid</option>
                   <option value="blitz">Blitz</option>
                   <option value="bullet">Bullet</option>
